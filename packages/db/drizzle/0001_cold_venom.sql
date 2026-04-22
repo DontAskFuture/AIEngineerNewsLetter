@@ -1,0 +1,2 @@
+ALTER TYPE "public"."source_category" ADD VALUE 'community_feed' BEFORE 'startup_launch';--> statement-breakpoint
+ALTER TYPE "public"."source_category" ADD VALUE 'social_trends' BEFORE 'startup_launch';

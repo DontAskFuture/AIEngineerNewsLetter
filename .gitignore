@@ -1,0 +1,15 @@
+node_modules
+.next
+.turbo
+dist
+coverage
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+var
+apps/web/.next
+apps/web/node_modules
+apps/worker/node_modules
+packages/db/node_modules
+packages/shared/node_modules

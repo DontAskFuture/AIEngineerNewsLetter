@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.local
+.DS_Store
+node_modules
+apps/web/.next
+apps/web/tsconfig.tsbuildinfo
+apps/worker/node_modules
+packages/db/node_modules
+packages/shared/node_modules
+var
+
