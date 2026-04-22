@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getAllowedEmailLabel, getCurrentUser } from "@/lib/auth";
 import { loginAction } from "@/app/auth-actions";
 
@@ -101,6 +102,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               Sign in
             </button>
           </form>
+
+          <p className="mt-6 text-center text-sm text-[color:var(--muted)]">
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" className="font-medium text-[color:var(--ink)] underline underline-offset-4">
+              Sign up
+            </Link>
+          </p>
         </div>
       </section>
     </main>

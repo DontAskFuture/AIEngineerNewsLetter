@@ -29,6 +29,20 @@
       "when": 1776891228134,
       "tag": "0003_condemned_alice",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776895298024,
+      "tag": "0004_magenta_obadiah_stane",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776897158533,
+      "tag": "0005_bored_zemo",
+      "breakpoints": true
     }
   ]
 }

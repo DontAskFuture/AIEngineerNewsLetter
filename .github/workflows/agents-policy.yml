@@ -1,0 +1,30 @@
+name: AGENTS Policy
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check-agents:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check AGENTS coverage
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node scripts/check-agents.mjs --base "${{ github.event.pull_request.base.sha }}"
+          else
+            node scripts/check-agents.mjs --base "${{ github.event.before }}"
+          fi

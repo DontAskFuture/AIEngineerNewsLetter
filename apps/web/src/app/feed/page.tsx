@@ -8,7 +8,7 @@ import {
   formatRelativeTime,
   summarizeText,
 } from "@/lib/formatters";
-import { getPersonalizedFeedSnapshot } from "@/lib/personalized-feed";
+import { getPersonalizedFeedSnapshot, isValidTimeWindow, type TimeWindow } from "@/lib/personalized-feed";
 import { createUserProfileAction, updateUserProfileAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -16,17 +16,28 @@ export const dynamic = "force-dynamic";
 interface FeedPageProps {
   searchParams?: Promise<{
     profile?: string;
+    window?: string;
   }>;
 }
+
+const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string }[] = [
+  { value: "day", label: "Last day" },
+  { value: "week", label: "Last week" },
+  { value: "month", label: "Last month" },
+  { value: "quarter", label: "Last quarter" },
+  { value: "year", label: "Last year" },
+];
 
 export default async function FeedPage({ searchParams }: FeedPageProps) {
   await requireCurrentUser();
   const params = searchParams ? await searchParams : undefined;
   const selectedProfileSlug = typeof params?.profile === "string" ? params.profile : undefined;
+  const rawWindow = typeof params?.window === "string" ? params.window : "week";
+  const timeWindow: TimeWindow = isValidTimeWindow(rawWindow) ? rawWindow : "week";
 
   const [snapshot, personalizedFeed] = await Promise.all([
     getDashboardSnapshot(),
-    getPersonalizedFeedSnapshot(selectedProfileSlug),
+    getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow),
   ]);
 
   return (
@@ -45,6 +56,29 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             Current window: {personalizedFeed.windowLabel}. Screened {personalizedFeed.candidateCount} candidate
             stories. {personalizedFeed.model ? `Model: ${personalizedFeed.model}.` : null}
           </p>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {TIME_WINDOW_OPTIONS.map((option) => {
+            const isActive = personalizedFeed.activeTimeWindow === option.value;
+            const href = `/feed?${new URLSearchParams({
+              ...(selectedProfileSlug ? { profile: selectedProfileSlug } : {}),
+              window: option.value,
+            }).toString()}`;
+
+            return (
+              <Link
+                key={option.value}
+                href={href}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                  isActive
+                    ? "bg-[color:var(--ink)] text-white"
+                    : "border border-black/10 bg-white/75 text-[color:var(--ink)]"
+                }`}
+              >
+                {option.label}
+              </Link>
+            );
+          })}
         </div>
       </section>
 
@@ -69,7 +103,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               return (
                 <Link
                   key={profile.id}
-                  href={`/feed?profile=${encodeURIComponent(profile.slug)}`}
+                  href={`/feed?${new URLSearchParams({ profile: profile.slug, window: timeWindow }).toString()}`}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     isSelected
                       ? "bg-[color:var(--ink)] text-white"
@@ -222,64 +256,158 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         ))}
       </section>
 
-      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-              Source registry
-            </p>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-              The shortlist above rides on top of the same live registry, crawl stats, and normalized
-              documents from the worker pipeline.
-            </p>
-          </div>
-          <p className="text-sm text-[color:var(--muted)]">
-            {snapshot.overview.sourceCount} sources across {snapshot.overview.endpointCount} endpoints
-          </p>
-        </div>
-
-        <div className="mt-6 grid gap-4">
-          {snapshot.sourceRegistry.map((source) => (
-            <article key={source.id} className="rounded-[1.5rem] border border-black/6 bg-white/70 p-5 sm:p-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <h2 className="display-font text-2xl font-semibold tracking-tight">{source.name}</h2>
-                    <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                      {formatCategoryLabel(source.category)}
+      {personalizedFeed.remainingDocuments.length > 0 ? (
+        <section>
+          <details>
+            <summary className="mb-4 cursor-pointer list-none">
+              <div className="flex items-center gap-3">
+                <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+                  More stories
+                </p>
+                <span className="text-sm text-[color:var(--muted)]">
+                  ({personalizedFeed.remainingDocuments.length})
+                </span>
+              </div>
+            </summary>
+            <div className="grid gap-3">
+              {personalizedFeed.remainingDocuments.slice(0, 10).map((document) => (
+                <article key={document.id} className="glass-card rounded-[1.25rem] px-5 py-4 sm:px-6">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="max-w-4xl">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                          {document.sourceName}
+                        </p>
+                        <span className="text-xs text-[color:var(--muted)]">
+                          {formatRelativeTime(document.sortTime)}
+                        </span>
+                      </div>
+                      <a
+                        href={document.canonicalUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="display-font mt-1 block text-lg font-semibold tracking-tight"
+                      >
+                        {document.title}
+                      </a>
+                      <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                        {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
+                      </p>
+                    </div>
+                    <span className="w-fit rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)] sm:ml-auto">
+                      {formatCategoryLabel(document.category)}
                     </span>
                   </div>
-                  <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)] sm:text-base">
-                    {summarizeText(source.description, "This source was seeded and fetched successfully.")}
-                  </p>
-                </div>
-                <div className="grid gap-2 text-sm text-[color:var(--muted)] sm:text-right">
-                  <p>{source.documentCount} documents captured</p>
-                  <p>latest document {formatRelativeTime(source.latestDocumentAt)}</p>
-                  <p>trust tier {source.trustTier}</p>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {source.endpoints.map((endpoint) => (
-                  <div key={endpoint.id} className="rounded-2xl border border-black/6 bg-white/80 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                      {endpoint.kind}
+                </article>
+              ))}
+              {personalizedFeed.remainingDocuments.length > 10 ? (
+                <details>
+                  <summary className="cursor-pointer list-none">
+                    <p className="rounded-full border border-black/10 bg-white/60 px-5 py-3 text-center text-sm font-medium text-[color:var(--ink)]">
+                      Show {personalizedFeed.remainingDocuments.length - 10} more
                     </p>
-                    <p className="mt-2 break-all text-sm leading-6 text-[color:var(--muted)]">{endpoint.url}</p>
-                    <div className="mt-4 space-y-1 text-xs text-[color:var(--muted)]">
-                      <p>cadence every {endpoint.cadenceMinutes} minutes</p>
-                      <p>
-                        {endpoint.totalRuns} runs, {formatPercent(endpoint.successRate)} success
-                      </p>
-                      <p>latest fetch {formatRelativeTime(endpoint.latestFetchAt)}</p>
-                    </div>
+                  </summary>
+                  <div className="mt-3 grid gap-3">
+                    {personalizedFeed.remainingDocuments.slice(10).map((document) => (
+                      <article key={document.id} className="glass-card rounded-[1.25rem] px-5 py-4 sm:px-6">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="max-w-4xl">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                                {document.sourceName}
+                              </p>
+                              <span className="text-xs text-[color:var(--muted)]">
+                                {formatRelativeTime(document.sortTime)}
+                              </span>
+                            </div>
+                            <a
+                              href={document.canonicalUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="display-font mt-1 block text-lg font-semibold tracking-tight"
+                            >
+                              {document.title}
+                            </a>
+                            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                              {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
+                            </p>
+                          </div>
+                          <span className="w-fit rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)] sm:ml-auto">
+                            {formatCategoryLabel(document.category)}
+                          </span>
+                        </div>
+                      </article>
+                    ))}
                   </div>
-                ))}
+                </details>
+              ) : null}
+            </div>
+          </details>
+        </section>
+      ) : null}
+
+      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+        <details>
+          <summary className="cursor-pointer list-none">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+                  Source registry
+                </p>
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+                  The shortlist above rides on top of the same live registry, crawl stats, and normalized
+                  documents from the worker pipeline.
+                </p>
               </div>
-            </article>
-          ))}
-        </div>
+              <p className="text-sm text-[color:var(--muted)]">
+                {snapshot.overview.sourceCount} sources across {snapshot.overview.endpointCount} endpoints
+              </p>
+            </div>
+          </summary>
+
+          <div className="mt-6 grid gap-4">
+            {snapshot.sourceRegistry.map((source) => (
+              <article key={source.id} className="rounded-[1.5rem] border border-black/6 bg-white/70 p-5 sm:p-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="display-font text-2xl font-semibold tracking-tight">{source.name}</h2>
+                      <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                        {formatCategoryLabel(source.category)}
+                      </span>
+                    </div>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)] sm:text-base">
+                      {summarizeText(source.description, "This source was seeded and fetched successfully.")}
+                    </p>
+                  </div>
+                  <div className="grid gap-2 text-sm text-[color:var(--muted)] sm:text-right">
+                    <p>{source.documentCount} documents captured</p>
+                    <p>latest document {formatRelativeTime(source.latestDocumentAt)}</p>
+                    <p>trust tier {source.trustTier}</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {source.endpoints.map((endpoint) => (
+                    <div key={endpoint.id} className="rounded-2xl border border-black/6 bg-white/80 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                        {endpoint.kind}
+                      </p>
+                      <p className="mt-2 break-all text-sm leading-6 text-[color:var(--muted)]">{endpoint.url}</p>
+                      <div className="mt-4 space-y-1 text-xs text-[color:var(--muted)]">
+                        <p>cadence every {endpoint.cadenceMinutes} minutes</p>
+                        <p>
+                          {endpoint.totalRuns} runs, {formatPercent(endpoint.successRate)} success
+                        </p>
+                        <p>latest fetch {formatRelativeTime(endpoint.latestFetchAt)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </details>
       </section>
     </main>
   );

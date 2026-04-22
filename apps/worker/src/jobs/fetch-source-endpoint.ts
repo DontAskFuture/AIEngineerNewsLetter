@@ -108,20 +108,62 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
   return extractedCount;
 }
 
-async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourceEndpointId: number, url: string, body: string) {
-  const db = getDb();
-  const dom = new JSDOM(body, { url });
+function extractArticleLinks(dom: JSDOM, baseUrl: string): string[] {
+  const parsed = new URL(baseUrl);
+  const baseDomain = parsed.hostname;
+  const basePath = parsed.pathname.replace(/\/$/, "");
+  const seen = new Set<string>();
+  const links: string[] = [];
+
+  const anchors = dom.window.document.querySelectorAll("a[href]");
+
+  for (const anchor of anchors) {
+    const href = anchor.getAttribute("href");
+    if (!href) continue;
+
+    let resolved: URL;
+    try {
+      resolved = new URL(href, baseUrl);
+    } catch {
+      continue;
+    }
+
+    if (resolved.hostname !== baseDomain) continue;
+
+    const resolvedPath = resolved.pathname.replace(/\/$/, "");
+
+    if (!resolvedPath.startsWith(basePath + "/")) continue;
+
+    const remainder = resolvedPath.slice(basePath.length + 1);
+    if (!remainder || remainder.includes("/")) continue;
+
+    const normalized = canonicalizeUrl(resolved.toString());
+    if (seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    links.push(normalized);
+  }
+
+  return links;
+}
+
+async function upsertSingleHtmlDocument(
+  db: ReturnType<typeof getDb>,
+  rawDocumentId: number,
+  sourceId: number,
+  sourceEndpointId: number,
+  articleUrl: string,
+  body: string,
+): Promise<boolean> {
+  const dom = new JSDOM(body, { url: articleUrl });
   const article = new Readability(dom.window.document).parse();
 
   const title = article?.title?.trim() || dom.window.document.title?.trim();
-
-  if (!title) {
-    return 0;
-  }
+  if (!title) return false;
 
   const summary = article?.excerpt?.trim() || null;
   const bodyText = article?.textContent?.trim() || null;
-  const canonicalUrl = canonicalizeUrl(url);
+  const canonicalUrl = canonicalizeUrl(articleUrl);
   const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
 
   await db
@@ -159,7 +201,47 @@ async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourc
       },
     });
 
-  return 1;
+  return true;
+}
+
+async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourceEndpointId: number, url: string, body: string) {
+  const db = getDb();
+  const dom = new JSDOM(body, { url });
+
+  const articleLinks = extractArticleLinks(dom, url);
+
+  if (articleLinks.length === 0) {
+    logger.info({ url }, "No article links found on listing page, skipping");
+    return 0;
+  }
+
+  let extractedCount = 0;
+
+  for (const articleUrl of articleLinks) {
+    try {
+      const response = await fetch(articleUrl, {
+        headers: {
+          "user-agent": userAgent,
+          accept: "text/html;q=0.9, */*;q=0.8",
+        },
+      });
+
+      if (!response.ok) continue;
+
+      const articleBody = await response.text();
+      const inserted = await upsertSingleHtmlDocument(db, rawDocumentId, sourceId, sourceEndpointId, articleUrl, articleBody);
+
+      if (inserted) {
+        extractedCount += 1;
+        logger.info({ articleUrl }, "Extracted article from listing page");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      logger.warn({ articleUrl, error: message }, "Failed to fetch article from listing page");
+    }
+  }
+
+  return extractedCount;
 }
 
 export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, bossJobId: string | null = null) {

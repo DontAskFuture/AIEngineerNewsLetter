@@ -1,12 +1,41 @@
+import { createHash } from "node:crypto";
 import type { SourceCategory } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
+import type { InterestRankingResponse } from "@/lib/openrouter";
 import { rankDocumentsForInterest } from "@/lib/openrouter";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
-const MAX_CANDIDATE_DOCUMENTS = 60;
+const MAX_CANDIDATE_DOCUMENTS = 200;
 const MAX_SELECTED_DOCUMENTS = 10;
+const RANKING_CACHE_TTL_HOURS = 6;
+
+export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
+
+const TIME_WINDOW_LABELS: Record<TimeWindow, string> = {
+  day: "Last 24 hours",
+  week: "Last 7 days",
+  month: "Last 30 days",
+  quarter: "Last 90 days",
+  year: "Last 365 days",
+};
+
+function getTimeWindowCutoff(window: TimeWindow): Date {
+  const now = new Date();
+  const daysMap: Record<TimeWindow, number> = {
+    day: 1,
+    week: 7,
+    month: 30,
+    quarter: 90,
+    year: 365,
+  };
+  return new Date(now.getTime() - daysMap[window] * 24 * 60 * 60 * 1000);
+}
+
+export function isValidTimeWindow(value: string): value is TimeWindow {
+  return ["day", "week", "month", "quarter", "year"].includes(value);
+}
 
 const defaultUserProfile = {
   slug: "founding-analyst",
@@ -48,12 +77,14 @@ export interface PersonalizedFeedSnapshot {
   profiles: FeedUserProfile[];
   selectedProfile: FeedUserProfile;
   topDocuments: PersonalizedFeedDocument[];
+  remainingDocuments: PersonalizedFeedDocument[];
   candidateCount: number;
   rankingMode: "interest_ranked" | "latest";
   rankingSummary: string;
   rankingStatusLabel: string;
   model: string | null;
   windowLabel: string;
+  activeTimeWindow: TimeWindow;
 }
 
 interface CandidateDocumentRow {
@@ -109,19 +140,6 @@ function extractFirstParagraph(summary: string | null, bodyText: string | null) 
   return summaryText ? summaryText.slice(0, 420) : "No first paragraph was extracted yet.";
 }
 
-function formatDayLabel(date: Date, timeZone: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone,
-    timeZoneName: "short",
-  }).format(date);
-}
-
-function buildTodayWindowFilter(timeZone: string) {
-  return sql<boolean>`date(timezone(${timeZone}, ${documentSortKey})) = date(timezone(${timeZone}, now()))`;
-}
 
 function normalizeProfileRow(row: {
   id: number;
@@ -150,7 +168,7 @@ function mapCandidateRow(row: CandidateDocumentRow) {
     category: row.category,
     sourcePublishedAt: row.sourcePublishedAt,
     discoveredAt: row.discoveredAt,
-    sortTime: row.sortTime,
+    sortTime: row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime),
     previewParagraph: extractFirstParagraph(row.summary, row.bodyText),
     llmRank: null,
     matchScore: null,
@@ -158,7 +176,7 @@ function mapCandidateRow(row: CandidateDocumentRow) {
   } satisfies PersonalizedFeedDocument;
 }
 
-async function getCandidateDocuments(useTodayWindow: boolean, timeZone: string) {
+async function getCandidateDocuments(cutoff: Date) {
   const db = getDb();
   const selectShape = {
     id: schema.documents.id,
@@ -174,20 +192,13 @@ async function getCandidateDocuments(useTodayWindow: boolean, timeZone: string) 
     sortTime: documentSortKey,
   };
 
-  const rows = useTodayWindow
-    ? await db
-        .select(selectShape)
-        .from(schema.documents)
-        .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-        .where(buildTodayWindowFilter(timeZone))
-        .orderBy(desc(documentSortKey))
-        .limit(MAX_CANDIDATE_DOCUMENTS)
-    : await db
-        .select(selectShape)
-        .from(schema.documents)
-        .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-        .orderBy(desc(documentSortKey))
-        .limit(MAX_CANDIDATE_DOCUMENTS);
+  const rows = await db
+    .select(selectShape)
+    .from(schema.documents)
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .where(gt(documentSortKey, cutoff))
+    .orderBy(desc(documentSortKey))
+    .limit(MAX_CANDIDATE_DOCUMENTS);
 
   return rows.map((row) => mapCandidateRow(row));
 }
@@ -309,7 +320,65 @@ export async function updateUserProfile({
   return normalizeProfileRow(updatedProfile);
 }
 
-export async function getPersonalizedFeedSnapshot(profileSlug?: string | null): Promise<PersonalizedFeedSnapshot> {
+function buildCandidatesHash(profileId: number, interestStatement: string, candidateIds: number[]): string {
+  const payload = [profileId, interestStatement, ...candidateIds.sort((a, b) => a - b)].join("|");
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+async function getCachedRanking(profileId: number, candidatesHash: string): Promise<{ model: string | null; ranking: InterestRankingResponse } | null> {
+  const db = getDb();
+
+  const [cached] = await db
+    .select({
+      model: schema.rankingCache.model,
+      rankingJson: schema.rankingCache.rankingJson,
+    })
+    .from(schema.rankingCache)
+    .where(
+      and(
+        eq(schema.rankingCache.profileId, profileId),
+        eq(schema.rankingCache.candidatesHash, candidatesHash),
+        gt(schema.rankingCache.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+
+  if (!cached) return null;
+
+  return {
+    model: cached.model,
+    ranking: cached.rankingJson as InterestRankingResponse,
+  };
+}
+
+async function setCachedRanking(profileId: number, candidatesHash: string, model: string | null, ranking: InterestRankingResponse): Promise<void> {
+  const db = getDb();
+  const expiresAt = new Date(Date.now() + RANKING_CACHE_TTL_HOURS * 60 * 60 * 1000);
+
+  await db
+    .insert(schema.rankingCache)
+    .values({
+      profileId,
+      candidatesHash,
+      model,
+      rankingJson: ranking,
+      expiresAt,
+    })
+    .onConflictDoUpdate({
+      target: [schema.rankingCache.profileId, schema.rankingCache.candidatesHash],
+      set: {
+        model,
+        rankingJson: ranking,
+        expiresAt,
+        createdAt: new Date(),
+      },
+    });
+}
+
+export async function getPersonalizedFeedSnapshot(
+  profileSlug?: string | null,
+  timeWindow: TimeWindow = "week",
+): Promise<PersonalizedFeedSnapshot> {
   const env = loadWebEnv();
   const profiles = await getProfiles();
   const selectedProfile = profiles.find((profile) => profile.slug === profileSlug) ?? profiles[0];
@@ -318,49 +387,128 @@ export async function getPersonalizedFeedSnapshot(profileSlug?: string | null): 
     throw new Error("Expected at least one active user profile");
   }
 
-  const todayWindowLabel = `Stories published on ${formatDayLabel(new Date(), env.appTimeZone)}`;
-  const todayCandidates = await getCandidateDocuments(true, env.appTimeZone);
-  const fallbackCandidates = todayCandidates.length > 0 ? todayCandidates : await getCandidateDocuments(false, env.appTimeZone);
-  const usingTodayWindow = todayCandidates.length > 0;
-  const candidateDocuments = fallbackCandidates;
+  const cutoff = getTimeWindowCutoff(timeWindow);
+  const windowLabel = TIME_WINDOW_LABELS[timeWindow];
+  const candidateDocuments = await getCandidateDocuments(cutoff);
   const defaultShortlist = candidateDocuments.slice(0, MAX_SELECTED_DOCUMENTS);
-  const windowLabel = usingTodayWindow
-    ? todayWindowLabel
-    : `Latest captured stories as of ${formatDayLabel(new Date(), env.appTimeZone)}`;
+
+  function buildRemainingDocuments(excludeIds: Set<number>) {
+    return candidateDocuments
+      .filter((d) => !excludeIds.has(d.id))
+      .sort((a, b) => {
+        const aTime = a.sortTime instanceof Date ? a.sortTime.getTime() : new Date(a.sortTime).getTime();
+        const bTime = b.sortTime instanceof Date ? b.sortTime.getTime() : new Date(b.sortTime).getTime();
+        return bTime - aTime;
+      });
+  }
 
   if (candidateDocuments.length === 0) {
     return {
       profiles,
       selectedProfile,
       topDocuments: [],
+      remainingDocuments: [],
       candidateCount: 0,
       rankingMode: "latest",
       rankingSummary: "No documents are available yet. Run the worker again after more sources publish updates.",
       rankingStatusLabel: "Awaiting documents",
       model: null,
       windowLabel,
+      activeTimeWindow: timeWindow,
     };
   }
 
   if (!selectedProfile.interestStatement.trim()) {
+    const topIds = new Set(defaultShortlist.map((d) => d.id));
     return {
       profiles,
       selectedProfile,
       topDocuments: defaultShortlist,
+      remainingDocuments: buildRemainingDocuments(topIds),
       candidateCount: candidateDocuments.length,
       rankingMode: "latest",
       rankingSummary: `No interest statement is saved for ${selectedProfile.displayName} yet, so this feed is showing the newest stories in the current window.`,
       rankingStatusLabel: "Newest first",
       model: null,
       windowLabel,
+      activeTimeWindow: timeWindow,
     };
   }
 
+  // Try pre-computed scores — fetch top scored documents directly from DB
+  const db = getDb();
+  const scoredRows = await db
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      summary: schema.documents.summary,
+      bodyText: schema.documents.bodyText,
+      canonicalUrl: schema.documents.canonicalUrl,
+      sourceName: schema.sources.name,
+      sourceSlug: schema.sources.slug,
+      category: schema.sources.category,
+      sourcePublishedAt: schema.documents.sourcePublishedAt,
+      discoveredAt: schema.documents.discoveredAt,
+      sortTime: documentSortKey,
+      score: schema.documentScores.score,
+      whyRelevant: schema.documentScores.whyRelevant,
+      model: schema.documentScores.model,
+    })
+    .from(schema.documentScores)
+    .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .where(
+      and(
+        eq(schema.documentScores.profileId, selectedProfile.id),
+        gt(documentSortKey, cutoff),
+      ),
+    )
+    .orderBy(desc(schema.documentScores.score))
+    .limit(MAX_CANDIDATE_DOCUMENTS);
+
+  if (scoredRows.length > 0) {
+    const scoredDocs: PersonalizedFeedDocument[] = scoredRows.map((row, index) => ({
+      ...mapCandidateRow(row),
+      llmRank: index + 1,
+      matchScore: row.score,
+      whyRelevant: row.whyRelevant,
+    }));
+
+    const scoredIds = new Set(scoredDocs.map((d) => d.id));
+    const unscoredCandidates = candidateDocuments.filter((d) => !scoredIds.has(d.id));
+
+    const topDocuments = scoredDocs.slice(0, MAX_SELECTED_DOCUMENTS);
+    const topIds = new Set(topDocuments.map((d) => d.id));
+    const remaining = [
+      ...scoredDocs.slice(MAX_SELECTED_DOCUMENTS),
+      ...unscoredCandidates,
+    ].filter((d) => !topIds.has(d.id));
+
+    const firstModel = scoredRows[0]?.model ?? null;
+
+    return {
+      profiles,
+      selectedProfile,
+      topDocuments,
+      remainingDocuments: remaining,
+      candidateCount: candidateDocuments.length,
+      rankingMode: "interest_ranked",
+      rankingSummary: "Ranked by pre-computed relevance scores.",
+      rankingStatusLabel: "Ranked by relevance",
+      model: firstModel,
+      windowLabel,
+      activeTimeWindow: timeWindow,
+    };
+  }
+
+  // Fallback: on-demand ranking via OpenRouter
   if (!env.openRouterApiKey) {
+    const topIds = new Set(defaultShortlist.map((d) => d.id));
     return {
       profiles,
       selectedProfile,
       topDocuments: defaultShortlist,
+      remainingDocuments: buildRemainingDocuments(topIds),
       candidateCount: candidateDocuments.length,
       rankingMode: "latest",
       rankingSummary:
@@ -368,20 +516,32 @@ export async function getPersonalizedFeedSnapshot(profileSlug?: string | null): 
       rankingStatusLabel: "Newest first",
       model: null,
       windowLabel,
+      activeTimeWindow: timeWindow,
     };
   }
 
   try {
-    const rankingResult = await rankDocumentsForInterest({
-      interestStatement: selectedProfile.interestStatement,
-      profileSlug: selectedProfile.slug,
-      windowLabel,
-      candidates: candidateDocuments.map((document) => ({
-        id: document.id,
-        title: document.title,
-        previewParagraph: document.previewParagraph,
-      })),
-    });
+    const candidateIds = candidateDocuments.map((d) => d.id);
+    const candidatesHash = buildCandidatesHash(selectedProfile.id, selectedProfile.interestStatement, candidateIds);
+
+    const cached = await getCachedRanking(selectedProfile.id, candidatesHash);
+
+    const rankingResult = cached ?? await (async () => {
+      const fresh = await rankDocumentsForInterest({
+        interestStatement: selectedProfile.interestStatement,
+        profileSlug: selectedProfile.slug,
+        windowLabel,
+        candidates: candidateDocuments.map((document) => ({
+          id: document.id,
+          title: document.title,
+          previewParagraph: document.previewParagraph,
+        })),
+      });
+
+      await setCachedRanking(selectedProfile.id, candidatesHash, fresh.model, fresh.ranking);
+
+      return { model: fresh.model, ranking: fresh.ranking };
+    })();
 
     const candidateById = new Map(candidateDocuments.map((document) => [document.id, document]));
     const seenIds = new Set<number>();
@@ -407,41 +567,46 @@ export async function getPersonalizedFeedSnapshot(profileSlug?: string | null): 
         } satisfies PersonalizedFeedDocument;
       })
       .filter(isDefined)
-      .slice(0, MAX_SELECTED_DOCUMENTS)
-      .sort((left, right) => right.sortTime.getTime() - left.sortTime.getTime());
+      .slice(0, MAX_SELECTED_DOCUMENTS);
 
     if (rankedDocuments.length === 0) {
       throw new Error("The ranking response did not map to any candidate documents");
     }
 
-    const rankingSummary = usingTodayWindow
-      ? rankingResult.ranking.shortlistSummary
-      : `No stories were captured in today's ${env.appTimeZone} window yet, so the model ranked the latest captured stories instead. ${rankingResult.ranking.shortlistSummary}`;
+    const fromCache = cached !== null;
+    const rankingSummary = rankingResult.ranking.shortlistSummary;
 
+    const rankedIds = new Set(rankedDocuments.map((d) => d.id));
     return {
       profiles,
       selectedProfile,
       topDocuments: rankedDocuments,
+      remainingDocuments: buildRemainingDocuments(rankedIds),
       candidateCount: candidateDocuments.length,
       rankingMode: "interest_ranked",
-      rankingSummary,
-      rankingStatusLabel: "Matched by interest, then ordered by time",
+      rankingSummary: fromCache ? `${rankingSummary} (cached)` : rankingSummary,
+      rankingStatusLabel: "Ranked by relevance",
       model: rankingResult.model,
       windowLabel,
+      activeTimeWindow: timeWindow,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown ranking error";
+    console.error("[personalized-feed] Interest ranking failed:", message, error);
 
+    const topIds = new Set(defaultShortlist.map((d) => d.id));
     return {
       profiles,
       selectedProfile,
       topDocuments: defaultShortlist,
+      remainingDocuments: buildRemainingDocuments(topIds),
       candidateCount: candidateDocuments.length,
       rankingMode: "latest",
       rankingSummary: `Interest ranking fell back to the newest stories because the OpenRouter request failed: ${message}`,
       rankingStatusLabel: "Newest first",
       model: env.openRouterModel,
       windowLabel,
+      activeTimeWindow: timeWindow,
     };
   }
 }

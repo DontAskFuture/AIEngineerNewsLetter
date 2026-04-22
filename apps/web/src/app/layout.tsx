@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans, Space_Grotesk } from "next/font/google";
 import Link from "next/link";
 import { logoutAction } from "@/app/auth-actions";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, isAdmin } from "@/lib/auth";
 import "./globals.css";
 
 const sans = IBM_Plex_Sans({
@@ -46,9 +46,11 @@ export default async function RootLayout({
                   <Link href="/feed" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
                     Feed
                   </Link>
-                  <Link href="/admin" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
-                    Admin
-                  </Link>
+                  {isAdmin(currentUser.email) ? (
+                    <Link href="/admin" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
+                      Admin
+                    </Link>
+                  ) : null}
                   <form action={logoutAction}>
                     <button type="submit" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
                       Logout
@@ -56,9 +58,14 @@ export default async function RootLayout({
                   </form>
                 </>
               ) : (
-                <Link href="/login" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
-                  Login
-                </Link>
+                <>
+                  <Link href="/login" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
+                    Login
+                  </Link>
+                  <Link href="/signup" className="rounded-full bg-[color:var(--ink)] px-4 py-2 text-white">
+                    Sign up
+                  </Link>
+                </>
               )}
             </nav>
           </header>

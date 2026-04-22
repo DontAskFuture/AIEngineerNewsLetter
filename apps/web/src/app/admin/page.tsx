@@ -1,4 +1,5 @@
-import { requireCurrentUser } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
+import { getCrawlJobStatuses } from "@/lib/crawler";
 import { getDashboardSnapshot } from "@/lib/dashboard";
 import {
   formatCategoryLabel,
@@ -8,12 +9,32 @@ import {
   formatPercent,
   formatRelativeTime,
 } from "@/lib/formatters";
+import { getScoringStats, getScoringStatsBySource } from "@/lib/scoring";
+import { getDb, schema } from "@ai-intel/db";
+import { eq, asc } from "drizzle-orm";
+import { triggerCrawlAction, triggerScoreAllAction } from "./actions";
+import { ActionButton } from "./action-button";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  await requireCurrentUser();
-  const snapshot = await getDashboardSnapshot();
+  await requireAdmin();
+
+  const db = getDb();
+  const profiles = await db
+    .select({ id: schema.userProfiles.id })
+    .from(schema.userProfiles)
+    .where(eq(schema.userProfiles.isActive, true))
+    .orderBy(asc(schema.userProfiles.id))
+    .limit(1);
+  const firstProfileId = profiles[0]?.id ?? null;
+
+  const [snapshot, crawlStatus, scoringStats, sourceScoringStats] = await Promise.all([
+    getDashboardSnapshot(),
+    getCrawlJobStatuses(),
+    firstProfileId ? getScoringStats(firstProfileId) : Promise.resolve(null),
+    firstProfileId ? getScoringStatsBySource(firstProfileId) : Promise.resolve([]),
+  ]);
 
   const adminCards = [
     {
@@ -49,6 +70,136 @@ export default async function AdminPage() {
           This route is now backed by the live ingestion tables. It tracks crawl freshness, source
           coverage, and recent fetch attempts so we can spot parser or scheduling issues quickly.
         </p>
+        <div className="mt-6 flex flex-wrap gap-4">
+          <ActionButton
+            action={triggerCrawlAction}
+            label="Force crawl all sources"
+            pendingLabel="Crawling..."
+            successMessage="Crawl triggered — new documents will be scored automatically."
+            className="bg-[color:var(--leaf)]"
+          />
+          <ActionButton
+            action={triggerScoreAllAction}
+            label="Score all unscored documents"
+            pendingLabel="Starting scorer..."
+            successMessage="Scoring started in background. Refresh to see progress."
+            className="bg-[color:var(--ink)]"
+          />
+        </div>
+        {scoringStats && (
+          <div className="mt-4 flex gap-6 text-sm text-[color:var(--muted)]">
+            <span>Scored: <strong>{scoringStats.scoredDocuments}</strong></span>
+            <span>Unscored: <strong>{scoringStats.unscoredDocuments}</strong></span>
+            <span>Total: <strong>{scoringStats.totalDocuments}</strong></span>
+          </div>
+        )}
+      </section>
+
+      {sourceScoringStats.length > 0 && (
+        <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+          <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+            Scoring status by source
+          </p>
+          <div className="mt-6 overflow-x-auto">
+            <div className="min-w-[700px] overflow-hidden rounded-[1.25rem] border border-black/6">
+              <div className="grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 bg-[rgba(255,255,255,0.82)] px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                <span>Source</span>
+                <span>Total</span>
+                <span>Scored</span>
+                <span>Unscored</span>
+                <span>Avg</span>
+                <span>Min</span>
+                <span>Max</span>
+              </div>
+              {sourceScoringStats.map((source) => {
+                const pct = source.totalDocuments > 0
+                  ? Math.round((source.scoredDocuments / source.totalDocuments) * 100)
+                  : 0;
+                return (
+                  <div
+                    key={source.sourceId}
+                    className="grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 border-t border-black/6 bg-white/70 px-4 py-3 text-sm text-[color:var(--muted)]"
+                  >
+                    <span className="font-medium text-[color:var(--ink)]">
+                      {source.sourceName}
+                      <span className="ml-2 text-xs text-[color:var(--muted)]">
+                        {pct === 100
+                          ? "✓"
+                          : `${pct}%`}
+                      </span>
+                    </span>
+                    <span>{source.totalDocuments}</span>
+                    <span className="text-[color:var(--leaf)]">{source.scoredDocuments}</span>
+                    <span className={source.unscoredDocuments > 0 ? "text-amber-600" : ""}>
+                      {source.unscoredDocuments}
+                    </span>
+                    <span>{source.avgScore ?? "—"}</span>
+                    <span>{source.minScore ?? "—"}</span>
+                    <span>{source.maxScore ?? "—"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+        <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+          Crawl job status (last 24h)
+        </p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-4">
+          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Queued</p>
+            <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.created}</p>
+          </div>
+          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-amber-600">Active</p>
+            <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.active}</p>
+          </div>
+          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">Completed</p>
+            <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.completed}</p>
+          </div>
+          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-red-700">Failed</p>
+            <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.failed}</p>
+          </div>
+        </div>
+
+        <div className="mt-6 overflow-x-auto">
+          <div className="min-w-[700px] overflow-hidden rounded-[1.25rem] border border-black/6">
+            <div className="grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 bg-[rgba(255,255,255,0.82)] px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              <span>Source</span>
+              <span>State</span>
+              <span>Enqueued</span>
+              <span>Completed</span>
+            </div>
+            {crawlStatus.jobs.map((job) => (
+              <div
+                key={job.id}
+                className="grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 border-t border-black/6 bg-white/70 px-4 py-3 text-sm text-[color:var(--muted)]"
+              >
+                <span className="font-medium text-[color:var(--ink)]">{job.sourceName}</span>
+                <span
+                  className={
+                    job.state === "completed"
+                      ? "text-[color:var(--leaf)]"
+                      : job.state === "failed"
+                        ? "text-red-700"
+                        : job.state === "active"
+                          ? "text-amber-600"
+                          : ""
+                  }
+                >
+                  {job.state}
+                </span>
+                <span>{formatRelativeTime(job.createdOn)}</span>
+                <span>{job.completedOn ? formatRelativeTime(job.completedOn) : "—"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2">

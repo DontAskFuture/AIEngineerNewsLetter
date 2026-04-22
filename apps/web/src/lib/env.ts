@@ -5,6 +5,7 @@ let cachedEnv:
       appBaseUrl: string | null;
       appTimeZone: string;
       authAllowedEmails: string[];
+      adminEmails: string[];
       authSessionDays: number;
     }
   | undefined;
@@ -15,14 +16,19 @@ export function loadWebEnv() {
       .split(",")
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean);
+    const adminEmails = (process.env.ADMIN_EMAILS?.trim() || "lianglingfan@gmail.com")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
     const authSessionDays = Number(process.env.AUTH_SESSION_DAYS?.trim() || "30");
 
     cachedEnv = {
       openRouterApiKey: process.env.OPENROUTER_API_KEY?.trim() || null,
-      openRouterModel: process.env.OPENROUTER_MODEL?.trim() || "openai/gpt-5.4-mini",
+      openRouterModel: process.env.OPENROUTER_MODEL?.trim() || "nvidia/nemotron-3-super-120b-a12b:free",
       appBaseUrl: process.env.APP_BASE_URL?.trim() || "http://localhost:3000",
       appTimeZone: process.env.APP_TIME_ZONE?.trim() || "America/Los_Angeles",
       authAllowedEmails: allowedEmails.length > 0 ? allowedEmails : ["lianglingfan@gmail.com"],
+      adminEmails: adminEmails.length > 0 ? adminEmails : ["lianglingfan@gmail.com"],
       authSessionDays: Number.isFinite(authSessionDays) && authSessionDays > 0 ? authSessionDays : 30,
     };
   }

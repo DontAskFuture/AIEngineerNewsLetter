@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm:*)",
+      "Bash(corepack pnpm:*)",
+      "Bash(lsof:*)",
+      "Bash(curl -sL -o /dev/null -w '%{http_code}' \"https://cursor.com/blog/rss\")",
+      "Bash(curl -sL -o /dev/null -w '%{http_code}' \"https://cursor.com/feed\")",
+      "Bash(curl -sL -o /dev/null -w '%{http_code}' \"https://cursor.com/rss.xml\")",
+      "Bash(curl -sL \"https://cursor.com/blog\")",
+      "Bash(psql:*)",
+      "Bash(docker exec ai-intel-postgres:*)",
+      "Bash(docker exec:*)",
+      "Bash(curl -s http://localhost:3000/feed)",
+      "Bash(curl -s \"https://cursor.com/blog\")",
+      "Bash(mv /Users/autumn/src/AIEngineerNewsLetter/packages/db/drizzle/meta/AGENTS.md /tmp/drizzle-meta-agents.md)",
+      "Bash(mv /Users/autumn/src/AIEngineerNewsLetter/packages/db/drizzle/meta/CLAUDE.md /tmp/drizzle-meta-claude.md)",
+      "Bash(mv /tmp/drizzle-meta-agents.md /Users/autumn/src/AIEngineerNewsLetter/packages/db/drizzle/meta/AGENTS.md)",
+      "Bash(mv /tmp/drizzle-meta-claude.md /Users/autumn/src/AIEngineerNewsLetter/packages/db/drizzle/meta/CLAUDE.md)",
+      "WebSearch",
+      "Bash(docker compose exec:*)",
+      "Bash(mv packages/db/drizzle/meta/AGENTS.md /tmp/_meta_agents.md)",
+      "Bash(mv packages/db/drizzle/meta/CLAUDE.md /tmp/_meta_claude.md)",
+      "Bash(mv packages/db/drizzle/AGENTS.md /tmp/_drizzle_agents.md)",
+      "Bash(mv packages/db/drizzle/CLAUDE.md /tmp/_drizzle_claude.md)",
+      "Bash(mv /tmp/_meta_agents.md packages/db/drizzle/meta/AGENTS.md)",
+      "Bash(mv /tmp/_meta_claude.md packages/db/drizzle/meta/CLAUDE.md)",
+      "Bash(mv /tmp/_drizzle_agents.md packages/db/drizzle/AGENTS.md)",
+      "Bash(mv /tmp/_drizzle_claude.md packages/db/drizzle/CLAUDE.md)",
+      "Bash(docker compose:*)"
+    ]
+  }
+}

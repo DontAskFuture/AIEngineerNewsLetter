@@ -29,12 +29,15 @@ Phase 0 scaffolds a TypeScript monorepo for a curated-source intelligence produc
 
 - `corepack pnpm typecheck`
 - `corepack pnpm lint`
+- `corepack pnpm check:agents -- --staged`
 - `corepack pnpm fetch:once`
 
 ## Notes
 
 - Raw fetch payloads are stored under `var/raw` locally and in the `raw_data` Docker volume when running through Compose.
 - The source registry is seeded from `packages/shared/src/default-sources.ts`.
+- Local Git enforcement for `AGENTS.md` updates lives in `.githooks/pre-commit`. Run `git config core.hooksPath .githooks` once per clone to enable it.
+- CI enforcement lives in `.github/workflows/agents-policy.yml`.
 - The app now uses a lightweight email and password login flow backed by Postgres sessions.
 - `AUTH_ALLOWED_EMAILS` controls who can create or access an account. It defaults to `lianglingfan@gmail.com`.
 - Passwords are stored as salted hashes, not plain text.

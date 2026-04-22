@@ -113,22 +113,8 @@ export const defaultSources: SeedSource[] = [
       },
     ],
   },
-  {
-    slug: "github-trending",
-    name: "GitHub Trending",
-    description: "Daily trending open-source repositories on GitHub.",
-    category: "github",
-    baseUrl: "https://github.com",
-    canonicalDomain: "github.com",
-    trustTier: 1,
-    endpoints: [
-      {
-        kind: "html",
-        url: "https://github.com/trending",
-        cadenceMinutes: 60,
-      },
-    ],
-  },
+  // GitHub Trending disabled — the page links to language filter pages,
+  // not individual repos, which produces junk documents.
   {
     slug: "vercel-blog",
     name: "Vercel Blog",

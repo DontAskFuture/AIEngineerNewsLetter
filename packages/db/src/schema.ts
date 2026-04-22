@@ -230,3 +230,41 @@ export const documentEntities = pgTable(
   },
   (table) => [uniqueIndex("document_entities_document_entity_idx").on(table.documentId, table.entityId)],
 );
+
+export const documentScores = pgTable(
+  "document_scores",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    documentId: bigint("document_id", { mode: "number" })
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    profileId: bigint("profile_id", { mode: "number" })
+      .notNull()
+      .references(() => userProfiles.id, { onDelete: "cascade" }),
+    score: integer("score").notNull(),
+    whyRelevant: text("why_relevant").notNull(),
+    model: text("model"),
+    scoredAt: timestamp("scored_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("document_scores_doc_profile_idx").on(table.documentId, table.profileId),
+  ],
+);
+
+export const rankingCache = pgTable(
+  "ranking_cache",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    profileId: bigint("profile_id", { mode: "number" })
+      .notNull()
+      .references(() => userProfiles.id, { onDelete: "cascade" }),
+    candidatesHash: text("candidates_hash").notNull(),
+    model: text("model"),
+    rankingJson: jsonb("ranking_json").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ranking_cache_profile_candidates_idx").on(table.profileId, table.candidatesHash),
+  ],
+);

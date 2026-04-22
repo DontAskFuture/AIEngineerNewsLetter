@@ -14,13 +14,18 @@ export interface AuthenticatedUser {
   email: string;
 }
 
-export class AuthError extends Error {
-  code: "missing_fields" | "email_not_allowed" | "password_too_short" | "invalid_credentials" | "account_disabled";
+export type AuthErrorCode =
+  | "missing_fields"
+  | "email_not_allowed"
+  | "password_too_short"
+  | "invalid_credentials"
+  | "account_disabled"
+  | "email_already_exists";
 
-  constructor(
-    code: "missing_fields" | "email_not_allowed" | "password_too_short" | "invalid_credentials" | "account_disabled",
-    message: string,
-  ) {
+export class AuthError extends Error {
+  code: AuthErrorCode;
+
+  constructor(code: AuthErrorCode, message: string) {
     super(message);
     this.code = code;
   }
@@ -69,7 +74,63 @@ export function getAllowedEmailLabel() {
   return getAllowedEmails().join(", ");
 }
 
-export async function signInWithPassword(email: string, password: string) {
+export async function signUpWithPassword(email: string, password: string): Promise<AuthenticatedUser> {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedPassword = password.trim();
+
+  if (!normalizedEmail || !normalizedPassword) {
+    throw new AuthError("missing_fields", "Email and password are required.");
+  }
+
+  if (!getAllowedEmails().includes(normalizedEmail)) {
+    throw new AuthError("email_not_allowed", "This email address is not allowed yet.");
+  }
+
+  if (normalizedPassword.length < PASSWORD_MIN_LENGTH) {
+    throw new AuthError(
+      "password_too_short",
+      `Passwords must be at least ${PASSWORD_MIN_LENGTH} characters long.`,
+    );
+  }
+
+  const db = getDb();
+
+  const [existingUser] = await db
+    .select({ id: schema.authUsers.id })
+    .from(schema.authUsers)
+    .where(eq(schema.authUsers.email, normalizedEmail))
+    .limit(1);
+
+  if (existingUser) {
+    throw new AuthError("email_already_exists", "An account with this email already exists.");
+  }
+
+  const passwordSalt = randomBytes(16).toString("hex");
+  const passwordHash = hashPassword(normalizedPassword, passwordSalt);
+
+  const [createdUser] = await db
+    .insert(schema.authUsers)
+    .values({
+      email: normalizedEmail,
+      passwordHash,
+      passwordSalt,
+      lastLoginAt: new Date(),
+    })
+    .returning({
+      id: schema.authUsers.id,
+      email: schema.authUsers.email,
+    });
+
+  if (!createdUser) {
+    throw new AuthError("invalid_credentials", "We could not create this account.");
+  }
+
+  await createSessionForUser(createdUser.id);
+
+  return createdUser;
+}
+
+export async function signInWithPassword(email: string, password: string): Promise<AuthenticatedUser> {
   const normalizedEmail = normalizeEmail(email);
   const normalizedPassword = password.trim();
 
@@ -95,36 +156,7 @@ export async function signInWithPassword(email: string, password: string) {
     .limit(1);
 
   if (!existingUser) {
-    if (normalizedPassword.length < PASSWORD_MIN_LENGTH) {
-      throw new AuthError(
-        "password_too_short",
-        `Passwords must be at least ${PASSWORD_MIN_LENGTH} characters long.`,
-      );
-    }
-
-    const passwordSalt = randomBytes(16).toString("hex");
-    const passwordHash = hashPassword(normalizedPassword, passwordSalt);
-
-    const [createdUser] = await db
-      .insert(schema.authUsers)
-      .values({
-        email: normalizedEmail,
-        passwordHash,
-        passwordSalt,
-        lastLoginAt: new Date(),
-      })
-      .returning({
-        id: schema.authUsers.id,
-        email: schema.authUsers.email,
-      });
-
-    if (!createdUser) {
-      throw new AuthError("invalid_credentials", "We could not create this account.");
-    }
-
-    await createSessionForUser(createdUser.id);
-
-    return createdUser satisfies AuthenticatedUser;
+    throw new AuthError("invalid_credentials", "Email or password is incorrect.");
   }
 
   if (!existingUser.isActive) {
@@ -151,7 +183,7 @@ export async function signInWithPassword(email: string, password: string) {
   return {
     id: existingUser.id,
     email: existingUser.email,
-  } satisfies AuthenticatedUser;
+  };
 }
 
 export async function createSessionForUser(userId: number) {
@@ -221,6 +253,20 @@ export async function requireCurrentUser() {
 
   if (!currentUser) {
     redirect("/login");
+  }
+
+  return currentUser;
+}
+
+export function isAdmin(email: string) {
+  return loadWebEnv().adminEmails.includes(email.toLowerCase());
+}
+
+export async function requireAdmin() {
+  const currentUser = await requireCurrentUser();
+
+  if (!isAdmin(currentUser.email)) {
+    redirect("/feed");
   }
 
   return currentUser;
