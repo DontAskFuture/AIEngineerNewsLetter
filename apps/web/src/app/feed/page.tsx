@@ -40,54 +40,35 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
     getDashboardSnapshot(),
     getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow, currentUser.id),
   ]);
+  const orderedProfiles = [
+    personalizedFeed.selectedProfile,
+    ...personalizedFeed.profiles.filter((profile) => profile.id !== personalizedFeed.selectedProfile.id),
+  ];
 
   return (
     <main className="page-shell">
       <section className="glass-card rounded-[2rem] p-6 sm:p-8">
-        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
-          <div>
-            <div className="flex flex-wrap gap-2">
-              <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
-                Ranked top 10
-              </span>
-              <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
-                Time-aware
-              </span>
-            </div>
-            <p className="mt-4 text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-              Personalized live feed
-            </p>
-            <div className="mt-4 flex max-w-4xl flex-col gap-3 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-              <p>
-                Each profile below stores a plain-English interest statement. We screen the newest stories in
-                the active daily window, ask an LLM to pick the top 10 using only the title and first
-                paragraph, then order the shortlisted stories by time.
-              </p>
-              <p>
-                Current window: {personalizedFeed.windowLabel}. Screened {personalizedFeed.candidateCount} candidate
-                stories. {personalizedFeed.model ? `Model: ${personalizedFeed.model}.` : null}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-            <div className="surface-panel rounded-[1.3rem] p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Ranking mode</p>
-              <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
-                {personalizedFeed.rankingStatusLabel}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">{personalizedFeed.rankingSummary}</p>
-            </div>
-            <div className="surface-panel rounded-[1.3rem] p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Window stats</p>
-              <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
-                {personalizedFeed.candidateCount} candidates
-              </p>
-              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-                Top stories keep source-family caps while still backfilling to a full 10.
-              </p>
-            </div>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+            Ranked top 10
+          </span>
+          <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+            Time-aware
+          </span>
+        </div>
+        <p className="mt-4 text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+          Personalized live feed
+        </p>
+        <div className="mt-4 flex max-w-4xl flex-col gap-3 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+          <p>
+            Each profile below stores a plain-English interest statement. We screen the newest stories in
+            the active daily window, ask an LLM to pick the top 10 using only the title and first
+            paragraph, then order the shortlisted stories by time.
+          </p>
+          <p>
+            Current window: {personalizedFeed.windowLabel}. Screened {personalizedFeed.candidateCount} candidate
+            stories.
+          </p>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-2">
@@ -126,7 +107,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
-            {personalizedFeed.profiles.map((profile) => {
+            {orderedProfiles.map((profile) => {
               const isSelected = profile.slug === personalizedFeed.selectedProfile.slug;
 
               return (
@@ -143,6 +124,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
 
           <form action={updateUserProfileAction} className="mt-6 grid gap-4">
             <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
+            <input type="hidden" name="timeWindow" value={timeWindow} />
             <div className="grid gap-2">
               <label htmlFor="displayName" className="text-sm font-medium text-[color:var(--ink)]">
                 Profile name
@@ -184,46 +166,32 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
 
         <article className="glass-card rounded-[1.75rem] p-6 sm:p-8">
           <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-            Ranking status
+            Create another profile
           </p>
-          <div className="mt-6 space-y-4">
-            <div className="surface-panel rounded-2xl p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                Current mode
-              </p>
-              <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
-                {personalizedFeed.rankingStatusLabel}
-              </p>
-              <p className="mt-3 text-sm leading-6 text-[color:var(--muted)]">
-                {personalizedFeed.rankingSummary}
-              </p>
-            </div>
-
-            <div className="surface-panel rounded-2xl p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                Create another profile
-              </p>
-              <form action={createUserProfileAction} className="mt-4 grid gap-3">
-                <input
-                  name="displayName"
-                  placeholder="Example: Infra scout"
-                  className="field-shell px-4 py-3 text-sm"
-                />
-                <textarea
-                  name="interestStatement"
-                  rows={4}
-                  placeholder="Example: Watch inference serving, GPU utilization, model routing, and pricing or latency shifts that create infra bottlenecks."
-                  className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
-                />
-                <button
-                  type="submit"
-                  className="button-secondary w-fit"
-                >
-                  Add profile
-                </button>
-              </form>
-            </div>
-          </div>
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+            Add a second research lens when you want a different shortlist, such as infra scouting,
+            coding agents, or model pricing changes.
+          </p>
+          <form action={createUserProfileAction} className="mt-6 grid gap-3">
+            <input type="hidden" name="timeWindow" value={timeWindow} />
+            <input
+              name="displayName"
+              placeholder="Example: Infra scout"
+              className="field-shell px-4 py-3 text-sm"
+            />
+            <textarea
+              name="interestStatement"
+              rows={4}
+              placeholder="Example: Watch inference serving, GPU utilization, model routing, and pricing or latency shifts that create infra bottlenecks."
+              className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
+            />
+            <button
+              type="submit"
+              className="button-secondary w-fit"
+            >
+              Add profile
+            </button>
+          </form>
         </article>
       </section>
 

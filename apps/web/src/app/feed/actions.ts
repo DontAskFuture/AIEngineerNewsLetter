@@ -10,20 +10,34 @@ function getTextField(formData: FormData, fieldName: string) {
   return typeof value === "string" ? value : "";
 }
 
+function buildFeedRedirect(slug: string, timeWindow: string) {
+  const params = new URLSearchParams({
+    profile: slug,
+  });
+
+  if (timeWindow) {
+    params.set("window", timeWindow);
+  }
+
+  return `/feed?${params.toString()}`;
+}
+
 export async function createUserProfileAction(formData: FormData) {
-  await requireCurrentUser();
+  const currentUser = await requireCurrentUser();
 
   const profile = await createUserProfile({
+    userId: currentUser.id,
     displayName: getTextField(formData, "displayName"),
     interestStatement: getTextField(formData, "interestStatement"),
   });
+  const timeWindow = getTextField(formData, "timeWindow");
 
   revalidatePath("/feed");
-  redirect(`/feed?profile=${encodeURIComponent(profile.slug)}`);
+  redirect(buildFeedRedirect(profile.slug, timeWindow));
 }
 
 export async function updateUserProfileAction(formData: FormData) {
-  await requireCurrentUser();
+  const currentUser = await requireCurrentUser();
 
   const rawProfileId = getTextField(formData, "profileId");
   const profileId = Number(rawProfileId);
@@ -34,11 +48,13 @@ export async function updateUserProfileAction(formData: FormData) {
   }
 
   const profile = await updateUserProfile({
+    userId: currentUser.id,
     profileId,
     displayName: getTextField(formData, "displayName"),
     interestStatement: getTextField(formData, "interestStatement"),
   });
+  const timeWindow = getTextField(formData, "timeWindow");
 
   revalidatePath("/feed");
-  redirect(`/feed?profile=${encodeURIComponent(profile.slug)}`);
+  redirect(buildFeedRedirect(profile.slug, timeWindow));
 }

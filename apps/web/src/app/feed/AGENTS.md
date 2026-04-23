@@ -16,3 +16,5 @@ This file applies to `apps/web/src/app/feed`.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
 - The page is protected and should continue to assume an authenticated user.
 - Preserve clear visual separation between feed hero controls, profile editing, top stories, more stories, and source registry, and keep those surfaces theme-aware.
+- Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.
+- Profile creation and update should preserve the user’s current feed window and make the selected profile obvious in the interest chip list.

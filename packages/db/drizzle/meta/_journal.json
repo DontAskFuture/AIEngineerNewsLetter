@@ -57,6 +57,13 @@
       "when": 1776914704873,
       "tag": "0007_spotty_layla_miller",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776917879121,
+      "tag": "0008_flawless_brother_voodoo",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/auth";
 import { getCrawlJobStatuses } from "@/lib/crawler";
 import { getDashboardSnapshot } from "@/lib/dashboard";
+import { loadWebEnv } from "@/lib/env";
 import {
   formatCategoryLabel,
   formatCompactNumber,
@@ -20,6 +21,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
   await requireAdmin();
+  const env = loadWebEnv();
 
   const db = getDb();
   const profiles = await db
@@ -71,6 +73,30 @@ export default async function AdminPage() {
           This route is now backed by the live ingestion tables. It tracks crawl freshness, source
           coverage, and recent fetch attempts so we can spot parser or scheduling issues quickly.
         </p>
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <div className="surface-panel rounded-[1.35rem] p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              Ranking model
+            </p>
+            <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+              {env.openRouterModel}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+              This is the configured OpenRouter model used when the app needs to rank or score stories.
+            </p>
+          </div>
+          <div className="surface-panel rounded-[1.35rem] p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              Ranking access
+            </p>
+            <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+              {env.openRouterApiKey ? "API key configured" : "Fallback only"}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+              When the API key is missing, the feed can still render from cached or fallback ordering.
+            </p>
+          </div>
+        </div>
         <div className="mt-6 flex flex-wrap gap-4">
           <ActionButton
             action={triggerCrawlAction}

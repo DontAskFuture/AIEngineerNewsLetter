@@ -44,6 +44,9 @@ export const userProfiles = pgTable(
   "user_profiles",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
     slug: text("slug").notNull(),
     displayName: text("display_name").notNull(),
     interestStatement: text("interest_statement").notNull().default(""),
@@ -51,7 +54,7 @@ export const userProfiles = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("user_profiles_slug_idx").on(table.slug)],
+  (table) => [uniqueIndex("user_profiles_user_slug_idx").on(table.userId, table.slug)],
 );
 
 export const authUsers = pgTable(

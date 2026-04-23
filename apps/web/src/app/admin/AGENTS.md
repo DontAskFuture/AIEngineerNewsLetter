@@ -15,3 +15,4 @@ This file applies to `apps/web/src/app/admin`.
 - Reuse shared dashboard queries from `../../lib/dashboard` and scoring queries from `../../lib/scoring`.
 - Admin buttons should enqueue work, not execute it. The worker owns long-running processes.
 - Admin status tables and progress panels should use the shared theme-aware surface styles rather than route-local hardcoded light-mode colors.
+- Model selection and ranking configuration details that are too operational for the feed should be surfaced here instead.

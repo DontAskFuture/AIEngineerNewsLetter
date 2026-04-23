@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SourceCategory } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, asc, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
 import type { InterestRankingResponse } from "@/lib/openrouter";
 import { rankDocumentsForInterest } from "@/lib/openrouter";
@@ -259,16 +259,22 @@ async function getCandidateDocuments(cutoff: Date) {
   return rows.map((row) => mapCandidateRow(row));
 }
 
-async function ensureDefaultUserProfile() {
+async function ensureDefaultUserProfile(userId: number) {
   const db = getDb();
 
-  await db.insert(schema.userProfiles).values(defaultUserProfile).onConflictDoNothing({
-    target: schema.userProfiles.slug,
-  });
+  await db
+    .insert(schema.userProfiles)
+    .values({
+      userId,
+      ...defaultUserProfile,
+    })
+    .onConflictDoNothing({
+      target: [schema.userProfiles.userId, schema.userProfiles.slug],
+    });
 }
 
-async function getProfiles() {
-  await ensureDefaultUserProfile();
+async function getProfiles(userId: number) {
+  await ensureDefaultUserProfile(userId);
 
   const db = getDb();
   const rows = await db
@@ -280,15 +286,18 @@ async function getProfiles() {
       updatedAt: schema.userProfiles.updatedAt,
     })
     .from(schema.userProfiles)
-    .where(eq(schema.userProfiles.isActive, true))
-    .orderBy(asc(schema.userProfiles.displayName));
+    .where(and(eq(schema.userProfiles.userId, userId), eq(schema.userProfiles.isActive, true)))
+    .orderBy(desc(schema.userProfiles.updatedAt), asc(schema.userProfiles.displayName));
 
   return rows.map((row) => normalizeProfileRow(row));
 }
 
-async function getUniqueProfileSlug(baseSlug: string) {
+async function getUniqueProfileSlug(userId: number, baseSlug: string) {
   const db = getDb();
-  const existingRows = await db.select({ slug: schema.userProfiles.slug }).from(schema.userProfiles);
+  const existingRows = await db
+    .select({ slug: schema.userProfiles.slug })
+    .from(schema.userProfiles)
+    .where(eq(schema.userProfiles.userId, userId));
   const existingSlugs = new Set(existingRows.map((row) => row.slug));
   const normalizedBase = baseSlug || "analyst";
 
@@ -308,21 +317,24 @@ async function getUniqueProfileSlug(baseSlug: string) {
 }
 
 export async function createUserProfile({
+  userId,
   displayName,
   interestStatement,
 }: {
+  userId: number;
   displayName: string;
   interestStatement: string;
 }) {
-  await ensureDefaultUserProfile();
+  await ensureDefaultUserProfile(userId);
 
   const db = getDb();
   const normalizedDisplayName = displayName.trim() || "New analyst";
-  const slug = await getUniqueProfileSlug(slugifyDisplayName(normalizedDisplayName));
+  const slug = await getUniqueProfileSlug(userId, slugifyDisplayName(normalizedDisplayName));
 
   const [createdProfile] = await db
     .insert(schema.userProfiles)
     .values({
+      userId,
       slug,
       displayName: normalizedDisplayName,
       interestStatement: interestStatement.trim(),
@@ -343,10 +355,12 @@ export async function createUserProfile({
 }
 
 export async function updateUserProfile({
+  userId,
   profileId,
   displayName,
   interestStatement,
 }: {
+  userId: number;
   profileId: number;
   displayName: string;
   interestStatement: string;
@@ -360,7 +374,7 @@ export async function updateUserProfile({
       interestStatement: interestStatement.trim(),
       updatedAt: new Date(),
     })
-    .where(eq(schema.userProfiles.id, profileId))
+    .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)))
     .returning({
       id: schema.userProfiles.id,
       slug: schema.userProfiles.slug,
@@ -439,7 +453,12 @@ export async function getPersonalizedFeedSnapshot(
   currentUserId?: number,
 ): Promise<PersonalizedFeedSnapshot> {
   const env = loadWebEnv();
-  const profiles = await getProfiles();
+
+  if (!currentUserId) {
+    throw new Error("Expected current user id when building personalized feed");
+  }
+
+  const profiles = await getProfiles(currentUserId);
   const selectedProfile = profiles.find((profile) => profile.slug === profileSlug) ?? profiles[0];
 
   if (!selectedProfile) {
