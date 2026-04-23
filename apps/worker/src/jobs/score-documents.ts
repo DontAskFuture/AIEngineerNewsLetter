@@ -1,0 +1,289 @@
+import { getDb, schema } from "@ai-intel/db";
+import { eq, notInArray, sql } from "drizzle-orm";
+import type { ScoreDocumentsPayload } from "@ai-intel/shared";
+import { logger } from "../logger";
+import { loadWorkerEnv } from "../env";
+
+const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+const BATCH_SIZE = 20;
+const MAX_RETRIES = 3;
+const INITIAL_BACKOFF_MS = 1000;
+const MAX_CANDIDATE_TEXT_CHARS = 2000;
+
+function truncateToLimit(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars - 3) + "...";
+}
+
+function stripHtml(value: string): string {
+  return value
+    .replace(/<\/(p|div|li|section|article|h[1-6])>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function extractPreview(summary: string | null, bodyText: string | null): string {
+  const bodyParagraphs = bodyText
+    ? stripHtml(bodyText).split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+    : [];
+  if (bodyParagraphs.length > 0) return bodyParagraphs[0]!.slice(0, 300);
+  const summaryText = summary ? stripHtml(summary) : "";
+  return summaryText ? summaryText.slice(0, 300) : "";
+}
+
+interface Candidate {
+  id: number;
+  title: string;
+  previewParagraph: string;
+}
+
+interface ScoreResult {
+  documentId: number;
+  score: number;
+  whyRelevant: string;
+}
+
+function buildCandidateList(candidates: Candidate[]): string {
+  return candidates
+    .map((c) => {
+      const entry = `ID: ${c.id}\nTitle: ${c.title}\nFirst paragraph: ${c.previewParagraph || "No first paragraph was available."}`;
+      return truncateToLimit(entry, MAX_CANDIDATE_TEXT_CHARS);
+    })
+    .join("\n\n---\n\n");
+}
+
+const SYSTEM_PROMPT = [
+  "You score AI and software news stories against one user's stated interests.",
+  "Use only each story title and first paragraph.",
+  "Score EVERY document in the candidate list on a 1-100 relevance scale.",
+  "Prefer direct matches to the user's domains, workflows, pain points, tools, companies, and product priorities.",
+  "Do not invent document IDs and do not include any IDs that are not present in the input.",
+  "For each document, write a 'whyRelevant' explanation in 1 or 2 sentences.",
+  "Keep every explanation grounded in the supplied text only, and connect it back to the user's saved interests.",
+  "You MUST respond with ONLY a valid JSON object, no other text before or after.",
+  'The JSON must have this exact shape: {"scores": [{"documentId": <int>, "score": <int 1-100>, "whyRelevant": "..."}]}',
+].join(" ");
+
+function extractJson(rawText: string): string {
+  const trimmed = rawText.trim();
+  if (trimmed.startsWith("{")) return trimmed;
+  const match = trimmed.match(/\{[\s\S]*\}/);
+  if (match) return match[0];
+  throw new SyntaxError(`No JSON object found in LLM response: ${trimmed.slice(0, 200)}...`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callLlm(interestStatement: string, candidates: Candidate[]): Promise<{ model: string; scores: ScoreResult[] }> {
+  const env = loadWorkerEnv();
+  if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
+
+  const userMessage = `User interest profile:\n${interestStatement}\n\nDocuments to score:\n${buildCandidateList(candidates)}`;
+  const body = JSON.stringify({
+    model: env.OPENROUTER_MODEL,
+    temperature: 0.1,
+    max_tokens: 4000,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+  });
+
+  const headers = {
+    Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+    "Content-Type": "application/json",
+    "HTTP-Referer": env.APP_BASE_URL,
+    "X-Title": "AI Builder Intelligence",
+  };
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
+      logger.info({ attempt, backoff }, "Retrying OpenRouter request");
+      await sleep(backoff);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(OPENROUTER_CHAT_URL, { method: "POST", headers, body });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Network error");
+      continue;
+    }
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      const errObj = payload?.error;
+      const msg = errObj && typeof errObj === "object" && typeof (errObj as Record<string, unknown>).message === "string"
+        ? ((errObj as Record<string, unknown>).message as string)
+        : `HTTP ${response.status}`;
+
+      if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+        logger.warn({ status: response.status, msg }, "Retryable OpenRouter error");
+        lastError = new Error(msg);
+        continue;
+      }
+      throw new Error(msg);
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const choices = payload.choices;
+    if (!Array.isArray(choices) || choices.length === 0) throw new Error("No choices returned");
+
+    const firstChoice = choices[0] as Record<string, unknown>;
+    const message = firstChoice.message as Record<string, unknown> | undefined;
+    const content = typeof message?.content === "string" ? message.content.trim() : null;
+    if (!content) throw new Error("Empty content returned");
+
+    const parsed = JSON.parse(extractJson(content)) as unknown;
+    const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+    const rawScores = Array.isArray(record?.scores) ? record.scores : [];
+
+    const scores: ScoreResult[] = rawScores
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return null;
+        const r = entry as Record<string, unknown>;
+        const documentId = Number(r.documentId);
+        const score = Number(r.score);
+        const whyRelevant = typeof r.whyRelevant === "string" ? r.whyRelevant.trim() : "";
+        if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) return null;
+        return { documentId, score: Math.max(1, Math.min(100, Math.round(score))), whyRelevant };
+      })
+      .filter((e): e is ScoreResult => e !== null);
+
+    const model = typeof payload.model === "string" ? payload.model : env.OPENROUTER_MODEL;
+    return { model, scores };
+  }
+
+  throw lastError ?? new Error("OpenRouter request failed after retries");
+}
+
+export async function scoreDocuments(payload: ScoreDocumentsPayload) {
+  const db = getDb();
+  const { profileId } = payload;
+
+  const [profile] = await db
+    .select({ id: schema.userProfiles.id, interestStatement: schema.userProfiles.interestStatement })
+    .from(schema.userProfiles)
+    .where(eq(schema.userProfiles.id, profileId))
+    .limit(1);
+
+  if (!profile || !profile.interestStatement.trim()) {
+    throw new Error(`Profile ${profileId} not found or has no interest statement`);
+  }
+
+  const alreadyScoredIds = db
+    .select({ documentId: schema.documentScores.documentId })
+    .from(schema.documentScores)
+    .where(eq(schema.documentScores.profileId, profileId));
+
+  const unscoredDocs = await db
+    .select({ id: schema.documents.id, title: schema.documents.title, summary: schema.documents.summary, bodyText: schema.documents.bodyText })
+    .from(schema.documents)
+    .where(notInArray(schema.documents.id, alreadyScoredIds))
+    .orderBy(schema.documents.id);
+
+  const totalBatches = Math.ceil(unscoredDocs.length / BATCH_SIZE);
+
+  if (unscoredDocs.length === 0) {
+    logger.info({ profileId }, "No unscored documents");
+    return;
+  }
+
+  // Create scoring job row
+  const [jobRow] = await db
+    .insert(schema.scoringJobs)
+    .values({ profileId, status: "running", totalDocuments: unscoredDocs.length, totalBatches })
+    .returning({ id: schema.scoringJobs.id });
+  const jobId = jobRow!.id;
+
+  try {
+    for (let i = 0; i < unscoredDocs.length; i += BATCH_SIZE) {
+      const batch = unscoredDocs.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+
+      const candidates: Candidate[] = batch.map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        previewParagraph: extractPreview(doc.summary, doc.bodyText),
+      }));
+
+      try {
+        const result = await callLlm(profile.interestStatement, candidates);
+        const validScores = result.scores.filter((s) => batch.some((doc) => doc.id === s.documentId));
+
+        if (validScores.length > 0) {
+          await db
+            .insert(schema.documentScores)
+            .values(validScores.map((s) => ({
+              documentId: s.documentId,
+              profileId,
+              score: s.score,
+              whyRelevant: s.whyRelevant,
+              model: result.model,
+            })))
+            .onConflictDoUpdate({
+              target: [schema.documentScores.documentId, schema.documentScores.profileId],
+              set: {
+                score: sql`excluded.score`,
+                whyRelevant: sql`excluded.why_relevant`,
+                model: sql`excluded.model`,
+                scoredAt: new Date(),
+              },
+            });
+        }
+
+        const missed = batch.length - validScores.length;
+
+        await db
+          .update(schema.scoringJobs)
+          .set({
+            currentBatch: batchNumber,
+            scoredDocuments: sql`${schema.scoringJobs.scoredDocuments} + ${validScores.length}`,
+            failedDocuments: sql`${schema.scoringJobs.failedDocuments} + ${missed}`,
+          })
+          .where(eq(schema.scoringJobs.id, jobId));
+
+        logger.info({ batchNumber, totalBatches, scored: validScores.length, total: batch.length }, "Scored batch");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        logger.error({ batchNumber, error: message }, "Batch scoring failed");
+
+        await db
+          .update(schema.scoringJobs)
+          .set({
+            currentBatch: batchNumber,
+            failedDocuments: sql`${schema.scoringJobs.failedDocuments} + ${batch.length}`,
+          })
+          .where(eq(schema.scoringJobs.id, jobId));
+      }
+    }
+
+    await db
+      .update(schema.scoringJobs)
+      .set({ status: "completed", completedAt: new Date() })
+      .where(eq(schema.scoringJobs.id, jobId));
+
+    logger.info({ jobId, profileId }, "Scoring job completed");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    await db
+      .update(schema.scoringJobs)
+      .set({ status: "failed", completedAt: new Date(), errorMessage: message })
+      .where(eq(schema.scoringJobs.id, jobId));
+
+    logger.error({ jobId, error: message }, "Scoring job failed");
+    throw error;
+  }
+}

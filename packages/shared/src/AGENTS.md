@@ -4,7 +4,7 @@
 This file applies to `packages/shared/src`.
 
 ## Architecture
-- `types.ts` defines shared source and fetch payload types.
+- `types.ts` defines shared source, fetch payload, and scoring payload types (`FetchSourceEndpointPayload`, `ScoreDocumentsPayload`).
 - `default-sources.ts` is the curated registry seed set.
 - `url.ts` handles canonicalization and shared URL behavior.
 - `index.ts` is the package export surface.

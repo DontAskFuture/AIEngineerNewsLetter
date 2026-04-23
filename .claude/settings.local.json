@@ -27,7 +27,10 @@
       "Bash(mv /tmp/_meta_claude.md packages/db/drizzle/meta/CLAUDE.md)",
       "Bash(mv /tmp/_drizzle_agents.md packages/db/drizzle/AGENTS.md)",
       "Bash(mv /tmp/_drizzle_claude.md packages/db/drizzle/CLAUDE.md)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(curl -s --connect-timeout 10 \"https://openrouter.ai/api/v1/models\")",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)"
     ]
   }
 }

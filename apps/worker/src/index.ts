@@ -1,19 +1,21 @@
 import { PgBoss, type Job } from "pg-boss";
 import { closePool } from "@ai-intel/db";
-import type { FetchSourceEndpointPayload } from "@ai-intel/shared";
+import type { FetchSourceEndpointPayload, ScoreDocumentsPayload } from "@ai-intel/shared";
 import { logger } from "./logger";
 import { loadWorkerEnv } from "./env";
 import { fetchSourceEndpoint } from "./jobs/fetch-source-endpoint";
+import { scoreDocuments } from "./jobs/score-documents";
 import { listActiveSourceEndpoints, seedDefaultSources } from "./services/source-registry";
 
-const queueName = "fetch-source-endpoint";
+const fetchQueueName = "fetch-source-endpoint";
+const scoreQueueName = "score-documents";
 
 async function enqueueDueFetches(boss: PgBoss) {
   const endpoints = await listActiveSourceEndpoints();
 
   for (const endpoint of endpoints) {
     await boss.send(
-      queueName,
+      fetchQueueName,
       { endpointId: endpoint.id },
       {
         singletonKey: `endpoint:${endpoint.id}`,
@@ -34,12 +36,22 @@ async function main() {
   });
 
   await boss.start();
-  await boss.createQueue(queueName);
+  await boss.createQueue(fetchQueueName);
+  await boss.createQueue(scoreQueueName);
   await seedDefaultSources();
 
-  await boss.work<FetchSourceEndpointPayload>(queueName, async (jobs: Job<FetchSourceEndpointPayload>[]) => {
+  await boss.work<FetchSourceEndpointPayload>(fetchQueueName, async (jobs: Job<FetchSourceEndpointPayload>[]) => {
     await Promise.all(jobs.map((job) => fetchSourceEndpoint(job.data, job.id)));
   });
+
+  await boss.work<ScoreDocumentsPayload>(
+    scoreQueueName,
+    async (jobs: Job<ScoreDocumentsPayload>[]) => {
+      for (const job of jobs) {
+        await scoreDocuments(job.data);
+      }
+    },
+  );
 
   await enqueueDueFetches(boss);
 
@@ -61,7 +73,7 @@ async function main() {
 
   logger.info(
     {
-      queueName,
+      queues: [fetchQueueName, scoreQueueName],
       fetchIntervalMinutes: env.FETCH_INTERVAL_MINUTES,
     },
     "Worker is running",

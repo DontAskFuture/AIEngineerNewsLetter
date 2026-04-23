@@ -3,6 +3,14 @@ import { eq, notInArray, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
 import type { InterestRankingCandidate } from "@/lib/openrouter";
 import { scoreDocumentBatch } from "@/lib/openrouter";
+import {
+  startScoringJob,
+  updateScoringBatch,
+  completeScoringJob,
+  failScoringJob,
+} from "@/lib/scoring-tracker";
+export type { ScoringJobState } from "@/lib/scoring-tracker";
+export { getScoringJobState } from "@/lib/scoring-tracker";
 
 const BATCH_SIZE = 20;
 
@@ -91,63 +99,77 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
     return progress;
   }
 
-  for (let i = 0; i < unscoredDocs.length; i += BATCH_SIZE) {
-    const batch = unscoredDocs.slice(i, i + BATCH_SIZE);
+  const jobId = await startScoringJob(profileId, unscoredDocs.length, progress.batches);
 
-    const candidates: InterestRankingCandidate[] = batch.map((doc) => ({
-      id: doc.id,
-      title: doc.title,
-      previewParagraph: extractPreview(doc.summary, doc.bodyText),
-    }));
+  try {
+    for (let i = 0; i < unscoredDocs.length; i += BATCH_SIZE) {
+      const batch = unscoredDocs.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
 
-    try {
-      const result = await scoreDocumentBatch({
-        interestStatement: profile.interestStatement,
-        candidates,
-      });
+      const candidates: InterestRankingCandidate[] = batch.map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        previewParagraph: extractPreview(doc.summary, doc.bodyText),
+      }));
 
-      const validScores = result.scores.filter((s) =>
-        batch.some((doc) => doc.id === s.documentId),
-      );
+      try {
+        const result = await scoreDocumentBatch({
+          interestStatement: profile.interestStatement,
+          candidates,
+        });
 
-      if (validScores.length > 0) {
-        await db
-          .insert(schema.documentScores)
-          .values(
-            validScores.map((s) => ({
-              documentId: s.documentId,
-              profileId,
-              score: s.score,
-              whyRelevant: s.whyRelevant,
-              model: result.model,
-            })),
-          )
-          .onConflictDoUpdate({
-            target: [schema.documentScores.documentId, schema.documentScores.profileId],
-            set: {
-              score: sql`excluded.score`,
-              whyRelevant: sql`excluded.why_relevant`,
-              model: sql`excluded.model`,
-              scoredAt: new Date(),
-            },
-          });
+        const validScores = result.scores.filter((s) =>
+          batch.some((doc) => doc.id === s.documentId),
+        );
 
-        progress.scored += validScores.length;
+        if (validScores.length > 0) {
+          await db
+            .insert(schema.documentScores)
+            .values(
+              validScores.map((s) => ({
+                documentId: s.documentId,
+                profileId,
+                score: s.score,
+                whyRelevant: s.whyRelevant,
+                model: result.model,
+              })),
+            )
+            .onConflictDoUpdate({
+              target: [schema.documentScores.documentId, schema.documentScores.profileId],
+              set: {
+                score: sql`excluded.score`,
+                whyRelevant: sql`excluded.why_relevant`,
+                model: sql`excluded.model`,
+                scoredAt: new Date(),
+              },
+            });
+
+          progress.scored += validScores.length;
+        }
+
+        const missedCount = batch.length - validScores.length;
+        if (missedCount > 0) {
+          progress.failed += missedCount;
+        }
+
+        await updateScoringBatch(jobId, batchNumber, validScores.length, missedCount);
+
+        console.log(
+          `[scoring] Batch ${batchNumber}/${progress.batches}: scored ${validScores.length}/${batch.length} docs`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[scoring] Batch ${batchNumber} failed:`, message);
+        progress.failed += batch.length;
+        await updateScoringBatch(jobId, batchNumber, 0, batch.length);
       }
-
-      const missedCount = batch.length - validScores.length;
-      if (missedCount > 0) {
-        progress.failed += missedCount;
-      }
-
-      console.log(
-        `[scoring] Batch ${Math.floor(i / BATCH_SIZE) + 1}/${progress.batches}: scored ${validScores.length}/${batch.length} docs`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[scoring] Batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, message);
-      progress.failed += batch.length;
     }
+
+    await completeScoringJob(jobId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    await failScoringJob(jobId, message);
+    throw error;
   }
 
   return progress;

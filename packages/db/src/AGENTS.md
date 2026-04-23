@@ -4,7 +4,7 @@
 This file applies to `packages/db/src`.
 
 ## Architecture
-- `schema.ts` defines tables and enums.
+- `schema.ts` defines tables and enums including `documents`, `documentScores`, `scoringJobs`, `scoringJobStatusEnum`, `userProfiles`, and auth tables.
 - `client.ts` owns pool and Drizzle client creation.
 - `index.ts` is the public export surface for the package.
 
@@ -12,4 +12,3 @@ This file applies to `packages/db/src`.
 - Keep exports intentional and stable.
 - Shared DB helpers should be generic enough for both apps.
 - Table and enum naming should match the domain model used throughout the repo.
-

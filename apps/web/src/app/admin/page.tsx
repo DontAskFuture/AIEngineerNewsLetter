@@ -14,6 +14,7 @@ import { getDb, schema } from "@ai-intel/db";
 import { eq, asc } from "drizzle-orm";
 import { triggerCrawlAction, triggerScoreAllAction } from "./actions";
 import { ActionButton } from "./action-button";
+import { ScoringProgress } from "./scoring-progress";
 
 export const dynamic = "force-dynamic";
 
@@ -81,8 +82,8 @@ export default async function AdminPage() {
           <ActionButton
             action={triggerScoreAllAction}
             label="Score all unscored documents"
-            pendingLabel="Starting scorer..."
-            successMessage="Scoring started in background. Refresh to see progress."
+            pendingLabel="Enqueueing..."
+            successMessage="Scoring jobs enqueued — worker will process them."
             className="bg-[color:var(--ink)]"
           />
         </div>
@@ -93,6 +94,15 @@ export default async function AdminPage() {
             <span>Total: <strong>{scoringStats.totalDocuments}</strong></span>
           </div>
         )}
+      </section>
+
+      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+        <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+          Scoring batch jobs
+        </p>
+        <div className="mt-6">
+          <ScoringProgress />
+        </div>
       </section>
 
       {sourceScoringStats.length > 0 && (

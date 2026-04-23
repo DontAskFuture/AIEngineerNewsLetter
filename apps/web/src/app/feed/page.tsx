@@ -10,6 +10,7 @@ import {
 } from "@/lib/formatters";
 import { getPersonalizedFeedSnapshot, isValidTimeWindow, type TimeWindow } from "@/lib/personalized-feed";
 import { createUserProfileAction, updateUserProfileAction } from "./actions";
+import { MoreStories } from "./more-stories";
 
 export const dynamic = "force-dynamic";
 
@@ -256,95 +257,20 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         ))}
       </section>
 
-      {personalizedFeed.remainingDocuments.length > 0 ? (
-        <section>
-          <details>
-            <summary className="mb-4 cursor-pointer list-none">
-              <div className="flex items-center gap-3">
-                <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-                  More stories
-                </p>
-                <span className="text-sm text-[color:var(--muted)]">
-                  ({personalizedFeed.remainingDocuments.length})
-                </span>
-              </div>
-            </summary>
-            <div className="grid gap-3">
-              {personalizedFeed.remainingDocuments.slice(0, 10).map((document) => (
-                <article key={document.id} className="glass-card rounded-[1.25rem] px-5 py-4 sm:px-6">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="max-w-4xl">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                          {document.sourceName}
-                        </p>
-                        <span className="text-xs text-[color:var(--muted)]">
-                          {formatRelativeTime(document.sortTime)}
-                        </span>
-                      </div>
-                      <a
-                        href={document.canonicalUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="display-font mt-1 block text-lg font-semibold tracking-tight"
-                      >
-                        {document.title}
-                      </a>
-                      <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-                        {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
-                      </p>
-                    </div>
-                    <span className="w-fit rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)] sm:ml-auto">
-                      {formatCategoryLabel(document.category)}
-                    </span>
-                  </div>
-                </article>
-              ))}
-              {personalizedFeed.remainingDocuments.length > 10 ? (
-                <details>
-                  <summary className="cursor-pointer list-none">
-                    <p className="rounded-full border border-black/10 bg-white/60 px-5 py-3 text-center text-sm font-medium text-[color:var(--ink)]">
-                      Show {personalizedFeed.remainingDocuments.length - 10} more
-                    </p>
-                  </summary>
-                  <div className="mt-3 grid gap-3">
-                    {personalizedFeed.remainingDocuments.slice(10).map((document) => (
-                      <article key={document.id} className="glass-card rounded-[1.25rem] px-5 py-4 sm:px-6">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="max-w-4xl">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                                {document.sourceName}
-                              </p>
-                              <span className="text-xs text-[color:var(--muted)]">
-                                {formatRelativeTime(document.sortTime)}
-                              </span>
-                            </div>
-                            <a
-                              href={document.canonicalUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="display-font mt-1 block text-lg font-semibold tracking-tight"
-                            >
-                              {document.title}
-                            </a>
-                            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-                              {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
-                            </p>
-                          </div>
-                          <span className="w-fit rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)] sm:ml-auto">
-                            {formatCategoryLabel(document.category)}
-                          </span>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </details>
-              ) : null}
-            </div>
-          </details>
-        </section>
-      ) : null}
+      {personalizedFeed.remainingDocuments.length > 0 && (
+        <MoreStories
+          documents={personalizedFeed.remainingDocuments.map((doc) => ({
+            id: doc.id,
+            title: doc.title,
+            canonicalUrl: doc.canonicalUrl,
+            sourceName: doc.sourceName,
+            category: doc.category,
+            sortTime: (doc.sortTime instanceof Date ? doc.sortTime : new Date(doc.sortTime)).toISOString(),
+            previewParagraph: doc.previewParagraph,
+            matchScore: doc.matchScore,
+          }))}
+        />
+      )}
 
       <section className="glass-card rounded-[2rem] p-6 sm:p-8">
         <details>

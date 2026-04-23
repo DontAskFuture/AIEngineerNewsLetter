@@ -251,6 +251,24 @@ export const documentScores = pgTable(
   ],
 );
 
+export const scoringJobStatusEnum = pgEnum("scoring_job_status", ["running", "completed", "failed"]);
+
+export const scoringJobs = pgTable("scoring_jobs", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  profileId: bigint("profile_id", { mode: "number" })
+    .notNull()
+    .references(() => userProfiles.id, { onDelete: "cascade" }),
+  status: scoringJobStatusEnum("status").notNull().default("running"),
+  totalDocuments: integer("total_documents").notNull().default(0),
+  scoredDocuments: integer("scored_documents").notNull().default(0),
+  failedDocuments: integer("failed_documents").notNull().default(0),
+  currentBatch: integer("current_batch").notNull().default(0),
+  totalBatches: integer("total_batches").notNull().default(0),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
 export const rankingCache = pgTable(
   "ranking_cache",
   {

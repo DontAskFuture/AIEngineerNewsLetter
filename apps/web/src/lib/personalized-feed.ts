@@ -9,6 +9,7 @@ import { rankDocumentsForInterest } from "@/lib/openrouter";
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const MAX_CANDIDATE_DOCUMENTS = 200;
 const MAX_SELECTED_DOCUMENTS = 10;
+const MAX_PER_SOURCE = 5;
 const RANKING_CACHE_TTL_HOURS = 6;
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
@@ -46,6 +47,16 @@ const defaultUserProfile = {
 
 function isDefined<T>(value: T | null): value is T {
   return value !== null;
+}
+
+function capPerSource(docs: PersonalizedFeedDocument[], maxPerSource: number): PersonalizedFeedDocument[] {
+  const sourceCounts = new Map<string, number>();
+  return docs.filter((doc) => {
+    const count = sourceCounts.get(doc.sourceSlug) ?? 0;
+    if (count >= maxPerSource) return false;
+    sourceCounts.set(doc.sourceSlug, count + 1);
+    return true;
+  });
 }
 
 export interface FeedUserProfile {
@@ -390,7 +401,7 @@ export async function getPersonalizedFeedSnapshot(
   const cutoff = getTimeWindowCutoff(timeWindow);
   const windowLabel = TIME_WINDOW_LABELS[timeWindow];
   const candidateDocuments = await getCandidateDocuments(cutoff);
-  const defaultShortlist = candidateDocuments.slice(0, MAX_SELECTED_DOCUMENTS);
+  const defaultShortlist = capPerSource(candidateDocuments, MAX_PER_SOURCE).slice(0, MAX_SELECTED_DOCUMENTS);
 
   function buildRemainingDocuments(excludeIds: Set<number>) {
     return candidateDocuments
@@ -477,12 +488,12 @@ export async function getPersonalizedFeedSnapshot(
     const scoredIds = new Set(scoredDocs.map((d) => d.id));
     const unscoredCandidates = candidateDocuments.filter((d) => !scoredIds.has(d.id));
 
-    const topDocuments = scoredDocs.slice(0, MAX_SELECTED_DOCUMENTS);
+    const topDocuments = capPerSource(scoredDocs, MAX_PER_SOURCE).slice(0, MAX_SELECTED_DOCUMENTS);
     const topIds = new Set(topDocuments.map((d) => d.id));
     const remaining = [
-      ...scoredDocs.slice(MAX_SELECTED_DOCUMENTS),
+      ...scoredDocs.filter((d) => !topIds.has(d.id)),
       ...unscoredCandidates,
-    ].filter((d) => !topIds.has(d.id));
+    ];
 
     const firstModel = scoredRows[0]?.model ?? null;
 
@@ -566,21 +577,22 @@ export async function getPersonalizedFeedSnapshot(
           whyRelevant: selection.whyRelevant,
         } satisfies PersonalizedFeedDocument;
       })
-      .filter(isDefined)
-      .slice(0, MAX_SELECTED_DOCUMENTS);
+      .filter(isDefined);
 
-    if (rankedDocuments.length === 0) {
+    const rankedCapped = capPerSource(rankedDocuments, MAX_PER_SOURCE).slice(0, MAX_SELECTED_DOCUMENTS);
+
+    if (rankedCapped.length === 0) {
       throw new Error("The ranking response did not map to any candidate documents");
     }
 
     const fromCache = cached !== null;
     const rankingSummary = rankingResult.ranking.shortlistSummary;
 
-    const rankedIds = new Set(rankedDocuments.map((d) => d.id));
+    const rankedIds = new Set(rankedCapped.map((d) => d.id));
     return {
       profiles,
       selectedProfile,
-      topDocuments: rankedDocuments,
+      topDocuments: rankedCapped,
       remainingDocuments: buildRemainingDocuments(rankedIds),
       candidateCount: candidateDocuments.length,
       rankingMode: "interest_ranked",

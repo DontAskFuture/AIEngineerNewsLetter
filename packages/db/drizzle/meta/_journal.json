@@ -43,6 +43,13 @@
       "when": 1776897158533,
       "tag": "0005_bored_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776898813239,
+      "tag": "0006_next_wendell_rand",
+      "breakpoints": true
     }
   ]
 }

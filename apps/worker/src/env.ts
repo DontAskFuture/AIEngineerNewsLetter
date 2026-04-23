@@ -14,6 +14,9 @@ const envSchema = z.object({
     .default("info"),
   RAW_STORAGE_DIR: z.string().default(resolve(currentDir, "../../../var/raw")),
   FETCH_INTERVAL_MINUTES: z.coerce.number().int().positive().default(15),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_MODEL: z.string().default("nvidia/nemotron-3-super-120b-a12b:free"),
+  APP_BASE_URL: z.string().default("http://localhost:3000"),
 });
 
 let cachedEnv: z.infer<typeof envSchema> | undefined;

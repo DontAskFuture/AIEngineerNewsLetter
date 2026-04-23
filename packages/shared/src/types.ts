@@ -36,3 +36,7 @@ export interface SeedSource {
 export interface FetchSourceEndpointPayload {
   endpointId: number;
 }
+
+export interface ScoreDocumentsPayload {
+  profileId: number;
+}

@@ -1,5 +1,5 @@
 import { getDb, schema } from "@ai-intel/db";
-import { eq, sql } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 
 export interface CrawlJobStatus {
   id: string;
@@ -112,4 +112,32 @@ export async function getCrawlJobStatuses(): Promise<{
   }));
 
   return { summary, jobs };
+}
+
+export async function triggerScoring(): Promise<{ enqueuedCount: number }> {
+  const db = getDb();
+
+  const profiles = await db
+    .select({ id: schema.userProfiles.id })
+    .from(schema.userProfiles)
+    .where(eq(schema.userProfiles.isActive, true))
+    .orderBy(asc(schema.userProfiles.id));
+
+  let enqueuedCount = 0;
+
+  for (const profile of profiles) {
+    await db.execute(
+      sql`INSERT INTO pgboss.job (name, data, state, singleton_key)
+          VALUES (
+            'score-documents',
+            ${JSON.stringify({ profileId: profile.id })}::jsonb,
+            'created',
+            ${'score-profile:' + profile.id}
+          )
+          ON CONFLICT DO NOTHING`,
+    );
+    enqueuedCount += 1;
+  }
+
+  return { enqueuedCount };
 }
