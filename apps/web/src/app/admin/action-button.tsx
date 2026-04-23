@@ -33,12 +33,12 @@ export function ActionButton({ action, label, pendingLabel, successMessage, clas
         type="button"
         onClick={handleClick}
         disabled={isPending}
-        className={`rounded-full px-5 py-3 text-sm font-medium text-white transition-opacity ${className ?? ""} ${isPending ? "opacity-60" : ""}`}
+        className={`${className ?? "button-primary"} ${isPending ? "opacity-60" : ""}`}
       >
         {isPending ? pendingLabel : label}
       </button>
       {toast && (
-        <div className="absolute left-0 top-full z-10 mt-2 w-max max-w-xs animate-[fadeIn_0.2s_ease-out] rounded-xl border border-black/6 bg-white px-4 py-3 text-sm font-medium text-[color:var(--ink)] shadow-lg">
+        <div className="surface-panel-strong absolute left-0 top-full z-10 mt-2 w-max max-w-xs animate-[fadeIn_0.2s_ease-out] rounded-xl px-4 py-3 text-sm font-medium text-[color:var(--ink)]">
           {toast}
         </div>
       )}
@@ -100,12 +100,12 @@ export function StreamingActionButton({ apiUrl, label, pendingLabel, successMess
         type="button"
         onClick={handleClick}
         disabled={isPending}
-        className={`rounded-full px-5 py-3 text-sm font-medium text-white transition-opacity ${className ?? ""} ${isPending ? "opacity-60" : ""}`}
+        className={`${className ?? "button-primary"} ${isPending ? "opacity-60" : ""}`}
       >
         {isPending ? pendingLabel : label}
       </button>
       {toast && (
-        <div className="absolute left-0 top-full z-10 mt-2 w-max max-w-xs animate-[fadeIn_0.2s_ease-out] rounded-xl border border-black/6 bg-white px-4 py-3 text-sm font-medium text-[color:var(--ink)] shadow-lg">
+        <div className="surface-panel-strong absolute left-0 top-full z-10 mt-2 w-max max-w-xs animate-[fadeIn_0.2s_ease-out] rounded-xl px-4 py-3 text-sm font-medium text-[color:var(--ink)]">
           {toast}
         </div>
       )}

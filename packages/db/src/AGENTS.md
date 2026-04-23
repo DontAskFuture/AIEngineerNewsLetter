@@ -4,7 +4,7 @@
 This file applies to `packages/db/src`.
 
 ## Architecture
-- `schema.ts` defines tables and enums including `documents`, `documentScores`, `scoringJobs`, `scoringJobStatusEnum`, `userProfiles`, and auth tables.
+- `schema.ts` defines tables and enums including `documents`, `documentScores`, `documentReads`, `scoringJobs`, `scoringJobStatusEnum`, `userProfiles`, and auth tables.
 - `client.ts` owns pool and Drizzle client creation.
 - `index.ts` is the public export surface for the package.
 

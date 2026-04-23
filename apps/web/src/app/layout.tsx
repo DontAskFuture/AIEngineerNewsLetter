@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { IBM_Plex_Sans, Space_Grotesk } from "next/font/google";
 import Link from "next/link";
+import Script from "next/script";
 import { logoutAction } from "@/app/auth-actions";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { ThemeToggle } from "./theme-toggle";
 import "./globals.css";
 
 const sans = IBM_Plex_Sans({
@@ -22,53 +25,86 @@ export const metadata: Metadata = {
   description: "Phase 0 scaffold for the AI builder market intelligence platform.",
 };
 
+const themeBootstrapScript = `
+(() => {
+  try {
+    const stored = window.localStorage.getItem("ai-intel-theme");
+    const cookieMatch = document.cookie.match(/(?:^|; )ai_intel_theme=([^;]+)/);
+    const cookieTheme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+    const resolved =
+      stored ||
+      cookieTheme ||
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const theme = resolved === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  } catch {
+    document.documentElement.dataset.theme = "light";
+    document.documentElement.style.colorScheme = "light";
+  }
+})();
+`;
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
   const currentUser = await getCurrentUser();
+  const cookieTheme = cookieStore.get("ai_intel_theme")?.value;
+  const initialTheme = cookieTheme === "dark" ? "dark" : "light";
 
   return (
-    <html lang="en">
+    <html lang="en" data-theme={initialTheme} suppressHydrationWarning>
       <body className={`${sans.variable} ${display.variable}`}>
+        <Script id="theme-bootstrap" strategy="beforeInteractive">
+          {themeBootstrapScript}
+        </Script>
         <div className="grid-fade min-h-screen">
-          <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
-            <Link href="/" className="display-font text-lg font-semibold tracking-tight">
-              AI Builder Intelligence
-            </Link>
-            <nav className="flex items-center gap-3 text-sm text-[color:var(--muted)]">
-              {currentUser ? (
-                <>
-                  <span className="hidden text-xs uppercase tracking-[0.16em] text-[color:var(--muted)] sm:inline">
-                    {currentUser.email}
-                  </span>
-                  <Link href="/feed" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
-                    Feed
-                  </Link>
-                  {isAdmin(currentUser.email) ? (
-                    <Link href="/admin" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
-                      Admin
+          <div className="mx-auto w-full max-w-7xl px-6 pt-5 sm:px-10 sm:pt-6">
+            <header className="header-shell flex flex-col gap-4 rounded-[1.75rem] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <Link href="/" className="flex flex-col gap-1">
+                <span className="display-font text-lg font-semibold tracking-tight">AI Builder Intelligence</span>
+                <span className="text-xs uppercase tracking-[0.18em] text-[color:var(--muted)]">
+                  Signal synthesis workspace
+                </span>
+              </Link>
+              <nav className="flex flex-wrap items-center gap-2 text-sm text-[color:var(--muted)]">
+                {currentUser ? (
+                  <>
+                    <span className="surface-chip hidden px-3 py-2 text-xs uppercase tracking-[0.16em] sm:inline-flex">
+                      {currentUser.email}
+                    </span>
+                    <Link href="/feed" className="button-secondary">
+                      Feed
                     </Link>
-                  ) : null}
-                  <form action={logoutAction}>
-                    <button type="submit" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
-                      Logout
-                    </button>
-                  </form>
-                </>
-              ) : (
-                <>
-                  <Link href="/login" className="rounded-full border border-black/5 bg-white/60 px-4 py-2">
-                    Login
-                  </Link>
-                  <Link href="/signup" className="rounded-full bg-[color:var(--ink)] px-4 py-2 text-white">
-                    Sign up
-                  </Link>
-                </>
-              )}
-            </nav>
-          </header>
+                    {isAdmin(currentUser.email) ? (
+                      <Link href="/admin" className="button-secondary">
+                        Admin
+                      </Link>
+                    ) : null}
+                    <ThemeToggle initialTheme={initialTheme} />
+                    <form action={logoutAction}>
+                      <button type="submit" className="button-ghost">
+                        Logout
+                      </button>
+                    </form>
+                  </>
+                ) : (
+                  <>
+                    <ThemeToggle initialTheme={initialTheme} />
+                    <Link href="/login" className="button-secondary">
+                      Login
+                    </Link>
+                    <Link href="/signup" className="button-primary">
+                      Sign up
+                    </Link>
+                  </>
+                )}
+              </nav>
+            </header>
+          </div>
           {children}
         </div>
       </body>

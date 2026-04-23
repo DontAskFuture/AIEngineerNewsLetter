@@ -3,6 +3,7 @@ import { loadWebEnv } from "@/lib/env";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+const RANKING_RETURN_COUNT = 20;
 
 export interface InterestRankingCandidate {
   id: number;
@@ -192,7 +193,8 @@ function parseRankingResponse(rawText: string) {
 const SYSTEM_PROMPT = [
   "You rank AI and software news stories against one user's stated interests.",
   "Use only each story title and first paragraph.",
-  "Select the 10 most relevant stories from the candidate list.",
+  `Return the ${RANKING_RETURN_COUNT} most relevant stories from the candidate list, ordered from most relevant to less relevant.`,
+  "The UI will apply source-family caps afterward, so provide enough strong candidates to still surface a top 10.",
   "Prefer direct matches to the user's domains, workflows, pain points, tools, companies, and product priorities.",
   "Do not invent document IDs and do not include any IDs that are not present in the input.",
   "For each selected story, write a 'whyRelevant' explanation in 2 or 3 sentences.",
@@ -218,7 +220,7 @@ export async function rankDocumentsForInterest({
     `Candidates:\n${buildCandidateList(candidates)}`,
   ].join("\n\n");
 
-  const result = await chatCompletion(SYSTEM_PROMPT, userMessage, 2000);
+  const result = await chatCompletion(SYSTEM_PROMPT, userMessage, 3500);
   const ranking = parseRankingResponse(result.content);
 
   return {

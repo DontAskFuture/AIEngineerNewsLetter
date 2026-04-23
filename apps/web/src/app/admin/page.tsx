@@ -61,7 +61,7 @@ export default async function AdminPage() {
   ];
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pb-16 pt-6 sm:px-10">
+    <main className="page-shell">
       <section className="glass-card rounded-[2rem] p-6 sm:p-8">
         <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
           Admin overview
@@ -77,14 +77,14 @@ export default async function AdminPage() {
             label="Force crawl all sources"
             pendingLabel="Crawling..."
             successMessage="Crawl triggered — new documents will be scored automatically."
-            className="bg-[color:var(--leaf)]"
+            className="button-secondary"
           />
           <ActionButton
             action={triggerScoreAllAction}
             label="Score all unscored documents"
             pendingLabel="Enqueueing..."
             successMessage="Scoring jobs enqueued — worker will process them."
-            className="bg-[color:var(--ink)]"
+            className="button-primary"
           />
         </div>
         {scoringStats && (
@@ -111,8 +111,8 @@ export default async function AdminPage() {
             Scoring status by source
           </p>
           <div className="mt-6 overflow-x-auto">
-            <div className="min-w-[700px] overflow-hidden rounded-[1.25rem] border border-black/6">
-              <div className="grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 bg-[rgba(255,255,255,0.82)] px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+            <div className="table-shell min-w-[700px]">
+              <div className="table-head grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
                 <span>Source</span>
                 <span>Total</span>
                 <span>Scored</span>
@@ -128,7 +128,7 @@ export default async function AdminPage() {
                 return (
                   <div
                     key={source.sourceId}
-                    className="grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 border-t border-black/6 bg-white/70 px-4 py-3 text-sm text-[color:var(--muted)]"
+                    className="table-row grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 px-4 py-3 text-sm text-[color:var(--muted)]"
                   >
                     <span className="font-medium text-[color:var(--ink)]">
                       {source.sourceName}
@@ -140,7 +140,7 @@ export default async function AdminPage() {
                     </span>
                     <span>{source.totalDocuments}</span>
                     <span className="text-[color:var(--leaf)]">{source.scoredDocuments}</span>
-                    <span className={source.unscoredDocuments > 0 ? "text-amber-600" : ""}>
+                    <span className={source.unscoredDocuments > 0 ? "text-[color:var(--warning)]" : ""}>
                       {source.unscoredDocuments}
                     </span>
                     <span>{source.avgScore ?? "—"}</span>
@@ -159,27 +159,27 @@ export default async function AdminPage() {
           Crawl job status (last 24h)
         </p>
         <div className="mt-6 grid gap-4 sm:grid-cols-4">
-          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+          <div className="surface-panel rounded-2xl px-4 py-4">
             <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Queued</p>
             <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.created}</p>
           </div>
-          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
-            <p className="text-xs uppercase tracking-[0.16em] text-amber-600">Active</p>
+          <div className="surface-panel rounded-2xl px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--warning)]">Active</p>
             <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.active}</p>
           </div>
-          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+          <div className="surface-panel rounded-2xl px-4 py-4">
             <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">Completed</p>
             <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.completed}</p>
           </div>
-          <div className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
-            <p className="text-xs uppercase tracking-[0.16em] text-red-700">Failed</p>
+          <div className="surface-panel rounded-2xl px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--danger)]">Failed</p>
             <p className="display-font mt-2 text-3xl font-semibold">{crawlStatus.summary.failed}</p>
           </div>
         </div>
 
         <div className="mt-6 overflow-x-auto">
-          <div className="min-w-[700px] overflow-hidden rounded-[1.25rem] border border-black/6">
-            <div className="grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 bg-[rgba(255,255,255,0.82)] px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+          <div className="table-shell min-w-[700px]">
+            <div className="table-head grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
               <span>Source</span>
               <span>State</span>
               <span>Enqueued</span>
@@ -188,7 +188,7 @@ export default async function AdminPage() {
             {crawlStatus.jobs.map((job) => (
               <div
                 key={job.id}
-                className="grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 border-t border-black/6 bg-white/70 px-4 py-3 text-sm text-[color:var(--muted)]"
+                className="table-row grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 px-4 py-3 text-sm text-[color:var(--muted)]"
               >
                 <span className="font-medium text-[color:var(--ink)]">{job.sourceName}</span>
                 <span
@@ -196,9 +196,9 @@ export default async function AdminPage() {
                     job.state === "completed"
                       ? "text-[color:var(--leaf)]"
                       : job.state === "failed"
-                        ? "text-red-700"
+                        ? "text-[color:var(--danger)]"
                         : job.state === "active"
-                          ? "text-amber-600"
+                          ? "text-[color:var(--warning)]"
                           : ""
                   }
                 >
@@ -231,7 +231,7 @@ export default async function AdminPage() {
           </p>
           <div className="mt-6 space-y-3">
             {snapshot.categoryBreakdown.map((entry) => (
-              <div key={entry.category} className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+              <div key={entry.category} className="surface-panel rounded-2xl px-4 py-4">
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
@@ -253,7 +253,7 @@ export default async function AdminPage() {
           <div className="mt-6 space-y-3">
             {snapshot.sourceRegistry.flatMap((source) =>
               source.endpoints.map((endpoint) => (
-                <div key={endpoint.id} className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+                <div key={endpoint.id} className="surface-panel rounded-2xl px-4 py-4">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <p className="display-font text-xl font-semibold tracking-tight">{source.name}</p>
@@ -279,8 +279,8 @@ export default async function AdminPage() {
           Recent fetch attempts
         </p>
         <div className="mt-6 overflow-x-auto">
-          <div className="min-w-[880px] overflow-hidden rounded-[1.25rem] border border-black/6">
-            <div className="grid grid-cols-[1.1fr_1.6fr_0.65fr_0.6fr_0.75fr_0.95fr] gap-4 bg-[rgba(255,255,255,0.82)] px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+          <div className="table-shell min-w-[880px]">
+            <div className="table-head grid grid-cols-[1.1fr_1.6fr_0.65fr_0.6fr_0.75fr_0.95fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
               <span>Source</span>
               <span>Endpoint</span>
               <span>Status</span>
@@ -291,11 +291,11 @@ export default async function AdminPage() {
             {snapshot.recentFetchAttempts.map((attempt) => (
               <div
                 key={attempt.id}
-                className="grid grid-cols-[1.1fr_1.6fr_0.65fr_0.6fr_0.75fr_0.95fr] gap-4 border-t border-black/6 bg-white/70 px-4 py-4 text-sm text-[color:var(--muted)]"
+                className="table-row grid grid-cols-[1.1fr_1.6fr_0.65fr_0.6fr_0.75fr_0.95fr] gap-4 px-4 py-4 text-sm text-[color:var(--muted)]"
               >
                 <span className="font-medium text-[color:var(--ink)]">{attempt.sourceName}</span>
                 <span className="truncate">{attempt.endpointUrl}</span>
-                <span className={attempt.status === "succeeded" ? "text-[color:var(--leaf)]" : "text-red-700"}>
+                <span className={attempt.status === "succeeded" ? "text-[color:var(--leaf)]" : "text-[color:var(--danger)]"}>
                   {attempt.status}
                 </span>
                 <span>{attempt.httpStatus ?? "n/a"}</span>

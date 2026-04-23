@@ -1,13 +1,67 @@
 @import "tailwindcss";
 
 :root {
-  --sand: #f3eee1;
+  color-scheme: light;
+  --sand: #e9e0cd;
   --cream: #fcfaf4;
+  --bg: #f6f1e7;
   --ink: #182126;
   --muted: #5f6a6f;
+  --muted-strong: #42525b;
   --leaf: #2e5b4f;
-  --card: rgba(255, 255, 255, 0.72);
+  --accent: #2e6f90;
+  --success: #1f8f6a;
+  --warning: #b77714;
+  --danger: #b85449;
+  --card: rgba(255, 255, 255, 0.74);
+  --card-strong: rgba(255, 255, 255, 0.92);
+  --panel: rgba(255, 255, 255, 0.58);
+  --panel-strong: rgba(255, 255, 255, 0.82);
+  --chip: rgba(255, 255, 255, 0.76);
   --line: rgba(24, 33, 38, 0.1);
+  --line-strong: rgba(24, 33, 38, 0.18);
+  --button-primary-bg: #182126;
+  --button-primary-ink: #f9fbfc;
+  --button-secondary-bg: rgba(255, 255, 255, 0.66);
+  --button-secondary-ink: #182126;
+  --button-secondary-border: rgba(24, 33, 38, 0.1);
+  --success-soft: rgba(31, 143, 106, 0.14);
+  --warning-soft: rgba(183, 119, 20, 0.14);
+  --danger-soft: rgba(184, 84, 73, 0.14);
+  --shadow-sm: 0 12px 28px rgba(24, 33, 38, 0.08);
+  --shadow-lg: 0 32px 96px rgba(24, 33, 38, 0.12);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --sand: #0d171d;
+  --cream: #081117;
+  --bg: #0c1419;
+  --ink: #eaf2f5;
+  --muted: #9fb0ba;
+  --muted-strong: #d5e0e5;
+  --leaf: #7bdfc2;
+  --accent: #88cfff;
+  --success: #67deb0;
+  --warning: #f1b64c;
+  --danger: #ff8d84;
+  --card: rgba(11, 22, 29, 0.72);
+  --card-strong: rgba(13, 25, 33, 0.92);
+  --panel: rgba(17, 31, 39, 0.66);
+  --panel-strong: rgba(18, 35, 45, 0.84);
+  --chip: rgba(21, 36, 45, 0.9);
+  --line: rgba(226, 241, 247, 0.12);
+  --line-strong: rgba(226, 241, 247, 0.2);
+  --button-primary-bg: #edf5f7;
+  --button-primary-ink: #091217;
+  --button-secondary-bg: rgba(17, 31, 39, 0.9);
+  --button-secondary-ink: #eaf2f5;
+  --button-secondary-border: rgba(226, 241, 247, 0.14);
+  --success-soft: rgba(103, 222, 176, 0.16);
+  --warning-soft: rgba(241, 182, 76, 0.16);
+  --danger-soft: rgba(255, 141, 132, 0.18);
+  --shadow-sm: 0 14px 32px rgba(0, 0, 0, 0.24);
+  --shadow-lg: 0 40px 120px rgba(0, 0, 0, 0.36);
 }
 
 * {
@@ -23,14 +77,17 @@ body {
   margin: 0;
   color: var(--ink);
   background:
-    radial-gradient(circle at top left, rgba(76, 126, 108, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(234, 179, 8, 0.12), transparent 24%),
-    linear-gradient(180deg, var(--cream), var(--sand));
+    radial-gradient(circle at top left, color-mix(in srgb, var(--leaf) 22%, transparent), transparent 32%),
+    radial-gradient(circle at top right, color-mix(in srgb, #f4c157 18%, transparent), transparent 26%),
+    radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 30%),
+    linear-gradient(180deg, var(--cream), var(--bg));
   font-family: var(--font-sans), sans-serif;
+  transition: background 180ms ease, color 180ms ease;
 }
 
 a {
   text-decoration: none;
+  color: inherit;
 }
 
 .display-font {
@@ -38,17 +95,215 @@ a {
 }
 
 .glass-card {
-  background: var(--card);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(155deg, var(--card-strong), var(--card));
   border: 1px solid var(--line);
-  box-shadow: 0 18px 48px rgba(40, 55, 61, 0.08);
-  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px);
+}
+
+.glass-card::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background:
+    linear-gradient(140deg, color-mix(in srgb, var(--leaf) 10%, transparent), transparent 40%),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 10%, transparent), transparent 30%);
+  opacity: 0.7;
+}
+
+.glass-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .grid-fade {
   background-image:
-    linear-gradient(rgba(24, 33, 38, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(24, 33, 38, 0.04) 1px, transparent 1px);
+    linear-gradient(color-mix(in srgb, var(--ink) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--ink) 6%, transparent) 1px, transparent 1px);
   background-size: 32px 32px;
+}
+
+.page-shell {
+  margin: 0 auto;
+  display: flex;
+  width: 100%;
+  max-width: 80rem;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem 1.5rem 4rem;
+}
+
+.header-shell {
+  border: 1px solid var(--line);
+  background: linear-gradient(160deg, var(--panel-strong), var(--panel));
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(18px);
+}
+
+.surface-panel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(16px);
+}
+
+.surface-panel-strong {
+  border: 1px solid var(--line-strong);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(16px);
+}
+
+.surface-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  background: var(--chip);
+  color: var(--muted);
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.surface-chip:hover {
+  transform: translateY(-1px);
+}
+
+.button-primary,
+.button-secondary,
+.button-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  padding: 0.8rem 1.2rem;
+  font-size: 0.925rem;
+  font-weight: 600;
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+.button-primary:hover,
+.button-secondary:hover,
+.button-ghost:hover {
+  transform: translateY(-1px);
+}
+
+.button-primary:disabled,
+.button-secondary:disabled,
+.button-ghost:disabled {
+  cursor: not-allowed;
+  transform: none;
+}
+
+.button-primary {
+  border: 1px solid transparent;
+  background: var(--button-primary-bg);
+  color: var(--button-primary-ink);
+}
+
+.button-secondary {
+  border: 1px solid var(--button-secondary-border);
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-ink);
+}
+
+.button-ghost {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.field-shell {
+  width: 100%;
+  border-radius: 1.2rem;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-strong);
+  color: var(--ink);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.field-shell::placeholder {
+  color: color-mix(in srgb, var(--muted) 85%, transparent);
+}
+
+.field-shell:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--leaf) 60%, var(--line-strong));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--leaf) 14%, transparent);
+}
+
+.alert-error {
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.table-shell {
+  overflow: hidden;
+  border-radius: 1.25rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.table-head {
+  background: color-mix(in srgb, var(--panel-strong) 88%, transparent);
+}
+
+.table-row {
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-pill--running {
+  border-color: color-mix(in srgb, var(--warning) 28%, transparent);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.status-pill--success {
+  border-color: color-mix(in srgb, var(--success) 28%, transparent);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.status-pill--danger {
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.status-pill--neutral {
+  border-color: var(--line);
+  background: var(--chip);
+  color: var(--muted);
 }
 
 @keyframes fadeIn {
@@ -56,3 +311,9 @@ a {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@media (min-width: 640px) {
+  .page-shell {
+    gap: 2rem;
+    padding: 1.25rem 2.5rem 4.5rem;
+  }
+}

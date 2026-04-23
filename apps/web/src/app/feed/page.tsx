@@ -30,7 +30,7 @@ const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string }[] = [
 ];
 
 export default async function FeedPage({ searchParams }: FeedPageProps) {
-  await requireCurrentUser();
+  const currentUser = await requireCurrentUser();
   const params = searchParams ? await searchParams : undefined;
   const selectedProfileSlug = typeof params?.profile === "string" ? params.profile : undefined;
   const rawWindow = typeof params?.window === "string" ? params.window : "week";
@@ -38,27 +38,59 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
 
   const [snapshot, personalizedFeed] = await Promise.all([
     getDashboardSnapshot(),
-    getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow),
+    getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow, currentUser.id),
   ]);
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pb-16 pt-6 sm:px-10">
+    <main className="page-shell">
       <section className="glass-card rounded-[2rem] p-6 sm:p-8">
-        <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-          Personalized live feed
-        </p>
-        <div className="mt-4 flex max-w-4xl flex-col gap-3 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-          <p>
-            Each profile below stores a plain-English interest statement. We screen the newest stories in
-            the active daily window, ask an LLM to pick the top 10 using only the title and first
-            paragraph, then order the shortlisted stories by time.
-          </p>
-          <p>
-            Current window: {personalizedFeed.windowLabel}. Screened {personalizedFeed.candidateCount} candidate
-            stories. {personalizedFeed.model ? `Model: ${personalizedFeed.model}.` : null}
-          </p>
+        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
+          <div>
+            <div className="flex flex-wrap gap-2">
+              <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+                Ranked top 10
+              </span>
+              <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+                Time-aware
+              </span>
+            </div>
+            <p className="mt-4 text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+              Personalized live feed
+            </p>
+            <div className="mt-4 flex max-w-4xl flex-col gap-3 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+              <p>
+                Each profile below stores a plain-English interest statement. We screen the newest stories in
+                the active daily window, ask an LLM to pick the top 10 using only the title and first
+                paragraph, then order the shortlisted stories by time.
+              </p>
+              <p>
+                Current window: {personalizedFeed.windowLabel}. Screened {personalizedFeed.candidateCount} candidate
+                stories. {personalizedFeed.model ? `Model: ${personalizedFeed.model}.` : null}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="surface-panel rounded-[1.3rem] p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Ranking mode</p>
+              <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+                {personalizedFeed.rankingStatusLabel}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">{personalizedFeed.rankingSummary}</p>
+            </div>
+            <div className="surface-panel rounded-[1.3rem] p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Window stats</p>
+              <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+                {personalizedFeed.candidateCount} candidates
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                Top stories keep source-family caps while still backfilling to a full 10.
+              </p>
+            </div>
+          </div>
         </div>
-        <div className="mt-5 flex flex-wrap gap-2">
+
+        <div className="mt-6 flex flex-wrap gap-2">
           {TIME_WINDOW_OPTIONS.map((option) => {
             const isActive = personalizedFeed.activeTimeWindow === option.value;
             const href = `/feed?${new URLSearchParams({
@@ -70,11 +102,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               <Link
                 key={option.value}
                 href={href}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                  isActive
-                    ? "bg-[color:var(--ink)] text-white"
-                    : "border border-black/10 bg-white/75 text-[color:var(--ink)]"
-                }`}
+                className={isActive ? "button-primary" : "button-secondary"}
               >
                 {option.label}
               </Link>
@@ -105,11 +133,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 <Link
                   key={profile.id}
                   href={`/feed?${new URLSearchParams({ profile: profile.slug, window: timeWindow }).toString()}`}
-                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                    isSelected
-                      ? "bg-[color:var(--ink)] text-white"
-                      : "border border-black/10 bg-white/75 text-[color:var(--ink)]"
-                  }`}
+                  className={isSelected ? "button-primary" : "button-secondary"}
                 >
                   {profile.displayName}
                 </Link>
@@ -127,7 +151,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 id="displayName"
                 name="displayName"
                 defaultValue={personalizedFeed.selectedProfile.displayName}
-                className="rounded-2xl border border-black/10 bg-white/85 px-4 py-3 text-sm text-[color:var(--ink)] outline-none"
+                className="field-shell px-4 py-3 text-sm"
               />
             </div>
 
@@ -140,7 +164,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 name="interestStatement"
                 defaultValue={personalizedFeed.selectedProfile.interestStatement}
                 rows={7}
-                className="rounded-[1.5rem] border border-black/10 bg-white/85 px-4 py-3 text-sm leading-7 text-[color:var(--ink)] outline-none"
+                className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
               />
             </div>
 
@@ -150,7 +174,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               </p>
               <button
                 type="submit"
-                className="rounded-full bg-[color:var(--ink)] px-5 py-3 text-sm font-medium text-white"
+                className="button-primary"
               >
                 Save interest
               </button>
@@ -163,7 +187,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             Ranking status
           </p>
           <div className="mt-6 space-y-4">
-            <div className="rounded-2xl border border-black/6 bg-white/75 p-4">
+            <div className="surface-panel rounded-2xl p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
                 Current mode
               </p>
@@ -175,7 +199,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               </p>
             </div>
 
-            <div className="rounded-2xl border border-black/6 bg-white/75 p-4">
+            <div className="surface-panel rounded-2xl p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
                 Create another profile
               </p>
@@ -183,17 +207,17 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 <input
                   name="displayName"
                   placeholder="Example: Infra scout"
-                  className="rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm text-[color:var(--ink)] outline-none"
+                  className="field-shell px-4 py-3 text-sm"
                 />
                 <textarea
                   name="interestStatement"
                   rows={4}
                   placeholder="Example: Watch inference serving, GPU utilization, model routing, and pricing or latency shifts that create infra bottlenecks."
-                  className="rounded-[1.5rem] border border-black/10 bg-white px-4 py-3 text-sm leading-7 text-[color:var(--ink)] outline-none"
+                  className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
                 />
                 <button
                   type="submit"
-                  className="w-fit rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-medium text-[color:var(--ink)]"
+                  className="button-secondary w-fit"
                 >
                   Add profile
                 </button>
@@ -203,58 +227,84 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         </article>
       </section>
 
-      <section className="grid gap-4">
-        {personalizedFeed.topDocuments.map((document) => (
-          <article key={document.id} className="glass-card rounded-[1.5rem] p-5 sm:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="max-w-4xl">
-                <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                    {document.sourceName}
+      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+              Top stories
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+              The LLM shortlist is capped for source diversity, then reordered by time so you can review the
+              most recent high-signal items first.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+            <span className="surface-chip px-3 py-2">10 stories</span>
+            <span className="surface-chip px-3 py-2">max 5 per source family</span>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4">
+          {personalizedFeed.topDocuments.map((document) => (
+            <article
+              key={document.id}
+              className={`surface-panel rounded-[1.5rem] p-5 transition sm:p-6 ${document.isRead ? "opacity-80" : ""}`}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="max-w-4xl">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                      {document.sourceName}
+                    </p>
+                    {document.isRead ? (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
+                        Read{document.readAt ? ` ${formatRelativeTime(document.readAt)}` : ""}
+                      </span>
+                    ) : null}
+                    {document.llmRank ? (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
+                        LLM rank #{document.llmRank}
+                      </span>
+                    ) : null}
+                    {document.matchScore ? (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
+                        Match {formatPercent(document.matchScore)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <a
+                    href={`/out/${document.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="display-font mt-2 block text-2xl font-semibold tracking-tight"
+                  >
+                    {document.title}
+                  </a>
+                  <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
+                    {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
-                  {document.llmRank ? (
-                    <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-                      LLM rank #{document.llmRank}
-                    </span>
-                  ) : null}
-                  {document.matchScore ? (
-                    <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-                      Match {formatPercent(document.matchScore)}
-                    </span>
+                  {document.whyRelevant ? (
+                    <div className="surface-panel-strong mt-4 rounded-[1.25rem] p-4">
+                      <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        Why Relevant To You
+                      </p>
+                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
+                        {document.whyRelevant}
+                      </p>
+                    </div>
                   ) : null}
                 </div>
-                <a
-                  href={document.canonicalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="display-font mt-2 block text-2xl font-semibold tracking-tight"
-                >
-                  {document.title}
-                </a>
-                <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
-                  {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
-                </p>
-                {document.whyRelevant ? (
-                  <div className="mt-4 rounded-[1.25rem] border border-black/8 bg-white/65 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                      Why Relevant To You
-                    </p>
-                    <p className="mt-2 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
-                      {document.whyRelevant}
-                    </p>
-                  </div>
-                ) : null}
+                <div className="flex flex-col gap-2 text-left sm:text-right">
+                  <span className="surface-chip w-fit px-3 py-1 text-xs uppercase tracking-[0.18em] sm:ml-auto">
+                    {formatCategoryLabel(document.category)}
+                  </span>
+                  <span className="text-sm text-[color:var(--muted)]">{formatRelativeTime(document.sortTime)}</span>
+                  <span className="text-xs text-[color:var(--muted)]">{formatDateTime(document.sortTime)}</span>
+                </div>
               </div>
-              <div className="flex flex-col gap-2 text-left sm:text-right">
-                <span className="w-fit rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)] sm:ml-auto">
-                  {formatCategoryLabel(document.category)}
-                </span>
-                <span className="text-sm text-[color:var(--muted)]">{formatRelativeTime(document.sortTime)}</span>
-                <span className="text-xs text-[color:var(--muted)]">{formatDateTime(document.sortTime)}</span>
-              </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          ))}
+        </div>
       </section>
 
       {personalizedFeed.remainingDocuments.length > 0 && (
@@ -268,6 +318,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             sortTime: (doc.sortTime instanceof Date ? doc.sortTime : new Date(doc.sortTime)).toISOString(),
             previewParagraph: doc.previewParagraph,
             matchScore: doc.matchScore,
+            whyRelevant: doc.whyRelevant,
+            isRead: doc.isRead,
+            readAt: doc.readAt ? doc.readAt.toISOString() : null,
           }))}
         />
       )}
@@ -293,12 +346,12 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
 
           <div className="mt-6 grid gap-4">
             {snapshot.sourceRegistry.map((source) => (
-              <article key={source.id} className="rounded-[1.5rem] border border-black/6 bg-white/70 p-5 sm:p-6">
+              <article key={source.id} className="surface-panel rounded-[1.5rem] p-5 sm:p-6">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="display-font text-2xl font-semibold tracking-tight">{source.name}</h2>
-                      <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.18em]">
                         {formatCategoryLabel(source.category)}
                       </span>
                     </div>
@@ -315,7 +368,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
 
                 <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {source.endpoints.map((endpoint) => (
-                    <div key={endpoint.id} className="rounded-2xl border border-black/6 bg-white/80 p-4">
+                    <div key={endpoint.id} className="surface-panel-strong rounded-2xl p-4">
                       <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
                         {endpoint.kind}
                       </p>

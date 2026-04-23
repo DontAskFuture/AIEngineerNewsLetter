@@ -23,10 +23,18 @@ export default async function HomePage() {
   const snapshot = await getDashboardSnapshot();
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-6 pb-16 pt-6 sm:px-10">
+    <main className="page-shell">
       <section className="glass-card overflow-hidden rounded-[2rem]">
-        <div className="grid gap-8 px-6 py-8 sm:px-10 lg:grid-cols-[1.4fr_0.8fr] lg:px-12 lg:py-12">
+        <div className="grid gap-8 px-6 py-8 sm:px-10 lg:grid-cols-[1.35fr_0.85fr] lg:px-12 lg:py-12">
           <div className="space-y-6">
+            <div className="flex flex-wrap gap-2">
+              <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+                Live Postgres data
+              </span>
+              <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+                Operator workspace
+              </span>
+            </div>
             <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
               Phase 0 foundation
             </p>
@@ -40,22 +48,45 @@ export default async function HomePage() {
                 instead of the static seed registry.
               </p>
             </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="surface-panel rounded-[1.35rem] p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Freshness</p>
+                <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+                  {formatRelativeTime(snapshot.overview.latestDocumentAt)}
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                  Latest story arrival across all tracked endpoints.
+                </p>
+              </div>
+              <div className="surface-panel rounded-[1.35rem] p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Coverage</p>
+                <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+                  {snapshot.overview.sourceCount} sources
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                  Curated across labs, infra, community, research, and docs.
+                </p>
+              </div>
+              <div className="surface-panel rounded-[1.35rem] p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Reliability</p>
+                <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+                  {snapshot.overview.fetchRunCount} runs
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                  Fetch history is auditable and tied back to raw captured content.
+                </p>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-3">
-              <Link
-                href="/feed"
-                className="rounded-full bg-[color:var(--ink)] px-5 py-3 text-sm font-medium text-white"
-              >
-                Inspect the source registry
+              <Link href="/feed" className="button-primary">
+                Open personalized feed
               </Link>
-              <Link
-                href="/admin"
-                className="rounded-full border border-black/10 px-5 py-3 text-sm font-medium"
-              >
-                View phase checklist
+              <Link href="/admin" className="button-secondary">
+                Review pipeline health
               </Link>
             </div>
           </div>
-          <div className="rounded-[1.5rem] border border-black/8 bg-[rgba(255,255,255,0.82)] p-6">
+          <div className="surface-panel-strong rounded-[1.6rem] p-6">
             <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
               Live shape
             </p>
@@ -90,7 +121,7 @@ export default async function HomePage() {
           </p>
           <ul className="mt-6 space-y-3 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
             {launchChecklist.map((item) => (
-              <li key={item} className="rounded-2xl border border-black/6 bg-white/70 px-4 py-3">
+              <li key={item} className="surface-panel rounded-2xl px-4 py-3">
                 {item}
               </li>
             ))}
@@ -103,7 +134,7 @@ export default async function HomePage() {
           </p>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             {snapshot.categoryBreakdown.map((entry) => (
-              <div key={entry.category} className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+              <div key={entry.category} className="surface-panel rounded-2xl px-4 py-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
                   {formatCategoryLabel(entry.category)}
                 </p>
@@ -124,14 +155,14 @@ export default async function HomePage() {
           </p>
           <div className="mt-6 space-y-4">
             {snapshot.latestDocuments.slice(0, 6).map((document) => (
-              <article key={document.id} className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+              <article key={document.id} className="surface-panel rounded-2xl px-4 py-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
                       {document.sourceName}
                     </p>
                     <a
-                      href={document.canonicalUrl}
+                      href={`/out/${document.id}`}
                       target="_blank"
                       rel="noreferrer"
                       className="display-font mt-2 block text-xl font-semibold tracking-tight"
@@ -155,7 +186,7 @@ export default async function HomePage() {
           </p>
           <div className="mt-6 space-y-4">
             {snapshot.topSources.map((source) => (
-              <article key={source.id} className="rounded-2xl border border-black/6 bg-white/70 px-4 py-4">
+              <article key={source.id} className="surface-panel rounded-2xl px-4 py-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="display-font text-xl font-semibold tracking-tight">{source.name}</h2>

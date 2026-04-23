@@ -17,6 +17,9 @@ interface MoreStoriesDocument {
   sortTime: string;
   previewParagraph: string;
   matchScore: number | null;
+  whyRelevant: string | null;
+  isRead: boolean;
+  readAt: string | null;
 }
 
 interface MoreStoriesProps {
@@ -33,33 +36,41 @@ export function MoreStories({ documents }: MoreStoriesProps) {
   const hasMore = visibleCount < documents.length;
 
   return (
-    <section>
+    <section className="glass-card rounded-[2rem] p-6 sm:p-8">
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className="mb-4 flex items-center gap-3"
+        className="flex w-full items-center justify-between gap-4 text-left"
       >
-        <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-          More stories
-        </p>
-        <span className="text-sm text-[color:var(--muted)]">
-          ({documents.length})
+        <div>
+          <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+            More stories
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[color:var(--muted)]">
+            Secondary ranked results and fallback signals that still match your current time window.
+          </p>
+        </div>
+        <span className="surface-chip px-3 py-2 text-xs uppercase tracking-[0.16em]">
+          {documents.length} items
+          <svg
+            className={`h-4 w-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
         </span>
-        <svg
-          className={`h-4 w-4 text-[color:var(--muted)] transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
       </button>
 
       {isOpen && (
-        <div className="grid gap-3">
+        <div className="mt-6 grid gap-3">
           {visibleDocs.map((document) => (
-            <article key={document.id} className="glass-card rounded-[1.25rem] px-5 py-4 sm:px-6">
+            <article
+              key={document.id}
+              className={`surface-panel rounded-[1.25rem] px-5 py-4 transition sm:px-6 ${document.isRead ? "opacity-80" : ""}`}
+            >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-4xl">
                   <div className="flex flex-wrap items-center gap-3">
@@ -69,14 +80,19 @@ export function MoreStories({ documents }: MoreStoriesProps) {
                     <span className="text-xs text-[color:var(--muted)]">
                       {formatRelativeTime(document.sortTime)}
                     </span>
+                    {document.isRead && (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
+                        Read{document.readAt ? ` ${formatRelativeTime(document.readAt)}` : ""}
+                      </span>
+                    )}
                     {document.matchScore != null && (
-                      <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
                         Match {formatPercent(document.matchScore)}
                       </span>
                     )}
                   </div>
                   <a
-                    href={document.canonicalUrl}
+                    href={`/out/${document.id}`}
                     target="_blank"
                     rel="noreferrer"
                     className="display-font mt-1 block text-lg font-semibold tracking-tight"
@@ -86,8 +102,18 @@ export function MoreStories({ documents }: MoreStoriesProps) {
                   <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
+                  {document.whyRelevant ? (
+                    <div className="surface-panel-strong mt-3 rounded-[1rem] p-4">
+                      <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        Why Relevant To You
+                      </p>
+                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)]">
+                        {document.whyRelevant}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
-                <span className="w-fit rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)] sm:ml-auto">
+                <span className="surface-chip w-fit px-3 py-1 text-xs uppercase tracking-[0.18em] sm:ml-auto">
                   {formatCategoryLabel(document.category)}
                 </span>
               </div>
@@ -98,7 +124,7 @@ export function MoreStories({ documents }: MoreStoriesProps) {
             <button
               type="button"
               onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
-              className="rounded-full border border-black/10 bg-white/60 px-5 py-3 text-center text-sm font-medium text-[color:var(--ink)]"
+              className="button-secondary"
             >
               Load {Math.min(PAGE_SIZE, documents.length - visibleCount)} more
             </button>

@@ -17,3 +17,6 @@ This file applies to `apps/web/src/lib`.
 - External APIs should be wrapped in focused modules with stable return shapes.
 - Formatting helpers should stay display-oriented and avoid business decisions.
 - Long-running work (actual scoring, crawling) must not run here; only enqueue jobs for the worker.
+- Feed ranking caps should apply to source families by canonical domain when multiple feeds belong to the same publisher, such as arXiv subfeeds.
+- The feed should still render a full top 10 after source-family caps by backfilling from additional ranked or fallback candidates.
+- Read tracking logic belongs here and should stay reusable across feed rendering and outbound redirect handlers.

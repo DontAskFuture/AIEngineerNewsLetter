@@ -84,6 +84,23 @@ export const authSessions = pgTable(
   (table) => [uniqueIndex("auth_sessions_token_hash_idx").on(table.sessionTokenHash)],
 );
 
+export const documentReads = pgTable(
+  "document_reads",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    documentId: bigint("document_id", { mode: "number" })
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("document_reads_user_document_idx").on(table.userId, table.documentId)],
+);
+
 export const sources = pgTable(
   "sources",
   {

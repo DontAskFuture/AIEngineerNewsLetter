@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import type { ScoringJobState } from "@/lib/scoring-tracker";
 
 interface ScoringStatusResponse {
@@ -12,10 +12,10 @@ const POLL_INTERVAL_MS = 2000;
 
 function StatusBadge({ status }: { status: ScoringJobState["status"] }) {
   const styles = {
-    running: "bg-amber-100 text-amber-700",
-    completed: "bg-emerald-100 text-emerald-700",
-    failed: "bg-red-100 text-red-700",
-    idle: "bg-gray-100 text-gray-500",
+    running: "status-pill status-pill--running",
+    completed: "status-pill status-pill--success",
+    failed: "status-pill status-pill--danger",
+    idle: "status-pill status-pill--neutral",
   };
   const labels = {
     running: "Running",
@@ -25,7 +25,7 @@ function StatusBadge({ status }: { status: ScoringJobState["status"] }) {
   };
 
   return (
-    <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${styles[status]}`}>
+    <span className={styles[status]}>
       {labels[status]}
     </span>
   );
@@ -51,22 +51,30 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
 export function ScoringProgress() {
   const [data, setData] = useState<ScoringStatusResponse | null>(null);
 
-  const poll = useCallback(async () => {
-    try {
-      const res = await fetch("/api/scoring-status");
-      if (res.ok) {
-        setData((await res.json()) as ScoringStatusResponse);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
   useEffect(() => {
-    poll();
-    const interval = setInterval(poll, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [poll]);
+    let isActive = true;
+
+    async function pollStatus() {
+      try {
+        const res = await fetch("/api/scoring-status");
+        if (res.ok && isActive) {
+          setData((await res.json()) as ScoringStatusResponse);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    void pollStatus();
+    const interval = setInterval(() => {
+      void pollStatus();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   if (!data) return null;
 
@@ -83,21 +91,21 @@ export function ScoringProgress() {
   return (
     <div className="space-y-4">
       {isRunning && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5">
+        <div className="surface-panel rounded-2xl p-5">
           <div className="flex items-center gap-3">
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-amber-700">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--warning)]">
               Scoring in progress
             </p>
             <StatusBadge status="running" />
           </div>
           <div className="mt-3">
-            <div className="h-2.5 w-full overflow-hidden rounded-full bg-amber-200/40">
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-[color:var(--warning-soft)]">
               <div
-                className="h-full rounded-full bg-amber-500 transition-all duration-500"
+                className="h-full rounded-full bg-[color:var(--warning)] transition-all duration-500"
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <div className="mt-2 flex flex-wrap gap-5 text-sm text-amber-800">
+            <div className="mt-2 flex flex-wrap gap-5 text-sm text-[color:var(--warning)]">
               <span>Batch {current.currentBatch}/{current.totalBatches}</span>
               <span>{pct}%</span>
               <span>Scored: <strong>{current.scoredDocuments}</strong>/{current.totalDocuments}</span>
@@ -112,8 +120,8 @@ export function ScoringProgress() {
 
       {hasHistory && (
         <div className="overflow-x-auto">
-          <div className="min-w-[700px] overflow-hidden rounded-[1.25rem] border border-black/6">
-            <div className="grid grid-cols-[0.5fr_0.6fr_0.6fr_0.5fr_0.6fr_0.6fr] gap-4 bg-[rgba(255,255,255,0.82)] px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+          <div className="table-shell min-w-[700px]">
+            <div className="table-head grid grid-cols-[0.5fr_0.6fr_0.6fr_0.5fr_0.6fr_0.6fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
               <span>Status</span>
               <span>Progress</span>
               <span>Scored / Total</span>
@@ -129,7 +137,7 @@ export function ScoringProgress() {
               return (
                 <div
                   key={`${job.startedAt}-${index}`}
-                  className="grid grid-cols-[0.5fr_0.6fr_0.6fr_0.5fr_0.6fr_0.6fr] gap-4 border-t border-black/6 bg-white/70 px-4 py-3 text-sm text-[color:var(--muted)]"
+                  className="table-row grid grid-cols-[0.5fr_0.6fr_0.6fr_0.5fr_0.6fr_0.6fr] gap-4 px-4 py-3 text-sm text-[color:var(--muted)]"
                 >
                   <span><StatusBadge status={job.status} /></span>
                   <span>
@@ -139,7 +147,7 @@ export function ScoringProgress() {
                   <span>
                     <strong className="text-[color:var(--leaf)]">{job.scoredDocuments}</strong> / {job.totalDocuments}
                   </span>
-                  <span className={job.failedDocuments > 0 ? "text-red-600" : ""}>
+                  <span className={job.failedDocuments > 0 ? "text-[color:var(--danger)]" : ""}>
                     {job.failedDocuments}
                   </span>
                   <span>{formatTime(job.startedAt)}</span>

@@ -11,4 +11,4 @@ This file applies to `apps/web/src/app/login`.
 - Keep login presentation here.
 - Authentication rules, hashing, sessions, and allowlist behavior belong in `../../lib/auth`.
 - Do not add database logic directly to the page.
-
+- The auth shell should stay theme-aware and keep the access policy explanation legible in both light and dark mode.

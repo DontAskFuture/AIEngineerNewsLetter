@@ -34,12 +34,17 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const errorMessage = errorCode ? errorMessages[errorCode] ?? errorMessages.unknown : null;
 
   return (
-    <main className="mx-auto flex min-h-[calc(100vh-7rem)] w-full max-w-7xl items-center px-6 pb-16 pt-6 sm:px-10">
+    <main className="page-shell min-h-[calc(100vh-8rem)] justify-center">
       <section className="glass-card mx-auto grid w-full max-w-5xl gap-8 overflow-hidden rounded-[2rem] lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="border-b border-black/6 px-6 py-8 sm:px-10 lg:border-b-0 lg:border-r">
-          <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-            Private access
-          </p>
+        <div className="border-b border-[color:var(--line)] px-6 py-8 sm:px-10 lg:border-b-0 lg:border-r">
+          <div className="flex flex-wrap gap-2">
+            <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+              Private access
+            </span>
+            <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+              Allowlist active
+            </span>
+          </div>
           <h1 className="display-font mt-4 max-w-xl text-4xl font-semibold tracking-tight sm:text-5xl">
             Sign in to the AI builder intelligence workspace.
           </h1>
@@ -53,6 +58,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               The first approved login will create the account in Postgres. Passwords are stored as salted
               hashes rather than plain text.
             </p>
+          </div>
+          <div className="mt-8 grid gap-3">
+            <div className="surface-panel rounded-[1.25rem] p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">What you get</p>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                Personalized top stories, source tracking, read-state persistence, and live pipeline health.
+              </p>
+            </div>
+            <div className="surface-panel rounded-[1.25rem] p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">Security</p>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                Credentials are stored as salted password hashes with a server-managed session cookie.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -72,7 +91,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 type="email"
                 autoComplete="email"
                 defaultValue={email}
-                className="rounded-2xl border border-black/10 bg-white/85 px-4 py-3 text-sm text-[color:var(--ink)] outline-none"
+                className="field-shell px-4 py-3 text-sm"
               />
             </div>
 
@@ -85,20 +104,17 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 name="password"
                 type="password"
                 autoComplete="current-password"
-                className="rounded-2xl border border-black/10 bg-white/85 px-4 py-3 text-sm text-[color:var(--ink)] outline-none"
+                className="field-shell px-4 py-3 text-sm"
               />
             </div>
 
             {errorMessage ? (
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <div className="alert-error rounded-2xl px-4 py-3 text-sm">
                 {errorMessage}
               </div>
             ) : null}
 
-            <button
-              type="submit"
-              className="mt-2 rounded-full bg-[color:var(--ink)] px-5 py-3 text-sm font-medium text-white"
-            >
+            <button type="submit" className="button-primary mt-2">
               Sign in
             </button>
           </form>
