@@ -3,20 +3,26 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/lib/auth";
-import { createUserProfile, updateUserProfile } from "@/lib/personalized-feed";
+import { createUserProfile, DuplicateProfileNameError, updateUserProfile } from "@/lib/personalized-feed";
 
 function getTextField(formData: FormData, fieldName: string) {
   const value = formData.get(fieldName);
   return typeof value === "string" ? value : "";
 }
 
-function buildFeedRedirect(slug: string, timeWindow: string) {
-  const params = new URLSearchParams({
-    profile: slug,
-  });
+function buildFeedRedirect(slug: string | null | undefined, timeWindow: string, error?: string) {
+  const params = new URLSearchParams();
+
+  if (slug) {
+    params.set("profile", slug);
+  }
 
   if (timeWindow) {
     params.set("window", timeWindow);
+  }
+
+  if (error) {
+    params.set("error", error);
   }
 
   return `/feed?${params.toString()}`;
@@ -24,13 +30,24 @@ function buildFeedRedirect(slug: string, timeWindow: string) {
 
 export async function createUserProfileAction(formData: FormData) {
   const currentUser = await requireCurrentUser();
-
-  const profile = await createUserProfile({
-    userId: currentUser.id,
-    displayName: getTextField(formData, "displayName"),
-    interestStatement: getTextField(formData, "interestStatement"),
-  });
   const timeWindow = getTextField(formData, "timeWindow");
+
+  let profile;
+
+  try {
+    profile = await createUserProfile({
+      userId: currentUser.id,
+      displayName: getTextField(formData, "displayName"),
+      interestStatement: getTextField(formData, "interestStatement"),
+    });
+  } catch (error) {
+    if (error instanceof DuplicateProfileNameError) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(error.profileSlug, timeWindow, "duplicate_profile_name"));
+    }
+
+    throw error;
+  }
 
   revalidatePath("/feed");
   redirect(buildFeedRedirect(profile.slug, timeWindow));
@@ -41,19 +58,30 @@ export async function updateUserProfileAction(formData: FormData) {
 
   const rawProfileId = getTextField(formData, "profileId");
   const profileId = Number(rawProfileId);
+  const timeWindow = getTextField(formData, "timeWindow");
 
   if (!Number.isInteger(profileId)) {
     revalidatePath("/feed");
     redirect("/feed");
   }
 
-  const profile = await updateUserProfile({
-    userId: currentUser.id,
-    profileId,
-    displayName: getTextField(formData, "displayName"),
-    interestStatement: getTextField(formData, "interestStatement"),
-  });
-  const timeWindow = getTextField(formData, "timeWindow");
+  let profile;
+
+  try {
+    profile = await updateUserProfile({
+      userId: currentUser.id,
+      profileId,
+      displayName: getTextField(formData, "displayName"),
+      interestStatement: getTextField(formData, "interestStatement"),
+    });
+  } catch (error) {
+    if (error instanceof DuplicateProfileNameError) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(error.profileSlug, timeWindow, "duplicate_profile_name"));
+    }
+
+    throw error;
+  }
 
   revalidatePath("/feed");
   redirect(buildFeedRedirect(profile.slug, timeWindow));

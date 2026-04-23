@@ -11,11 +11,13 @@ import {
 import { getPersonalizedFeedSnapshot, isValidTimeWindow, type TimeWindow } from "@/lib/personalized-feed";
 import { createUserProfileAction, updateUserProfileAction } from "./actions";
 import { MoreStories } from "./more-stories";
+import { ProfileSelector } from "./profile-selector";
 
 export const dynamic = "force-dynamic";
 
 interface FeedPageProps {
   searchParams?: Promise<{
+    error?: string;
     profile?: string;
     window?: string;
   }>;
@@ -33,8 +35,13 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
   const currentUser = await requireCurrentUser();
   const params = searchParams ? await searchParams : undefined;
   const selectedProfileSlug = typeof params?.profile === "string" ? params.profile : undefined;
+  const errorCode = typeof params?.error === "string" ? params.error : undefined;
   const rawWindow = typeof params?.window === "string" ? params.window : "week";
   const timeWindow: TimeWindow = isValidTimeWindow(rawWindow) ? rawWindow : "week";
+  const profileError =
+    errorCode === "duplicate_profile_name"
+      ? "That profile name is already used on your account. Choose a unique name for each profile."
+      : null;
 
   const [snapshot, personalizedFeed] = await Promise.all([
     getDashboardSnapshot(),
@@ -75,7 +82,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           {TIME_WINDOW_OPTIONS.map((option) => {
             const isActive = personalizedFeed.activeTimeWindow === option.value;
             const href = `/feed?${new URLSearchParams({
-              ...(selectedProfileSlug ? { profile: selectedProfileSlug } : {}),
+              profile: personalizedFeed.selectedProfile.slug,
               window: option.value,
             }).toString()}`;
 
@@ -106,23 +113,27 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             <p className="text-sm text-[color:var(--muted)]">{personalizedFeed.profiles.length} saved profiles</p>
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            {orderedProfiles.map((profile) => {
-              const isSelected = profile.slug === personalizedFeed.selectedProfile.slug;
+          <ProfileSelector
+            profiles={orderedProfiles.map((profile) => ({
+              id: profile.id,
+              slug: profile.slug,
+              displayName: profile.displayName,
+            }))}
+            selectedSlug={personalizedFeed.selectedProfile.slug}
+            timeWindow={timeWindow}
+          />
 
-              return (
-                <Link
-                  key={profile.id}
-                  href={`/feed?${new URLSearchParams({ profile: profile.slug, window: timeWindow }).toString()}`}
-                  className={isSelected ? "button-primary" : "button-secondary"}
-                >
-                  {profile.displayName}
-                </Link>
-              );
-            })}
-          </div>
+          {profileError ? (
+            <div className="alert-error mt-5 rounded-[1.25rem] px-4 py-3 text-sm leading-6" role="alert">
+              {profileError}
+            </div>
+          ) : null}
 
-          <form action={updateUserProfileAction} className="mt-6 grid gap-4">
+          <form
+            key={personalizedFeed.selectedProfile.id}
+            action={updateUserProfileAction}
+            className="mt-6 grid gap-4"
+          >
             <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
             <input type="hidden" name="timeWindow" value={timeWindow} />
             <div className="grid gap-2">
@@ -195,7 +206,10 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         </article>
       </section>
 
-      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+      <section
+        key={`top-stories-${personalizedFeed.selectedProfile.id}`}
+        className="glass-card rounded-[2rem] p-6 sm:p-8"
+      >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
@@ -209,6 +223,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
             <span className="surface-chip px-3 py-2">10 stories</span>
             <span className="surface-chip px-3 py-2">max 5 per source family</span>
+            <span className="surface-chip px-3 py-2">{personalizedFeed.selectedProfile.displayName}</span>
           </div>
         </div>
 
@@ -277,6 +292,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
 
       {personalizedFeed.remainingDocuments.length > 0 && (
         <MoreStories
+          key={`more-stories-${personalizedFeed.selectedProfile.id}`}
           documents={personalizedFeed.remainingDocuments.map((doc) => ({
             id: doc.id,
             title: doc.title,

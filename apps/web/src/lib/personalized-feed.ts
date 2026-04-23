@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SourceCategory } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
 import type { InterestRankingResponse } from "@/lib/openrouter";
 import { rankDocumentsForInterest } from "@/lib/openrouter";
@@ -46,6 +46,18 @@ const defaultUserProfile = {
   interestStatement:
     "I care about AI coding tools, agent tooling, inference infrastructure, model serving, pricing changes, and stories that reveal product wedges or operational bottlenecks.",
 };
+
+const PROFILE_NAME_UNIQUE_INDEX = "user_profiles_user_display_name_idx";
+
+export class DuplicateProfileNameError extends Error {
+  profileSlug: string | null;
+
+  constructor(displayName: string, profileSlug?: string | null) {
+    super(`A profile named "${displayName}" already exists for this user.`);
+    this.name = "DuplicateProfileNameError";
+    this.profileSlug = profileSlug ?? null;
+  }
+}
 
 function isDefined<T>(value: T | null): value is T {
   return value !== null;
@@ -160,6 +172,14 @@ function slugifyDisplayName(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function normalizeProfileDisplayName(value: string, fallback: string) {
+  return value.trim().replace(/\s+/g, " ") || fallback;
+}
+
+function normalizedProfileNameSql(value: string) {
+  return value.trim().toLowerCase();
 }
 
 function stripHtml(value: string) {
@@ -316,6 +336,51 @@ async function getUniqueProfileSlug(userId: number, baseSlug: string) {
   return candidate;
 }
 
+async function findProfileByDisplayName(userId: number, displayName: string, excludeProfileId?: number) {
+  const db = getDb();
+  const filters = [
+    eq(schema.userProfiles.userId, userId),
+    sql`lower(btrim(${schema.userProfiles.displayName})) = ${normalizedProfileNameSql(displayName)}`,
+  ];
+
+  if (excludeProfileId) {
+    filters.push(ne(schema.userProfiles.id, excludeProfileId));
+  }
+
+  const [profile] = await db
+    .select({
+      id: schema.userProfiles.id,
+      slug: schema.userProfiles.slug,
+    })
+    .from(schema.userProfiles)
+    .where(and(...filters))
+    .limit(1);
+
+  return profile ?? null;
+}
+
+function isProfileNameUniqueViolation(error: unknown) {
+  const candidates: unknown[] = [error];
+  const cause = error && typeof error === "object" && "cause" in error ? (error as { cause?: unknown }).cause : null;
+
+  if (cause) {
+    candidates.push(cause);
+  }
+
+  return candidates.some((candidate) => {
+    if (!candidate || typeof candidate !== "object") {
+      return false;
+    }
+
+    const errorLike = candidate as { code?: string; constraint?: string; detail?: string };
+    return (
+      errorLike.code === "23505" &&
+      (errorLike.constraint === PROFILE_NAME_UNIQUE_INDEX ||
+        Boolean(errorLike.detail?.includes(PROFILE_NAME_UNIQUE_INDEX)))
+    );
+  });
+}
+
 export async function createUserProfile({
   userId,
   displayName,
@@ -328,24 +393,48 @@ export async function createUserProfile({
   await ensureDefaultUserProfile(userId);
 
   const db = getDb();
-  const normalizedDisplayName = displayName.trim() || "New analyst";
+  const normalizedDisplayName = normalizeProfileDisplayName(displayName, "New analyst");
+  const duplicateProfile = await findProfileByDisplayName(userId, normalizedDisplayName);
+
+  if (duplicateProfile) {
+    throw new DuplicateProfileNameError(normalizedDisplayName, duplicateProfile.slug);
+  }
+
   const slug = await getUniqueProfileSlug(userId, slugifyDisplayName(normalizedDisplayName));
 
-  const [createdProfile] = await db
-    .insert(schema.userProfiles)
-    .values({
-      userId,
-      slug,
-      displayName: normalizedDisplayName,
-      interestStatement: interestStatement.trim(),
-    })
-    .returning({
-      id: schema.userProfiles.id,
-      slug: schema.userProfiles.slug,
-      displayName: schema.userProfiles.displayName,
-      interestStatement: schema.userProfiles.interestStatement,
-      updatedAt: schema.userProfiles.updatedAt,
-    });
+  let createdProfile:
+    | {
+        id: number;
+        slug: string;
+        displayName: string;
+        interestStatement: string;
+        updatedAt: Date;
+      }
+    | undefined;
+
+  try {
+    [createdProfile] = await db
+      .insert(schema.userProfiles)
+      .values({
+        userId,
+        slug,
+        displayName: normalizedDisplayName,
+        interestStatement: interestStatement.trim(),
+      })
+      .returning({
+        id: schema.userProfiles.id,
+        slug: schema.userProfiles.slug,
+        displayName: schema.userProfiles.displayName,
+        interestStatement: schema.userProfiles.interestStatement,
+        updatedAt: schema.userProfiles.updatedAt,
+      });
+  } catch (error) {
+    if (isProfileNameUniqueViolation(error)) {
+      throw new DuplicateProfileNameError(normalizedDisplayName);
+    }
+
+    throw error;
+  }
 
   if (!createdProfile) {
     throw new Error("Failed to create user profile");
@@ -366,22 +455,58 @@ export async function updateUserProfile({
   interestStatement: string;
 }) {
   const db = getDb();
-
-  const [updatedProfile] = await db
-    .update(schema.userProfiles)
-    .set({
-      displayName: displayName.trim() || "Untitled analyst",
-      interestStatement: interestStatement.trim(),
-      updatedAt: new Date(),
-    })
-    .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)))
-    .returning({
-      id: schema.userProfiles.id,
+  const [existingProfile] = await db
+    .select({
       slug: schema.userProfiles.slug,
-      displayName: schema.userProfiles.displayName,
-      interestStatement: schema.userProfiles.interestStatement,
-      updatedAt: schema.userProfiles.updatedAt,
-    });
+    })
+    .from(schema.userProfiles)
+    .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)))
+    .limit(1);
+
+  if (!existingProfile) {
+    throw new Error(`User profile ${profileId} was not found`);
+  }
+
+  const normalizedDisplayName = normalizeProfileDisplayName(displayName, "Untitled analyst");
+  const duplicateProfile = await findProfileByDisplayName(userId, normalizedDisplayName, profileId);
+
+  if (duplicateProfile) {
+    throw new DuplicateProfileNameError(normalizedDisplayName, existingProfile.slug);
+  }
+
+  let updatedProfile:
+    | {
+        id: number;
+        slug: string;
+        displayName: string;
+        interestStatement: string;
+        updatedAt: Date;
+      }
+    | undefined;
+
+  try {
+    [updatedProfile] = await db
+      .update(schema.userProfiles)
+      .set({
+        displayName: normalizedDisplayName,
+        interestStatement: interestStatement.trim(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)))
+      .returning({
+        id: schema.userProfiles.id,
+        slug: schema.userProfiles.slug,
+        displayName: schema.userProfiles.displayName,
+        interestStatement: schema.userProfiles.interestStatement,
+        updatedAt: schema.userProfiles.updatedAt,
+      });
+  } catch (error) {
+    if (isProfileNameUniqueViolation(error)) {
+      throw new DuplicateProfileNameError(normalizedDisplayName, existingProfile.slug);
+    }
+
+    throw error;
+  }
 
   if (!updatedProfile) {
     throw new Error(`User profile ${profileId} was not found`);

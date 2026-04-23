@@ -21,3 +21,4 @@ This file applies to `apps/web/src/lib`.
 - The feed should still render a full top 10 after source-family caps by backfilling from additional ranked or fallback candidates.
 - Read tracking logic belongs here and should stay reusable across feed rendering and outbound redirect handlers.
 - Personalized feed profile reads and writes should be scoped to the authenticated user rather than using a global shared profile list.
+- User profile writes should reject duplicate display names per authenticated user before writing, while the database keeps the same invariant as a race-safe backstop.
