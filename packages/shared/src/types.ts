@@ -40,3 +40,7 @@ export interface FetchSourceEndpointPayload {
 export interface ScoreDocumentsPayload {
   profileId: number;
 }
+
+export interface SendDailyNewsletterPayload {
+  newsletterDate: string;
+}

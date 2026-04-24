@@ -71,6 +71,13 @@
       "when": 1776985786188,
       "tag": "0009_sleepy_misty_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776988247066,
+      "tag": "0010_common_pixie",
+      "breakpoints": true
     }
   ]
 }

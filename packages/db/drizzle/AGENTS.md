@@ -10,6 +10,7 @@ This file applies to `packages/db/drizzle` and its subdirectories unless a deepe
 - `0007_spotty_layla_miller.sql` introduces `document_reads`, which stores per-user read state for outbound story clicks.
 - `0008_flawless_brother_voodoo.sql` scopes `user_profiles` to `auth_users` so each signed-in account owns its own interest profiles.
 - `0009_sleepy_misty_knight.sql` renames existing duplicate user profile names with a copy suffix, then enforces one case-insensitive display name per user.
+- `0010_common_pixie.sql` introduces `newsletter_sends`, the per-user daily email send log used to dedupe SendPulse newsletter delivery.
 
 ## Implementation Guidance
 - Add new migration files through `drizzle-kit generate`.

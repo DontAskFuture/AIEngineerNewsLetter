@@ -5,7 +5,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 
 ## Monorepo Architecture
 - `apps/web` is the Next.js application. It owns the UI, route protection, server actions, and server-side orchestration.
-- `apps/worker` is the background worker. It fetches sources, stores raw payloads, upserts normalized documents, and runs LLM-based document scoring.
+- `apps/worker` is the background worker. It fetches sources, stores raw payloads, inserts new normalized documents while skipping canonical duplicates, and runs LLM-based document scoring.
 - `packages/db` owns the Postgres schema, Drizzle client, and migrations.
 - `packages/shared` owns shared types, source registry seeds, and URL helpers.
 - `docs` holds product and implementation notes that explain intent rather than runtime behavior.
@@ -14,19 +14,23 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 1. Curated sources are defined in `packages/shared`.
 2. The worker fetches endpoints and writes `fetch_jobs`, `fetch_attempts`, `raw_documents`, and `documents`.
 3. The worker scores documents against user interest profiles via OpenRouter, writing `document_scores` and tracking progress in `scoring_jobs`.
-4. The web app reads normalized tables for dashboards and the personalized feed.
-5. Auth is handled in the web app with `auth_users`, `auth_sessions`, and an `HttpOnly` session cookie.
-6. Personalized ranking uses pre-computed `document_scores` joined with `documents` and `sources`, filtered by a time window (day/week/month/quarter/year).
+4. The worker sends daily SendPulse newsletter emails using each active user's first active profile, then records successful sends in `newsletter_sends`.
+5. The web app reads normalized tables for dashboards and the personalized feed.
+6. Auth is handled in the web app with `auth_users`, `auth_sessions`, and an `HttpOnly` session cookie.
+7. Personalized ranking uses pre-computed `document_scores` joined with `documents` and `sources`, filtered by a time window (day/week/month/quarter/year).
 
 ## Job Queue
 - Both fetch and scoring jobs are managed by pg-boss (Postgres-backed queue).
 - The web app enqueues jobs by inserting into `pgboss.job`; the worker picks them up.
-- Queue names: `fetch-source-endpoint`, `score-documents`.
+- Queue names: `fetch-source-endpoint`, `score-documents`, `send-daily-newsletter`.
+- The worker's default fetch enqueue interval is 60 minutes, while endpoint-specific `cadenceMinutes` still controls per-endpoint singleton throttling.
+- Crawl jobs default to 5 local pg-boss fetch workers per worker process; scoring stays separately queued.
 - Scoring uses a singleton key per profile to prevent duplicate concurrent scoring.
+- Newsletter sends require SendPulse credentials in the worker environment and are deduped by user/date.
 
 ## Implementation Guidance
 - Keep route files thin. Put data access, auth, and ranking logic in `apps/web/src/lib`.
-- Keep worker logic idempotent. Prefer upserts and deterministic hashes over destructive rewrites.
+- Keep worker logic idempotent. Prefer deterministic hashes, canonical-URL existence checks, and additive inserts over destructive rewrites.
 - Treat `packages/db/drizzle` and `packages/db/drizzle/meta` as generated artifacts. Generate migrations instead of hand-editing snapshots.
 - Shared code should be framework-light. Do not leak Next.js APIs into `packages/*`.
 - Prefer additive schema changes. Existing data should keep working after a migration.

@@ -27,7 +27,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/ai_intel
       LOG_LEVEL: info
       RAW_STORAGE_DIR: /app/var/raw
-      FETCH_INTERVAL_MINUTES: 15
+      FETCH_INTERVAL_MINUTES: 60
     restart: "no"
 
   web:
@@ -41,7 +41,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/ai_intel
       LOG_LEVEL: info
       RAW_STORAGE_DIR: /app/var/raw
-      FETCH_INTERVAL_MINUTES: 15
+      FETCH_INTERVAL_MINUTES: 60
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
@@ -64,10 +64,18 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/ai_intel
       LOG_LEVEL: info
       RAW_STORAGE_DIR: /app/var/raw
-      FETCH_INTERVAL_MINUTES: 15
+      FETCH_INTERVAL_MINUTES: 60
+      FETCH_WORKER_CONCURRENCY: 5
+      NEWSLETTER_CHECK_INTERVAL_MINUTES: ${NEWSLETTER_CHECK_INTERVAL_MINUTES:-30}
+      NEWSLETTER_SEND_HOUR: ${NEWSLETTER_SEND_HOUR:-8}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Los_Angeles}
+      SENDPULSE_CLIENT_ID: ${SENDPULSE_CLIENT_ID:-}
+      SENDPULSE_CLIENT_SECRET: ${SENDPULSE_CLIENT_SECRET:-}
+      SENDPULSE_FROM_EMAIL: ${SENDPULSE_FROM_EMAIL:-}
+      SENDPULSE_FROM_NAME: ${SENDPULSE_FROM_NAME:-AI Builder Intelligence}
       NODE_ENV: production
     volumes:
       - raw_data:/app/var/raw

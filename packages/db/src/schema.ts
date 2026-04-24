@@ -295,6 +295,26 @@ export const scoringJobs = pgTable("scoring_jobs", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
 });
 
+export const newsletterSends = pgTable(
+  "newsletter_sends",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    profileId: bigint("profile_id", { mode: "number" })
+      .notNull()
+      .references(() => userProfiles.id, { onDelete: "cascade" }),
+    newsletterDate: text("newsletter_date").notNull(),
+    recipientEmail: text("recipient_email").notNull(),
+    storyCount: integer("story_count").notNull().default(0),
+    providerMessageId: text("provider_message_id"),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("newsletter_sends_user_date_idx").on(table.userId, table.newsletterDate)],
+);
+
 export const rankingCache = pgTable(
   "ranking_cache",
   {

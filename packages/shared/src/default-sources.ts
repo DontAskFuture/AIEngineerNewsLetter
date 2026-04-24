@@ -77,7 +77,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://huggingface.co/blog/feed.xml",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -109,7 +109,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://github.blog/feed/",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -127,7 +127,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://vercel.com/atom",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -207,7 +207,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://openai.com/news/rss.xml",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -335,7 +335,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://hnrss.org/frontpage",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -351,7 +351,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://www.reddit.com/r/LocalLLaMA.rss",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -367,7 +367,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://www.reddit.com/r/MachineLearning.rss",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -383,7 +383,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://www.reddit.com/r/artificial.rss",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -399,7 +399,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://www.reddit.com/r/OpenAI.rss",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },
@@ -415,7 +415,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "html",
         url: "https://trends24.in/united-states/",
-        cadenceMinutes: 30,
+        cadenceMinutes: 60,
       },
     ],
   },

@@ -7,16 +7,34 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 
 config({ path: resolve(currentDir, "../../../.env") });
 
+const optionalString = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().optional(),
+);
+const optionalEmail = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().email().optional(),
+);
+
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
   RAW_STORAGE_DIR: z.string().default(resolve(currentDir, "../../../var/raw")),
-  FETCH_INTERVAL_MINUTES: z.coerce.number().int().positive().default(15),
+  FETCH_INTERVAL_MINUTES: z.coerce.number().int().positive().default(60),
+  FETCH_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  NEWSLETTER_CHECK_INTERVAL_MINUTES: z.coerce.number().int().positive().default(30),
+  NEWSLETTER_SEND_HOUR: z.coerce.number().int().min(0).max(23).default(8),
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL: z.string().default("nvidia/nemotron-3-super-120b-a12b:free"),
   APP_BASE_URL: z.string().default("http://localhost:3000"),
+  APP_TIME_ZONE: z.string().default("America/Los_Angeles"),
+  SENDPULSE_API_BASE_URL: z.string().url().default("https://api.sendpulse.com"),
+  SENDPULSE_CLIENT_ID: optionalString,
+  SENDPULSE_CLIENT_SECRET: optionalString,
+  SENDPULSE_FROM_EMAIL: optionalEmail,
+  SENDPULSE_FROM_NAME: z.string().default("AI Builder Intelligence"),
 });
 
 let cachedEnv: z.infer<typeof envSchema> | undefined;

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import RSSParser from "rss-parser";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import { canonicalizeUrl, type FetchSourceEndpointPayload } from "@ai-intel/shared";
 import { logger } from "../logger";
@@ -44,16 +44,27 @@ function buildFallbackUrl(baseUrl: string, title: string, externalId: string | n
   return `${baseUrl.replace(/\/$/, "")}#${hashValue(externalId ?? title).slice(0, 16)}`;
 }
 
+async function getExistingCanonicalUrls(db: ReturnType<typeof getDb>, canonicalUrls: string[]) {
+  if (canonicalUrls.length === 0) {
+    return new Set<string>();
+  }
+
+  const rows = await db
+    .select({ canonicalUrl: schema.documents.canonicalUrl })
+    .from(schema.documents)
+    .where(inArray(schema.documents.canonicalUrl, canonicalUrls));
+
+  return new Set(rows.map((row) => row.canonicalUrl));
+}
+
 async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sourceEndpointId: number, baseUrl: string, body: string) {
   const db = getDb();
   const feed = await parser.parseString(body);
-  let extractedCount = 0;
-
-  for (const item of feed.items) {
+  const candidates = feed.items.flatMap((item) => {
     const title = item.title?.trim();
 
     if (!title) {
-      continue;
+      return [];
     }
 
     const canonicalUrl = canonicalizeUrl(item.link ?? buildFallbackUrl(baseUrl, title, item.guid ?? null));
@@ -63,46 +74,60 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
     const sourcePublishedAt = toDate(item.isoDate ?? item.pubDate);
     const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
 
-    await db
+    return [{
+      canonicalUrl,
+      title,
+      externalId: item.guid ?? null,
+      summary,
+      bodyText,
+      sourcePublishedAt,
+      contentHash,
+      metadata: {
+        creator: item.creator ?? null,
+        categories: item.categories ?? [],
+        feedTitle: feed.title ?? null,
+      },
+    }];
+  });
+  const existingCanonicalUrls = await getExistingCanonicalUrls(db, candidates.map((candidate) => candidate.canonicalUrl));
+  let extractedCount = 0;
+  let skippedCount = 0;
+
+  for (const candidate of candidates) {
+    if (existingCanonicalUrls.has(candidate.canonicalUrl)) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const [createdDocument] = await db
       .insert(schema.documents)
       .values({
         sourceId,
         sourceEndpointId,
         rawDocumentId,
-        canonicalUrl,
-        externalId: item.guid ?? null,
-        title,
-        summary,
-        bodyText,
-        sourcePublishedAt,
-        contentHash,
-        metadata: {
-          creator: item.creator ?? null,
-          categories: item.categories ?? [],
-          feedTitle: feed.title ?? null,
-        },
+        canonicalUrl: candidate.canonicalUrl,
+        externalId: candidate.externalId,
+        title: candidate.title,
+        summary: candidate.summary,
+        bodyText: candidate.bodyText,
+        sourcePublishedAt: candidate.sourcePublishedAt,
+        contentHash: candidate.contentHash,
+        metadata: candidate.metadata,
       })
-      .onConflictDoUpdate({
+      .onConflictDoNothing({
         target: schema.documents.canonicalUrl,
-        set: {
-          rawDocumentId,
-          externalId: item.guid ?? null,
-          title,
-          summary,
-          bodyText,
-          sourcePublishedAt,
-          contentHash,
-          metadata: {
-            creator: item.creator ?? null,
-            categories: item.categories ?? [],
-            feedTitle: feed.title ?? null,
-          },
-          lastSeenAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      })
+      .returning({ id: schema.documents.id });
 
-    extractedCount += 1;
+    if (createdDocument) {
+      extractedCount += 1;
+    } else {
+      skippedCount += 1;
+    }
+  }
+
+  if (skippedCount > 0) {
+    logger.info({ skippedCount, feedTitle: feed.title ?? null }, "Skipped feed items with existing canonical URLs");
   }
 
   return extractedCount;
@@ -166,7 +191,7 @@ async function upsertSingleHtmlDocument(
   const canonicalUrl = canonicalizeUrl(articleUrl);
   const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
 
-  await db
+  const [createdDocument] = await db
     .insert(schema.documents)
     .values({
       sourceId,
@@ -184,24 +209,12 @@ async function upsertSingleHtmlDocument(
         siteName: article?.siteName ?? null,
       },
     })
-    .onConflictDoUpdate({
+    .onConflictDoNothing({
       target: schema.documents.canonicalUrl,
-      set: {
-        rawDocumentId,
-        title,
-        summary,
-        bodyText,
-        contentHash,
-        metadata: {
-          byline: article?.byline ?? null,
-          siteName: article?.siteName ?? null,
-        },
-        lastSeenAt: new Date(),
-        updatedAt: new Date(),
-      },
-    });
+    })
+    .returning({ id: schema.documents.id });
 
-  return true;
+  return Boolean(createdDocument);
 }
 
 async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourceEndpointId: number, url: string, body: string) {
@@ -216,9 +229,16 @@ async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourc
   }
 
   let extractedCount = 0;
+  let skippedCount = 0;
+  const existingCanonicalUrls = await getExistingCanonicalUrls(db, articleLinks);
 
   for (const articleUrl of articleLinks) {
     try {
+      if (existingCanonicalUrls.has(articleUrl)) {
+        skippedCount += 1;
+        continue;
+      }
+
       const response = await fetch(articleUrl, {
         headers: {
           "user-agent": userAgent,
@@ -234,11 +254,17 @@ async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourc
       if (inserted) {
         extractedCount += 1;
         logger.info({ articleUrl }, "Extracted article from listing page");
+      } else {
+        skippedCount += 1;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       logger.warn({ articleUrl, error: message }, "Failed to fetch article from listing page");
     }
+  }
+
+  if (skippedCount > 0) {
+    logger.info({ url, skippedCount }, "Skipped article URLs already present in documents");
   }
 
   return extractedCount;
