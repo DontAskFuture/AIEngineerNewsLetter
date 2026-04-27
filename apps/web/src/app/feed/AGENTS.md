@@ -21,3 +21,4 @@ This file applies to `apps/web/src/app/feed`.
 - Profile creation and update should preserve the user’s current feed window and make the selected profile obvious in the interest chip list.
 - Profile-specific uncontrolled form fields and expandable story sections should be keyed by selected profile so browser state does not leak across profile switches.
 - Duplicate profile-name errors are surfaced through feed URL params so server actions can keep using redirects instead of client action state.
+- Profile deletes should be soft deletes (`is_active=false`) and redirect to a remaining profile; the UI should prevent deleting the last active profile with a clear error.

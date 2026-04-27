@@ -16,5 +16,8 @@
     "db:migrate": "corepack pnpm --filter @ai-intel/db db:migrate",
     "seed:sources": "corepack pnpm --filter worker seed:sources",
     "fetch:once": "corepack pnpm --filter worker fetch:once"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   }
 }

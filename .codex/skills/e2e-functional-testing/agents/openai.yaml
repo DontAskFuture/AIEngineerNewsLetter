@@ -1,0 +1,6 @@
+interface:
+  display_name: "E2E Functional Testing"
+  short_description: "Run Playwright frontend flow tests"
+  default_prompt: "Use $e2e-functional-testing to run the standard E2E smoke test for this project."
+policy:
+  allow_implicit_invocation: true

@@ -59,6 +59,16 @@ export class DuplicateProfileNameError extends Error {
   }
 }
 
+export class LastProfileDeleteError extends Error {
+  profileSlug: string | null;
+
+  constructor(profileSlug?: string | null) {
+    super("At least one active profile is required.");
+    this.name = "LastProfileDeleteError";
+    this.profileSlug = profileSlug ?? null;
+  }
+}
+
 function isDefined<T>(value: T | null): value is T {
   return value !== null;
 }
@@ -513,6 +523,43 @@ export async function updateUserProfile({
   }
 
   return normalizeProfileRow(updatedProfile);
+}
+
+export async function deleteUserProfile({
+  userId,
+  profileId,
+}: {
+  userId: number;
+  profileId: number;
+}) {
+  await ensureDefaultUserProfile(userId);
+
+  const db = getDb();
+  const profiles = await getProfiles(userId);
+  const profileToDelete = profiles.find((profile) => profile.id === profileId);
+
+  if (!profileToDelete) {
+    throw new Error(`User profile ${profileId} was not found`);
+  }
+
+  if (profiles.length <= 1) {
+    throw new LastProfileDeleteError(profileToDelete.slug);
+  }
+
+  await db
+    .update(schema.userProfiles)
+    .set({
+      isActive: false,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)));
+
+  const nextProfile = profiles.find((profile) => profile.id !== profileId) ?? null;
+
+  return {
+    deletedProfile: profileToDelete,
+    nextProfile,
+  };
 }
 
 function buildCandidatesHash(profileId: number, interestStatement: string, candidateIds: number[]): string {

@@ -35,6 +35,10 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Shared code should be framework-light. Do not leak Next.js APIs into `packages/*`.
 - Prefer additive schema changes. Existing data should keep working after a migration.
 - Long-running work (crawling, scoring) belongs in the worker, not the web app. The web app only enqueues.
+- Docker builds must exclude workspace `node_modules` directories so container-installed pnpm links are not overwritten by host symlinks.
+- E2E smoke credentials live in local env as `E2E_TEST_EMAIL` and `E2E_TEST_PASSWORD`; keep the password synthetic and ensure the email is included in `AUTH_ALLOWED_EMAILS`.
+- Project-local Codex skills live in `.codex/skills`; update the relevant skill reference when testing workflows or credential conventions change.
+- Playwright is installed as a root dev dependency for browser-based E2E smoke tests.
 
 ## Safe Change Patterns
 - Web features usually touch `apps/web/src/app`, `apps/web/src/lib`, and sometimes `packages/db/src/schema.ts`.

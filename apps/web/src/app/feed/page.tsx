@@ -9,7 +9,7 @@ import {
   summarizeText,
 } from "@/lib/formatters";
 import { getPersonalizedFeedSnapshot, isValidTimeWindow, type TimeWindow } from "@/lib/personalized-feed";
-import { createUserProfileAction, updateUserProfileAction } from "./actions";
+import { createUserProfileAction, deleteUserProfileAction, updateUserProfileAction } from "./actions";
 import { MoreStories } from "./more-stories";
 import { ProfileSelector } from "./profile-selector";
 
@@ -41,6 +41,8 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
   const profileError =
     errorCode === "duplicate_profile_name"
       ? "That profile name is already used on your account. Choose a unique name for each profile."
+      : errorCode === "last_profile_delete"
+        ? "You need at least one active profile. Create another profile before deleting this one."
       : null;
 
   const [snapshot, personalizedFeed] = await Promise.all([
@@ -172,6 +174,20 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 Save interest
               </button>
             </div>
+          </form>
+
+          <form action={deleteUserProfileAction} className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
+            <input type="hidden" name="timeWindow" value={timeWindow} />
+            <p className="max-w-lg text-xs leading-6 text-[color:var(--muted)]">
+              Delete this profile when you no longer want its shortlist. Existing read history and scores stay archived.
+            </p>
+            <button
+              type="submit"
+              className="button-secondary border-[color:color-mix(in_srgb,var(--danger)_35%,var(--button-secondary-border))] text-[color:var(--danger)]"
+            >
+              Delete profile
+            </button>
           </form>
         </article>
 

@@ -7,6 +7,19 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
+const nonSourceDirectoryNames = new Set([
+  ".next",
+  "artifact",
+  "artifacts",
+  "build",
+  "coverage",
+  "dist",
+  "playwright-report",
+  "test",
+  "test-results",
+  "tests",
+  "__tests__",
+]);
 
 function runGit(args) {
   return execFileSync("git", args, {
@@ -72,12 +85,20 @@ function isPolicyFile(relativePath) {
   return path.basename(relativePath) === "AGENTS.md";
 }
 
+function isInNonSourceDirectory(relativePath) {
+  return relativePath.split("/").some((segment) => nonSourceDirectoryNames.has(segment));
+}
+
 function isCodeOrConfigChange(relativePath) {
   if (isDocumentationFile(relativePath)) {
     return false;
   }
 
   if (path.basename(relativePath) === "CLAUDE.md") {
+    return false;
+  }
+
+  if (isInNonSourceDirectory(relativePath)) {
     return false;
   }
 

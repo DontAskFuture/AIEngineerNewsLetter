@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireCurrentUser } from "@/lib/auth";
-import { createUserProfile, DuplicateProfileNameError, updateUserProfile } from "@/lib/personalized-feed";
+import {
+  createUserProfile,
+  deleteUserProfile,
+  DuplicateProfileNameError,
+  LastProfileDeleteError,
+  updateUserProfile,
+} from "@/lib/personalized-feed";
 
 function getTextField(formData: FormData, fieldName: string) {
   const value = formData.get(fieldName);
@@ -85,4 +91,33 @@ export async function updateUserProfileAction(formData: FormData) {
 
   revalidatePath("/feed");
   redirect(buildFeedRedirect(profile.slug, timeWindow));
+}
+
+export async function deleteUserProfileAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const rawProfileId = getTextField(formData, "profileId");
+  const profileId = Number(rawProfileId);
+  const timeWindow = getTextField(formData, "timeWindow");
+
+  if (!Number.isInteger(profileId)) {
+    revalidatePath("/feed");
+    redirect(buildFeedRedirect(null, timeWindow));
+  }
+
+  try {
+    const result = await deleteUserProfile({
+      userId: currentUser.id,
+      profileId,
+    });
+
+    revalidatePath("/feed");
+    redirect(buildFeedRedirect(result.nextProfile?.slug, timeWindow));
+  } catch (error) {
+    if (error instanceof LastProfileDeleteError) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(error.profileSlug, timeWindow, "last_profile_delete"));
+    }
+
+    throw error;
+  }
 }
