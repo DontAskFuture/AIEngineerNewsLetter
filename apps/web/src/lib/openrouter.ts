@@ -1,9 +1,9 @@
+import { renderRankDocumentsPrompt, renderScoreDocumentsPrompt } from "@ai-intel/shared";
 import { loadWebEnv } from "@/lib/env";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
-const RANKING_RETURN_COUNT = 20;
 
 export interface InterestRankingCandidate {
   id: number;
@@ -20,26 +20,6 @@ export interface InterestRankingSelection {
 export interface InterestRankingResponse {
   shortlistSummary: string;
   selectedDocuments: InterestRankingSelection[];
-}
-
-const MAX_CANDIDATE_TEXT_CHARS = 2000;
-
-function truncateToLimit(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars - 3) + "...";
-}
-
-function buildCandidateList(candidates: InterestRankingCandidate[]) {
-  return candidates
-    .map((candidate) => {
-      const entry = [
-        `ID: ${candidate.id}`,
-        `Title: ${candidate.title}`,
-        `First paragraph: ${candidate.previewParagraph || "No first paragraph was available."}`,
-      ].join("\n");
-      return truncateToLimit(entry, MAX_CANDIDATE_TEXT_CHARS);
-    })
-    .join("\n\n---\n\n");
 }
 
 function extractJson(rawText: string): string {
@@ -190,37 +170,18 @@ function parseRankingResponse(rawText: string) {
   } satisfies InterestRankingResponse;
 }
 
-const SYSTEM_PROMPT = [
-  "You rank AI and software news stories against one user's stated interests.",
-  "Use only each story title and first paragraph.",
-  `Return the ${RANKING_RETURN_COUNT} most relevant stories from the candidate list, ordered from most relevant to less relevant.`,
-  "The UI will apply source-family caps afterward, so provide enough strong candidates to still surface a top 10.",
-  "Prefer direct matches to the user's domains, workflows, pain points, tools, companies, and product priorities.",
-  "Do not invent document IDs and do not include any IDs that are not present in the input.",
-  "For each selected story, write a 'whyRelevant' explanation in 2 or 3 sentences.",
-  "Keep every explanation grounded in the supplied text only, and connect it back to the user's saved interests.",
-  "You MUST respond with ONLY a valid JSON object, no other text before or after.",
-  'The JSON must have this exact shape: {"shortlistSummary": "...", "selectedDocuments": [{"documentId": <int>, "score": <int 1-100>, "whyRelevant": "..."}]}',
-].join(" ");
-
 export async function rankDocumentsForInterest({
   interestStatement,
   profileSlug,
-  windowLabel,
   candidates,
 }: {
   interestStatement: string;
   profileSlug: string;
-  windowLabel: string;
   candidates: InterestRankingCandidate[];
 }) {
-  const userMessage = [
-    `User interest profile:\n${interestStatement}`,
-    `Window:\n${windowLabel}`,
-    `Candidates:\n${buildCandidateList(candidates)}`,
-  ].join("\n\n");
+  const prompt = renderRankDocumentsPrompt({ interestStatement, candidates });
 
-  const result = await chatCompletion(SYSTEM_PROMPT, userMessage, 3500);
+  const result = await chatCompletion(prompt.system, prompt.user, 3500);
   const ranking = parseRankingResponse(result.content);
 
   return {
@@ -235,18 +196,6 @@ export interface BatchScoreResult {
   score: number;
   whyRelevant: string;
 }
-
-const BATCH_SCORE_SYSTEM_PROMPT = [
-  "You score AI and software news stories against one user's stated interests.",
-  "Use only each story title and first paragraph.",
-  "Score EVERY document in the candidate list on a 1-100 relevance scale.",
-  "Prefer direct matches to the user's domains, workflows, pain points, tools, companies, and product priorities.",
-  "Do not invent document IDs and do not include any IDs that are not present in the input.",
-  "For each document, write a 'whyRelevant' explanation in 1 or 2 sentences.",
-  "Keep every explanation grounded in the supplied text only, and connect it back to the user's saved interests.",
-  "You MUST respond with ONLY a valid JSON object, no other text before or after.",
-  'The JSON must have this exact shape: {"scores": [{"documentId": <int>, "score": <int 1-100>, "whyRelevant": "..."}]}',
-].join(" ");
 
 function parseBatchScoreResponse(rawText: string): BatchScoreResult[] {
   const parsed = JSON.parse(extractJson(rawText)) as unknown;
@@ -281,12 +230,9 @@ export async function scoreDocumentBatch({
   interestStatement: string;
   candidates: InterestRankingCandidate[];
 }): Promise<{ model: string; scores: BatchScoreResult[] }> {
-  const userMessage = [
-    `User interest profile:\n${interestStatement}`,
-    `Documents to score:\n${buildCandidateList(candidates)}`,
-  ].join("\n\n");
+  const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
 
-  const result = await chatCompletion(BATCH_SCORE_SYSTEM_PROMPT, userMessage, 4000);
+  const result = await chatCompletion(prompt.system, prompt.user, 4000);
   const scores = parseBatchScoreResponse(result.content);
 
   return { model: result.model, scores };

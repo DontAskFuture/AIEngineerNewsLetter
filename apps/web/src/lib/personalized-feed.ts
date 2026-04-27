@@ -803,7 +803,6 @@ export async function getPersonalizedFeedSnapshot(
       const fresh = await rankDocumentsForInterest({
         interestStatement: selectedProfile.interestStatement,
         profileSlug: selectedProfile.slug,
-        windowLabel,
         candidates: candidateDocuments.map((document) => ({
           id: document.id,
           title: document.title,

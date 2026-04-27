@@ -1,6 +1,6 @@
 import { getDb, schema } from "@ai-intel/db";
 import { eq, notInArray, sql } from "drizzle-orm";
-import type { ScoreDocumentsPayload } from "@ai-intel/shared";
+import { renderScoreDocumentsPrompt, type PromptCandidate, type ScoreDocumentsPayload } from "@ai-intel/shared";
 import { logger } from "../logger";
 import { loadWorkerEnv } from "../env";
 
@@ -8,12 +8,6 @@ const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const BATCH_SIZE = 20;
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
-const MAX_CANDIDATE_TEXT_CHARS = 2000;
-
-function truncateToLimit(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars - 3) + "...";
-}
 
 function stripHtml(value: string): string {
   return value
@@ -38,38 +32,11 @@ function extractPreview(summary: string | null, bodyText: string | null): string
   return summaryText ? summaryText.slice(0, 300) : "";
 }
 
-interface Candidate {
-  id: number;
-  title: string;
-  previewParagraph: string;
-}
-
 interface ScoreResult {
   documentId: number;
   score: number;
   whyRelevant: string;
 }
-
-function buildCandidateList(candidates: Candidate[]): string {
-  return candidates
-    .map((c) => {
-      const entry = `ID: ${c.id}\nTitle: ${c.title}\nFirst paragraph: ${c.previewParagraph || "No first paragraph was available."}`;
-      return truncateToLimit(entry, MAX_CANDIDATE_TEXT_CHARS);
-    })
-    .join("\n\n---\n\n");
-}
-
-const SYSTEM_PROMPT = [
-  "You score AI and software news stories against one user's stated interests.",
-  "Use only each story title and first paragraph.",
-  "Score EVERY document in the candidate list on a 1-100 relevance scale.",
-  "Prefer direct matches to the user's domains, workflows, pain points, tools, companies, and product priorities.",
-  "Do not invent document IDs and do not include any IDs that are not present in the input.",
-  "For each document, write a 'whyRelevant' explanation in 1 or 2 sentences.",
-  "Keep every explanation grounded in the supplied text only, and connect it back to the user's saved interests.",
-  "You MUST respond with ONLY a valid JSON object, no other text before or after.",
-  'The JSON must have this exact shape: {"scores": [{"documentId": <int>, "score": <int 1-100>, "whyRelevant": "..."}]}',
-].join(" ");
 
 function extractJson(rawText: string): string {
   const trimmed = rawText.trim();
@@ -83,18 +50,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function callLlm(interestStatement: string, candidates: Candidate[]): Promise<{ model: string; scores: ScoreResult[] }> {
+async function callLlm(interestStatement: string, candidates: PromptCandidate[]): Promise<{ model: string; scores: ScoreResult[] }> {
   const env = loadWorkerEnv();
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
 
-  const userMessage = `User interest profile:\n${interestStatement}\n\nDocuments to score:\n${buildCandidateList(candidates)}`;
+  const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
   const body = JSON.stringify({
     model: env.OPENROUTER_MODEL,
     temperature: 0.1,
     max_tokens: 4000,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userMessage },
+      { role: "system", content: prompt.system },
+      { role: "user", content: prompt.user },
     ],
   });
 
@@ -213,7 +180,7 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
       const batch = unscoredDocs.slice(i, i + BATCH_SIZE);
       const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
 
-      const candidates: Candidate[] = batch.map((doc) => ({
+      const candidates: PromptCandidate[] = batch.map((doc) => ({
         id: doc.id,
         title: doc.title,
         previewParagraph: extractPreview(doc.summary, doc.bodyText),

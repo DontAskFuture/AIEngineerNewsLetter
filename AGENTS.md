@@ -33,6 +33,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Keep worker logic idempotent. Prefer deterministic hashes, canonical-URL existence checks, and additive inserts over destructive rewrites.
 - Treat `packages/db/drizzle` and `packages/db/drizzle/meta` as generated artifacts. Generate migrations instead of hand-editing snapshots.
 - Shared code should be framework-light. Do not leak Next.js APIs into `packages/*`.
+- Shared LLM prompt templates live in `packages/shared` and use Handlebars for dynamic rendering across web and worker callers.
 - Prefer additive schema changes. Existing data should keep working after a migration.
 - Long-running work (crawling, scoring) belongs in the worker, not the web app. The web app only enqueues.
 - Docker builds must exclude workspace `node_modules` directories so container-installed pnpm links are not overwritten by host symlinks.
