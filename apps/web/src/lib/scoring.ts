@@ -1,5 +1,6 @@
+import { scoringConfig } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { eq, notInArray, sql } from "drizzle-orm";
+import { desc, eq, notInArray, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
 import type { InterestRankingCandidate } from "@/lib/openrouter";
 import { scoreDocumentBatch } from "@/lib/openrouter";
@@ -12,7 +13,7 @@ import {
 export type { ScoringJobState } from "@/lib/scoring-tracker";
 export { getScoringJobState } from "@/lib/scoring-tracker";
 
-const BATCH_SIZE = 20;
+const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 
 function stripHtml(value: string): string {
   return value
@@ -86,13 +87,14 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
     })
     .from(schema.documents)
     .where(notInArray(schema.documents.id, alreadyScoredIds))
-    .orderBy(schema.documents.id);
+    .orderBy(desc(documentSortKey), desc(schema.documents.id))
+    .limit(scoringConfig.maxDocumentsPerRun);
 
   const progress: ScoringProgress = {
     totalUnscored: unscoredDocs.length,
     scored: 0,
     failed: 0,
-    batches: Math.ceil(unscoredDocs.length / BATCH_SIZE),
+    batches: Math.ceil(unscoredDocs.length / scoringConfig.batchSize),
   };
 
   if (unscoredDocs.length === 0) {
@@ -102,9 +104,9 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
   const jobId = await startScoringJob(profileId, unscoredDocs.length, progress.batches);
 
   try {
-    for (let i = 0; i < unscoredDocs.length; i += BATCH_SIZE) {
-      const batch = unscoredDocs.slice(i, i + BATCH_SIZE);
-      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+    for (let i = 0; i < unscoredDocs.length; i += scoringConfig.batchSize) {
+      const batch = unscoredDocs.slice(i, i + scoringConfig.batchSize);
+      const batchNumber = Math.floor(i / scoringConfig.batchSize) + 1;
 
       const candidates: InterestRankingCandidate[] = batch.map((doc) => ({
         id: doc.id,

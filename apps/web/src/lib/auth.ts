@@ -266,7 +266,7 @@ export async function requireAdmin() {
   const currentUser = await requireCurrentUser();
 
   if (!isAdmin(currentUser.email)) {
-    redirect("/feed");
+    redirect("/feed?window=week");
   }
 
   return currentUser;

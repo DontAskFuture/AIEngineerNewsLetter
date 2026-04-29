@@ -76,7 +76,7 @@ export default async function RootLayout({
                     <span className="surface-chip hidden px-3 py-2 text-xs uppercase tracking-[0.16em] sm:inline-flex">
                       {currentUser.email}
                     </span>
-                    <Link href="/feed" className="button-secondary">
+                    <Link href="/feed?window=week" className="button-secondary">
                       Feed
                     </Link>
                     {isAdmin(currentUser.email) ? (

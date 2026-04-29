@@ -1,18 +1,14 @@
-import { createHash } from "node:crypto";
 import type { SourceCategory } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
 import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
-import { loadWebEnv } from "@/lib/env";
-import type { InterestRankingResponse } from "@/lib/openrouter";
-import { rankDocumentsForInterest } from "@/lib/openrouter";
 import { applyReadStateToDocuments } from "@/lib/read-tracking";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const MAX_CANDIDATE_DOCUMENTS = 200;
 const MAX_SELECTED_DOCUMENTS = 10;
 const MAX_PER_SOURCE = 5;
-const RANKING_CACHE_TTL_HOURS = 6;
-const RANKING_CACHE_VERSION = 2;
+const PUBLIC_FEED_OWNER_EMAIL = "lianglingfan@gmail.com";
+const PUBLIC_FEED_PROFILE_SLUG = "founding-analyst";
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
 
@@ -67,21 +63,6 @@ export class LastProfileDeleteError extends Error {
     this.name = "LastProfileDeleteError";
     this.profileSlug = profileSlug ?? null;
   }
-}
-
-function isDefined<T>(value: T | null): value is T {
-  return value !== null;
-}
-
-function capPerSource(docs: PersonalizedFeedDocument[], maxPerSource: number): PersonalizedFeedDocument[] {
-  const sourceCounts = new Map<string, number>();
-  return docs.filter((doc) => {
-    const sourceKey = doc.sourceGroupKey;
-    const count = sourceCounts.get(sourceKey) ?? 0;
-    if (count >= maxPerSource) return false;
-    sourceCounts.set(sourceKey, count + 1);
-    return true;
-  });
 }
 
 function selectTopDocuments(
@@ -562,75 +543,18 @@ export async function deleteUserProfile({
   };
 }
 
-function buildCandidatesHash(profileId: number, interestStatement: string, candidateIds: number[]): string {
-  const payload = [RANKING_CACHE_VERSION, profileId, interestStatement, ...candidateIds.sort((a, b) => a - b)].join(
-    "|",
-  );
-  return createHash("sha256").update(payload).digest("hex");
-}
-
-async function getCachedRanking(profileId: number, candidatesHash: string): Promise<{ model: string | null; ranking: InterestRankingResponse } | null> {
-  const db = getDb();
-
-  const [cached] = await db
-    .select({
-      model: schema.rankingCache.model,
-      rankingJson: schema.rankingCache.rankingJson,
-    })
-    .from(schema.rankingCache)
-    .where(
-      and(
-        eq(schema.rankingCache.profileId, profileId),
-        eq(schema.rankingCache.candidatesHash, candidatesHash),
-        gt(schema.rankingCache.expiresAt, new Date()),
-      ),
-    )
-    .limit(1);
-
-  if (!cached) return null;
-
-  return {
-    model: cached.model,
-    ranking: cached.rankingJson as InterestRankingResponse,
-  };
-}
-
-async function setCachedRanking(profileId: number, candidatesHash: string, model: string | null, ranking: InterestRankingResponse): Promise<void> {
-  const db = getDb();
-  const expiresAt = new Date(Date.now() + RANKING_CACHE_TTL_HOURS * 60 * 60 * 1000);
-
-  await db
-    .insert(schema.rankingCache)
-    .values({
-      profileId,
-      candidatesHash,
-      model,
-      rankingJson: ranking,
-      expiresAt,
-    })
-    .onConflictDoUpdate({
-      target: [schema.rankingCache.profileId, schema.rankingCache.candidatesHash],
-      set: {
-        model,
-        rankingJson: ranking,
-        expiresAt,
-        createdAt: new Date(),
-      },
-    });
-}
-
-export async function getPersonalizedFeedSnapshot(
-  profileSlug?: string | null,
-  timeWindow: TimeWindow = "week",
-  currentUserId?: number,
-): Promise<PersonalizedFeedSnapshot> {
-  const env = loadWebEnv();
-
-  if (!currentUserId) {
-    throw new Error("Expected current user id when building personalized feed");
-  }
-
-  const profiles = await getProfiles(currentUserId);
+async function buildPersonalizedFeedSnapshot({
+  profileSlug,
+  timeWindow,
+  ownerUserId,
+  readStateUserId,
+}: {
+  profileSlug?: string | null;
+  timeWindow: TimeWindow;
+  ownerUserId: number;
+  readStateUserId: number | null;
+}): Promise<PersonalizedFeedSnapshot> {
+  const profiles = await getProfiles(ownerUserId);
   const selectedProfile = profiles.find((profile) => profile.slug === profileSlug) ?? profiles[0];
 
   if (!selectedProfile) {
@@ -669,7 +593,7 @@ export async function getPersonalizedFeedSnapshot(
   }
 
   async function withReadState(topDocuments: PersonalizedFeedDocument[], remainingDocuments: PersonalizedFeedDocument[]) {
-    if (!currentUserId) {
+    if (!readStateUserId) {
       return {
         topDocuments,
         remainingDocuments,
@@ -677,8 +601,8 @@ export async function getPersonalizedFeedSnapshot(
     }
 
     const [readTopDocuments, readRemainingDocuments] = await Promise.all([
-      applyReadStateToDocuments(currentUserId, topDocuments),
-      applyReadStateToDocuments(currentUserId, remainingDocuments),
+      applyReadStateToDocuments(readStateUserId, topDocuments),
+      applyReadStateToDocuments(readStateUserId, remainingDocuments),
     ]);
 
     return {
@@ -773,120 +697,57 @@ export async function getPersonalizedFeedSnapshot(
     };
   }
 
-  // Fallback: on-demand ranking via OpenRouter
-  if (!env.openRouterApiKey) {
-    const topIds = new Set(defaultShortlist.map((d) => d.id));
-    const documentsWithReadState = await withReadState(defaultShortlist, buildRemainingDocuments(topIds));
-    return {
-      profiles,
-      selectedProfile,
-      topDocuments: documentsWithReadState.topDocuments,
-      remainingDocuments: documentsWithReadState.remainingDocuments,
-      candidateCount: candidateDocuments.length,
-      rankingMode: "latest",
-      rankingSummary:
-        "OpenRouter is not configured yet, so the feed is falling back to the newest stories. Add OPENROUTER_API_KEY to enable interest-based ranking.",
-      rankingStatusLabel: "Newest first",
-      model: null,
-      windowLabel,
-      activeTimeWindow: timeWindow,
-    };
+  const topIds = new Set(defaultShortlist.map((d) => d.id));
+  const documentsWithReadState = await withReadState(defaultShortlist, buildRemainingDocuments(topIds));
+  return {
+    profiles,
+    selectedProfile,
+    topDocuments: documentsWithReadState.topDocuments,
+    remainingDocuments: documentsWithReadState.remainingDocuments,
+    candidateCount: candidateDocuments.length,
+    rankingMode: "latest",
+    rankingSummary:
+      "No pre-computed relevance scores are available for this profile and window yet, so this feed is showing the newest stories while the worker catches up.",
+    rankingStatusLabel: "Newest first",
+    model: null,
+    windowLabel,
+    activeTimeWindow: timeWindow,
+  };
+}
+
+export async function getPersonalizedFeedSnapshot(
+  profileSlug?: string | null,
+  timeWindow: TimeWindow = "week",
+  currentUserId?: number,
+): Promise<PersonalizedFeedSnapshot> {
+  if (!currentUserId) {
+    throw new Error("Expected current user id when building personalized feed");
   }
 
-  try {
-    const candidateIds = candidateDocuments.map((d) => d.id);
-    const candidatesHash = buildCandidatesHash(selectedProfile.id, selectedProfile.interestStatement, candidateIds);
+  return buildPersonalizedFeedSnapshot({
+    profileSlug: profileSlug ?? null,
+    timeWindow,
+    ownerUserId: currentUserId,
+    readStateUserId: currentUserId,
+  });
+}
 
-    const cached = await getCachedRanking(selectedProfile.id, candidatesHash);
+export async function getPublicAiEngineerFeedSnapshot(timeWindow: TimeWindow = "week"): Promise<PersonalizedFeedSnapshot> {
+  const db = getDb();
+  const [publicOwner] = await db
+    .select({ id: schema.authUsers.id })
+    .from(schema.authUsers)
+    .where(and(eq(schema.authUsers.email, PUBLIC_FEED_OWNER_EMAIL), eq(schema.authUsers.isActive, true)))
+    .limit(1);
 
-    const rankingResult = cached ?? await (async () => {
-      const fresh = await rankDocumentsForInterest({
-        interestStatement: selectedProfile.interestStatement,
-        profileSlug: selectedProfile.slug,
-        candidates: candidateDocuments.map((document) => ({
-          id: document.id,
-          title: document.title,
-          previewParagraph: document.previewParagraph,
-        })),
-      });
-
-      await setCachedRanking(selectedProfile.id, candidatesHash, fresh.model, fresh.ranking);
-
-      return { model: fresh.model, ranking: fresh.ranking };
-    })();
-
-    const candidateById = new Map(candidateDocuments.map((document) => [document.id, document]));
-    const seenIds = new Set<number>();
-    const rankedDocuments = rankingResult.ranking.selectedDocuments
-      .map<PersonalizedFeedDocument | null>((selection, index) => {
-        if (seenIds.has(selection.documentId)) {
-          return null;
-        }
-
-        const document = candidateById.get(selection.documentId);
-
-        if (!document) {
-          return null;
-        }
-
-        seenIds.add(selection.documentId);
-
-        return {
-          ...document,
-          llmRank: index + 1,
-          matchScore: selection.score,
-          whyRelevant: selection.whyRelevant,
-        } satisfies PersonalizedFeedDocument;
-      })
-      .filter(isDefined);
-
-    const rankedCapped = selectTopDocuments(rankedDocuments, candidateDocuments, MAX_SELECTED_DOCUMENTS, MAX_PER_SOURCE);
-
-    if (rankedCapped.length === 0) {
-      throw new Error("The ranking response did not map to any candidate documents");
-    }
-
-    const fromCache = cached !== null;
-    const rankingSummary = rankingResult.ranking.shortlistSummary;
-
-    const rankedIds = new Set(rankedCapped.map((d) => d.id));
-    const remaining = [
-      ...rankedDocuments.filter((d) => !rankedIds.has(d.id)),
-      ...candidateDocuments.filter((d) => !rankedIds.has(d.id) && !rankedDocuments.some((ranked) => ranked.id === d.id)),
-    ];
-    const documentsWithReadState = await withReadState(rankedCapped, remaining);
-
-    return {
-      profiles,
-      selectedProfile,
-      topDocuments: documentsWithReadState.topDocuments,
-      remainingDocuments: documentsWithReadState.remainingDocuments,
-      candidateCount: candidateDocuments.length,
-      rankingMode: "interest_ranked",
-      rankingSummary: fromCache ? `${rankingSummary} (cached)` : rankingSummary,
-      rankingStatusLabel: "Ranked by relevance",
-      model: rankingResult.model,
-      windowLabel,
-      activeTimeWindow: timeWindow,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown ranking error";
-    console.error("[personalized-feed] Interest ranking failed:", message, error);
-
-    const topIds = new Set(defaultShortlist.map((d) => d.id));
-    const documentsWithReadState = await withReadState(defaultShortlist, buildRemainingDocuments(topIds));
-    return {
-      profiles,
-      selectedProfile,
-      topDocuments: documentsWithReadState.topDocuments,
-      remainingDocuments: documentsWithReadState.remainingDocuments,
-      candidateCount: candidateDocuments.length,
-      rankingMode: "latest",
-      rankingSummary: `Interest ranking fell back to the newest stories because the OpenRouter request failed: ${message}`,
-      rankingStatusLabel: "Newest first",
-      model: env.openRouterModel,
-      windowLabel,
-      activeTimeWindow: timeWindow,
-    };
+  if (!publicOwner) {
+    throw new Error(`Public feed owner ${PUBLIC_FEED_OWNER_EMAIL} was not found`);
   }
+
+  return buildPersonalizedFeedSnapshot({
+    profileSlug: PUBLIC_FEED_PROFILE_SLUG,
+    timeWindow,
+    ownerUserId: publicOwner.id,
+    readStateUserId: null,
+  });
 }

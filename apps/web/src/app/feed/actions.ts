@@ -18,14 +18,13 @@ function getTextField(formData: FormData, fieldName: string) {
 
 function buildFeedRedirect(slug: string | null | undefined, timeWindow: string, error?: string) {
   const params = new URLSearchParams();
+  const resolvedTimeWindow = timeWindow || "week";
 
   if (slug) {
     params.set("profile", slug);
   }
 
-  if (timeWindow) {
-    params.set("window", timeWindow);
-  }
+  params.set("window", resolvedTimeWindow);
 
   if (error) {
     params.set("error", error);
@@ -68,7 +67,7 @@ export async function updateUserProfileAction(formData: FormData) {
 
   if (!Number.isInteger(profileId)) {
     revalidatePath("/feed");
-    redirect("/feed");
+    redirect("/feed?window=week");
   }
 
   let profile;

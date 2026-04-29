@@ -14,6 +14,31 @@ Phase 0 scaffolds a TypeScript monorepo for a curated-source intelligence produc
 3. The compose stack starts `postgres`, runs migrations plus source seeding once, then starts `web` and `worker`.
 4. Stop everything with `docker compose down`.
 
+## Cloudflare Tunnel
+
+Use the optional `cloudflared` Compose profile when you want a stable public DNS name without opening inbound port `3000`.
+
+1. In Cloudflare Zero Trust, create a Cloudflare Tunnel.
+2. Choose the Docker connector and copy the tunnel token into `.env`:
+   ```bash
+   CLOUDFLARE_TUNNEL_TOKEN=your-token-here
+   ```
+3. Add a public hostname for the tunnel, such as `news.example.com`.
+4. Point that hostname's service to the Compose web service:
+   ```text
+   http://web:3000
+   ```
+5. Set `APP_BASE_URL` to the public URL so generated links and OpenRouter referer headers use the public hostname:
+   ```bash
+   APP_BASE_URL=https://news.example.com
+   ```
+6. Start the stack with the tunnel profile:
+   ```bash
+   docker compose --profile tunnel up --build -d
+   ```
+
+The web service still binds to `127.0.0.1:3000` for local browser access, while Cloudflare reaches it privately over the Docker network through `cloudflared`. Do not publish router/firewall inbound access to port `3000`; the only public entrypoint should be Cloudflare.
+
 ## Local development
 
 1. Copy `.env.example` to `.env`.

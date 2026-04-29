@@ -9,6 +9,7 @@ This file applies to `apps/web/src/app/login`.
 
 ## Implementation Guidance
 - Keep login presentation here.
+- Signed-in visitors who land on login should redirect to the canonical default feed URL `/feed?window=week`.
 - Authentication rules, hashing, sessions, and allowlist behavior belong in `../../lib/auth`.
 - Do not add database logic directly to the page.
 - The auth shell should stay theme-aware and keep the access policy explanation legible in both light and dark mode.

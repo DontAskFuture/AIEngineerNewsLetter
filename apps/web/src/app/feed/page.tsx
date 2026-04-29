@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { getDashboardSnapshot } from "@/lib/dashboard";
 import {
   formatCategoryLabel,
@@ -8,7 +8,12 @@ import {
   formatRelativeTime,
   summarizeText,
 } from "@/lib/formatters";
-import { getPersonalizedFeedSnapshot, isValidTimeWindow, type TimeWindow } from "@/lib/personalized-feed";
+import {
+  getPersonalizedFeedSnapshot,
+  getPublicAiEngineerFeedSnapshot,
+  isValidTimeWindow,
+  type TimeWindow,
+} from "@/lib/personalized-feed";
 import { createUserProfileAction, deleteUserProfileAction, updateUserProfileAction } from "./actions";
 import { MoreStories } from "./more-stories";
 import { ProfileSelector } from "./profile-selector";
@@ -32,9 +37,10 @@ const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string }[] = [
 ];
 
 export default async function FeedPage({ searchParams }: FeedPageProps) {
-  const currentUser = await requireCurrentUser();
+  const currentUser = await getCurrentUser();
+  const isPublicView = currentUser === null;
   const params = searchParams ? await searchParams : undefined;
-  const selectedProfileSlug = typeof params?.profile === "string" ? params.profile : undefined;
+  const selectedProfileSlug = currentUser && typeof params?.profile === "string" ? params.profile : undefined;
   const errorCode = typeof params?.error === "string" ? params.error : undefined;
   const rawWindow = typeof params?.window === "string" ? params.window : "week";
   const timeWindow: TimeWindow = isValidTimeWindow(rawWindow) ? rawWindow : "week";
@@ -47,7 +53,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
 
   const [snapshot, personalizedFeed] = await Promise.all([
     getDashboardSnapshot(),
-    getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow, currentUser.id),
+    currentUser
+      ? getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow, currentUser.id)
+      : getPublicAiEngineerFeedSnapshot(timeWindow),
   ]);
   const orderedProfiles = [
     personalizedFeed.selectedProfile,
@@ -59,7 +67,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
       <section className="glass-card rounded-[2rem] p-6 sm:p-8">
         <div className="flex flex-wrap gap-2">
           <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
-            Ranked top 10
+            {isPublicView ? "Public preview" : "Ranked top 10"}
           </span>
           <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
             Time-aware
@@ -70,9 +78,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         </p>
         <div className="mt-4 flex max-w-4xl flex-col gap-3 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
           <p>
-            Each profile below stores a plain-English interest statement. We screen the newest stories in
-            the active daily window, ask an LLM to pick the top 10 using only the title and first
-            paragraph, then order the shortlisted stories by time.
+            {isPublicView
+              ? "Browse the public AI Engineer feed, powered by the AI Engineer profile from lianglingfan@gmail.com."
+              : "Each profile below stores a plain-English interest statement. We screen the newest stories in the active daily window, use pre-computed relevance scores when the worker has them, then fall back to newest stories while scoring catches up."}
           </p>
           <p>
             Current window: {personalizedFeed.windowLabel}. Screened {personalizedFeed.candidateCount} candidate
@@ -83,10 +91,11 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         <div className="mt-6 flex flex-wrap gap-2">
           {TIME_WINDOW_OPTIONS.map((option) => {
             const isActive = personalizedFeed.activeTimeWindow === option.value;
-            const href = `/feed?${new URLSearchParams({
-              profile: personalizedFeed.selectedProfile.slug,
-              window: option.value,
-            }).toString()}`;
+            const params = new URLSearchParams({ window: option.value });
+            if (!isPublicView) {
+              params.set("profile", personalizedFeed.selectedProfile.slug);
+            }
+            const href = `/feed?${params.toString()}`;
 
             return (
               <Link
@@ -101,8 +110,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <article className="glass-card rounded-[1.75rem] p-6 sm:p-8">
+      {!isPublicView ? (
+      <section className="glass-card rounded-[1.75rem] p-6 sm:p-8">
+        <article>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
@@ -115,15 +125,17 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             <p className="text-sm text-[color:var(--muted)]">{personalizedFeed.profiles.length} saved profiles</p>
           </div>
 
-          <ProfileSelector
-            profiles={orderedProfiles.map((profile) => ({
-              id: profile.id,
-              slug: profile.slug,
-              displayName: profile.displayName,
-            }))}
-            selectedSlug={personalizedFeed.selectedProfile.slug}
-            timeWindow={timeWindow}
-          />
+          <div className="mt-6">
+            <ProfileSelector
+              profiles={orderedProfiles.map((profile) => ({
+                id: profile.id,
+                slug: profile.slug,
+                displayName: profile.displayName,
+              }))}
+              selectedSlug={personalizedFeed.selectedProfile.slug}
+              timeWindow={timeWindow}
+            />
+          </div>
 
           {profileError ? (
             <div className="alert-error mt-5 rounded-[1.25rem] px-4 py-3 text-sm leading-6" role="alert">
@@ -131,96 +143,140 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             </div>
           ) : null}
 
-          <form
-            key={personalizedFeed.selectedProfile.id}
-            action={updateUserProfileAction}
-            className="mt-6 grid gap-4"
-          >
-            <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
-            <input type="hidden" name="timeWindow" value={timeWindow} />
-            <div className="grid gap-2">
-              <label htmlFor="displayName" className="text-sm font-medium text-[color:var(--ink)]">
-                Profile name
-              </label>
-              <input
-                id="displayName"
-                name="displayName"
-                defaultValue={personalizedFeed.selectedProfile.displayName}
-                className="field-shell px-4 py-3 text-sm"
-              />
-            </div>
+          <div className="mt-7 grid gap-7 border-t border-[color:var(--line)] pt-7 lg:grid-cols-[1.15fr_0.85fr] lg:gap-8">
+            <div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                    Edit selected
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                    Tune the profile that is currently driving this feed.
+                  </p>
+                </div>
+                <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                  Updated {formatRelativeTime(personalizedFeed.selectedProfile.updatedAt)}
+                </p>
+              </div>
 
-            <div className="grid gap-2">
-              <label htmlFor="interestStatement" className="text-sm font-medium text-[color:var(--ink)]">
-                Plain-English interest
-              </label>
-              <textarea
-                id="interestStatement"
-                name="interestStatement"
-                defaultValue={personalizedFeed.selectedProfile.interestStatement}
-                rows={7}
-                className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-                Updated {formatRelativeTime(personalizedFeed.selectedProfile.updatedAt)}
-              </p>
-              <button
-                type="submit"
-                className="button-primary"
+              <form
+                key={personalizedFeed.selectedProfile.id}
+                action={updateUserProfileAction}
+                className="mt-5 grid gap-4"
               >
-                Save interest
-              </button>
+                <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
+                <input type="hidden" name="timeWindow" value={timeWindow} />
+                <div className="grid gap-2">
+                  <label htmlFor="displayName" className="text-sm font-medium text-[color:var(--ink)]">
+                    Profile name
+                  </label>
+                  <input
+                    id="displayName"
+                    name="displayName"
+                    defaultValue={personalizedFeed.selectedProfile.displayName}
+                    className="field-shell px-4 py-3 text-sm"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <label htmlFor="interestStatement" className="text-sm font-medium text-[color:var(--ink)]">
+                    Plain-English interest
+                  </label>
+                  <textarea
+                    id="interestStatement"
+                    name="interestStatement"
+                    defaultValue={personalizedFeed.selectedProfile.interestStatement}
+                    rows={7}
+                    className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    type="submit"
+                    className="button-primary"
+                  >
+                    Save interest
+                  </button>
+                </div>
+              </form>
+
+              <form action={deleteUserProfileAction} className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
+                <input type="hidden" name="timeWindow" value={timeWindow} />
+                <p className="max-w-lg text-xs leading-6 text-[color:var(--muted)]">
+                  Delete this profile when you no longer want its shortlist. Existing read history and scores stay archived.
+                </p>
+                <button
+                  type="submit"
+                  className="button-secondary border-[color:color-mix(in_srgb,var(--danger)_35%,var(--button-secondary-border))] text-[color:var(--danger)]"
+                >
+                  Delete profile
+                </button>
+              </form>
             </div>
-          </form>
 
-          <form action={deleteUserProfileAction} className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
-            <input type="hidden" name="timeWindow" value={timeWindow} />
-            <p className="max-w-lg text-xs leading-6 text-[color:var(--muted)]">
-              Delete this profile when you no longer want its shortlist. Existing read history and scores stay archived.
-            </p>
-            <button
-              type="submit"
-              className="button-secondary border-[color:color-mix(in_srgb,var(--danger)_35%,var(--button-secondary-border))] text-[color:var(--danger)]"
-            >
-              Delete profile
-            </button>
-          </form>
-        </article>
-
-        <article className="glass-card rounded-[1.75rem] p-6 sm:p-8">
-          <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-            Create another profile
-          </p>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-            Add a second research lens when you want a different shortlist, such as infra scouting,
-            coding agents, or model pricing changes.
-          </p>
-          <form action={createUserProfileAction} className="mt-6 grid gap-3">
-            <input type="hidden" name="timeWindow" value={timeWindow} />
-            <input
-              name="displayName"
-              placeholder="Example: Infra scout"
-              className="field-shell px-4 py-3 text-sm"
-            />
-            <textarea
-              name="interestStatement"
-              rows={4}
-              placeholder="Example: Watch inference serving, GPU utilization, model routing, and pricing or latency shifts that create infra bottlenecks."
-              className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
-            />
-            <button
-              type="submit"
-              className="button-secondary w-fit"
-            >
-              Add profile
-            </button>
-          </form>
+            <div className="border-t border-[color:var(--line)] pt-7 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                Add new
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                Create a separate research lens for a different shortlist.
+              </p>
+              <form action={createUserProfileAction} className="mt-5 grid gap-3">
+                <input type="hidden" name="timeWindow" value={timeWindow} />
+                <div className="grid gap-2">
+                  <label htmlFor="newDisplayName" className="text-sm font-medium text-[color:var(--ink)]">
+                    Profile name
+                  </label>
+                  <input
+                    id="newDisplayName"
+                    name="displayName"
+                    placeholder="Example: Infra scout"
+                    className="field-shell px-4 py-3 text-sm"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <label htmlFor="newInterestStatement" className="text-sm font-medium text-[color:var(--ink)]">
+                    Plain-English interest
+                  </label>
+                  <textarea
+                    id="newInterestStatement"
+                    name="interestStatement"
+                    rows={7}
+                    placeholder="Example: Watch inference serving, GPU utilization, model routing, and pricing or latency shifts that create infra bottlenecks."
+                    className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="button-secondary w-fit"
+                >
+                  Add profile
+                </button>
+              </form>
+            </div>
+          </div>
         </article>
       </section>
+      ) : (
+        <section className="glass-card rounded-[1.75rem] p-6 sm:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+                Public profile
+              </p>
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+                You are viewing {personalizedFeed.selectedProfile.displayName} as a read-only public feed.
+                Sign in to create and tune your own profiles.
+              </p>
+            </div>
+            <Link href="/login" className="button-primary w-fit">
+              Sign in
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section
         key={`top-stories-${personalizedFeed.selectedProfile.id}`}
@@ -232,8 +288,8 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               Top stories
             </p>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-              The LLM shortlist is capped for source diversity, then reordered by time so you can review the
-              most recent high-signal items first.
+              Pre-computed relevance scores are capped for source diversity, then mixed with newest fallback
+              stories so you can review the most recent high-signal items first.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">

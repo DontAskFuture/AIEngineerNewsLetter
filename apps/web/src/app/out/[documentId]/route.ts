@@ -12,16 +12,11 @@ interface OutboundDocumentRouteProps {
 
 export async function GET(request: Request, { params }: OutboundDocumentRouteProps) {
   const currentUser = await getCurrentUser();
-
-  if (!currentUser) {
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
-
   const { documentId } = await params;
   const parsedDocumentId = Number(documentId);
 
   if (!Number.isInteger(parsedDocumentId)) {
-    return NextResponse.redirect(new URL("/feed", request.url));
+    return NextResponse.redirect(new URL("/feed?window=week", request.url));
   }
 
   const db = getDb();
@@ -35,17 +30,19 @@ export async function GET(request: Request, { params }: OutboundDocumentRoutePro
     .limit(1);
 
   if (!document) {
-    return NextResponse.redirect(new URL("/feed", request.url));
+    return NextResponse.redirect(new URL("/feed?window=week", request.url));
   }
 
-  try {
-    await markDocumentRead(currentUser.id, document.id);
-  } catch (error) {
-    console.error("Failed to mark document as read before redirect", {
-      documentId: document.id,
-      userId: currentUser.id,
-      error,
-    });
+  if (currentUser) {
+    try {
+      await markDocumentRead(currentUser.id, document.id);
+    } catch (error) {
+      console.error("Failed to mark document as read before redirect", {
+        documentId: document.id,
+        userId: currentUser.id,
+        error,
+      });
+    }
   }
 
   return NextResponse.redirect(document.canonicalUrl);

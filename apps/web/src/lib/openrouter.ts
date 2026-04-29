@@ -1,4 +1,4 @@
-import { renderRankDocumentsPrompt, renderScoreDocumentsPrompt } from "@ai-intel/shared";
+import { renderRankDocumentsPrompt, renderScoreDocumentsPrompt, scoringConfig } from "@ai-intel/shared";
 import { loadWebEnv } from "@/lib/env";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -44,6 +44,7 @@ async function chatCompletion(
   systemPrompt: string,
   userMessage: string,
   maxTokens: number,
+  modelCandidates?: string[],
 ): Promise<{ content: string; model: string; responseId: string | null }> {
   const env = loadWebEnv();
 
@@ -58,75 +59,80 @@ async function chatCompletion(
     "X-Title": "AI Builder Intelligence",
   };
 
-  const body = JSON.stringify({
-    model: env.openRouterModel,
-    temperature: 0.1,
-    max_tokens: maxTokens,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ],
-  });
-
+  const models = Array.from(new Set(modelCandidates?.length ? modelCandidates : [env.openRouterModel]));
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
-      console.log(`[openrouter] Retry ${attempt}/${MAX_RETRIES} after ${backoff}ms`);
-      await sleep(backoff);
-    }
+  for (const model of models) {
+    const body = JSON.stringify({
+      model,
+      temperature: 0.1,
+      max_tokens: maxTokens,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+    });
 
-    let response: Response;
-    try {
-      response = await fetch(OPENROUTER_CHAT_URL, {
-        method: "POST",
-        cache: "no-store",
-        headers,
-        body,
-      });
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error("Network error");
-      continue;
-    }
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
+        console.log(`[openrouter] Retry ${attempt}/${MAX_RETRIES} for ${model} after ${backoff}ms`);
+        await sleep(backoff);
+      }
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      const errorObj = payload?.error;
-      const errorMessage =
-        errorObj && typeof errorObj === "object" && typeof (errorObj as Record<string, unknown>).message === "string"
-          ? ((errorObj as Record<string, unknown>).message as string)
-          : `OpenRouter request failed with HTTP ${response.status}`;
-
-      if (isRetryableStatus(response.status) && attempt < MAX_RETRIES) {
-        console.warn(`[openrouter] HTTP ${response.status}: ${errorMessage} (will retry)`);
-        lastError = new Error(errorMessage);
+      let response: Response;
+      try {
+        response = await fetch(OPENROUTER_CHAT_URL, {
+          method: "POST",
+          cache: "no-store",
+          headers,
+          body,
+        });
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Network error");
         continue;
       }
 
-      throw new Error(errorMessage);
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        const errorObj = payload?.error;
+        const errorMessage =
+          errorObj && typeof errorObj === "object" && typeof (errorObj as Record<string, unknown>).message === "string"
+            ? ((errorObj as Record<string, unknown>).message as string)
+            : `OpenRouter request failed with HTTP ${response.status}`;
+
+        if (isRetryableStatus(response.status) && attempt < MAX_RETRIES) {
+          console.warn(`[openrouter] ${model} HTTP ${response.status}: ${errorMessage} (will retry)`);
+          lastError = new Error(errorMessage);
+          continue;
+        }
+
+        console.warn(`[openrouter] ${model} failed: ${errorMessage}`);
+        lastError = new Error(errorMessage);
+        break;
+      }
+
+      const payload = (await response.json()) as Record<string, unknown>;
+
+      const choices = payload.choices;
+      if (!Array.isArray(choices) || choices.length === 0) {
+        throw new Error("OpenRouter returned no choices");
+      }
+
+      const firstChoice = choices[0] as Record<string, unknown>;
+      const message = firstChoice.message as Record<string, unknown> | undefined;
+      const content = typeof message?.content === "string" ? message.content.trim() : null;
+
+      if (!content) {
+        throw new Error("OpenRouter returned empty content");
+      }
+
+      return {
+        content,
+        model: typeof payload.model === "string" ? payload.model : model,
+        responseId: typeof payload.id === "string" ? payload.id : null,
+      };
     }
-
-    const payload = (await response.json()) as Record<string, unknown>;
-
-    const choices = payload.choices;
-    if (!Array.isArray(choices) || choices.length === 0) {
-      throw new Error("OpenRouter returned no choices");
-    }
-
-    const firstChoice = choices[0] as Record<string, unknown>;
-    const message = firstChoice.message as Record<string, unknown> | undefined;
-    const content = typeof message?.content === "string" ? message.content.trim() : null;
-
-    if (!content) {
-      throw new Error("OpenRouter returned empty content");
-    }
-
-    return {
-      content,
-      model: typeof payload.model === "string" ? payload.model : env.openRouterModel,
-      responseId: typeof payload.id === "string" ? payload.id : null,
-    };
   }
 
   throw lastError ?? new Error("OpenRouter request failed after retries");
@@ -172,11 +178,9 @@ function parseRankingResponse(rawText: string) {
 
 export async function rankDocumentsForInterest({
   interestStatement,
-  profileSlug,
   candidates,
 }: {
   interestStatement: string;
-  profileSlug: string;
   candidates: InterestRankingCandidate[];
 }) {
   const prompt = renderRankDocumentsPrompt({ interestStatement, candidates });
@@ -231,8 +235,9 @@ export async function scoreDocumentBatch({
   candidates: InterestRankingCandidate[];
 }): Promise<{ model: string; scores: BatchScoreResult[] }> {
   const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
+  const env = loadWebEnv();
 
-  const result = await chatCompletion(prompt.system, prompt.user, 4000);
+  const result = await chatCompletion(prompt.system, prompt.user, 4000, [scoringConfig.preferredModel, env.openRouterModel]);
   const scores = parseBatchScoreResponse(result.content);
 
   return { model: result.model, scores };

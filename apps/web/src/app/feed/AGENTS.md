@@ -12,13 +12,16 @@ This file applies to `apps/web/src/app/feed`.
 
 ## Implementation Guidance
 - Keep form handling and redirects here, but keep ranking and persistence logic in `../../lib/personalized-feed`.
+- Server-action redirects should fall back to `window=week` when no current window is submitted.
 - The feed reads pre-computed scores from `document_scores`; it does not call OpenRouter at render time.
+- Feed copy should describe scoring as pre-computed and non-blocking so the UI matches runtime behavior.
 - Both the top shortlist and the expandable "More stories" section should surface `whyRelevant` copy when the ranking layer provides it.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
-- The page is protected and should continue to assume an authenticated user.
+- Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s `AI Engineer` profile; profile management stays signed-in only.
 - Preserve clear visual separation between feed hero controls, profile editing, top stories, more stories, and source registry, and keep those surfaces theme-aware.
 - Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.
 - Profile creation and update should preserve the user’s current feed window and make the selected profile obvious in the interest chip list.
+- Profile creation and selected-profile editing live in one combined profile workspace rather than separate page sections.
 - Profile-specific uncontrolled form fields and expandable story sections should be keyed by selected profile so browser state does not leak across profile switches.
 - Duplicate profile-name errors are surfaced through feed URL params so server actions can keep using redirects instead of client action state.
 - Profile deletes should be soft deletes (`is_active=false`) and redirect to a remaining profile; the UI should prevent deleting the last active profile with a clear error.

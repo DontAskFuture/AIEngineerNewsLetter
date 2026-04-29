@@ -25,7 +25,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const currentUser = await getCurrentUser();
 
   if (currentUser) {
-    redirect("/feed");
+    redirect("/feed?window=week");
   }
 
   const params = searchParams ? await searchParams : undefined;

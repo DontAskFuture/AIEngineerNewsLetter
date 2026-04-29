@@ -24,7 +24,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   const currentUser = await getCurrentUser();
 
   if (currentUser) {
-    redirect("/feed");
+    redirect("/feed?window=week");
   }
 
   const params = searchParams ? await searchParams : undefined;

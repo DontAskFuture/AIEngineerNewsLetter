@@ -39,7 +39,7 @@ export async function loginAction(formData: FormData) {
   }
 
   revalidatePath("/", "layout");
-  redirect("/feed");
+  redirect("/feed?window=week");
 }
 
 export async function signupAction(formData: FormData) {
@@ -57,7 +57,7 @@ export async function signupAction(formData: FormData) {
   }
 
   revalidatePath("/", "layout");
-  redirect("/feed");
+  redirect("/feed?window=week");
 }
 
 export async function logoutAction() {

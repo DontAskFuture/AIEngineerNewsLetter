@@ -1,13 +1,18 @@
 import { getDb, schema } from "@ai-intel/db";
-import { eq, notInArray, sql } from "drizzle-orm";
-import { renderScoreDocumentsPrompt, type PromptCandidate, type ScoreDocumentsPayload } from "@ai-intel/shared";
+import { desc, eq, notInArray, sql } from "drizzle-orm";
+import {
+  renderScoreDocumentsPrompt,
+  scoringConfig,
+  type PromptCandidate,
+  type ScoreDocumentsPayload,
+} from "@ai-intel/shared";
 import { logger } from "../logger";
 import { loadWorkerEnv } from "../env";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
-const BATCH_SIZE = 20;
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 
 function stripHtml(value: string): string {
   return value
@@ -55,16 +60,6 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
 
   const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
-  const body = JSON.stringify({
-    model: env.OPENROUTER_MODEL,
-    temperature: 0.1,
-    max_tokens: 4000,
-    messages: [
-      { role: "system", content: prompt.system },
-      { role: "user", content: prompt.user },
-    ],
-  });
-
   const headers = {
     Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
     "Content-Type": "application/json",
@@ -72,65 +67,80 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
     "X-Title": "AI Builder Intelligence",
   };
 
+  const models = Array.from(new Set([scoringConfig.preferredModel, env.OPENROUTER_MODEL]));
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
-      logger.info({ attempt, backoff }, "Retrying OpenRouter request");
-      await sleep(backoff);
-    }
+  for (const model of models) {
+    const body = JSON.stringify({
+      model,
+      temperature: 0.1,
+      max_tokens: 4000,
+      messages: [
+        { role: "system", content: prompt.system },
+        { role: "user", content: prompt.user },
+      ],
+    });
 
-    let response: Response;
-    try {
-      response = await fetch(OPENROUTER_CHAT_URL, { method: "POST", headers, body });
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error("Network error");
-      continue;
-    }
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
+        logger.info({ attempt, backoff, model }, "Retrying OpenRouter request");
+        await sleep(backoff);
+      }
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      const errObj = payload?.error;
-      const msg = errObj && typeof errObj === "object" && typeof (errObj as Record<string, unknown>).message === "string"
-        ? ((errObj as Record<string, unknown>).message as string)
-        : `HTTP ${response.status}`;
-
-      if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
-        logger.warn({ status: response.status, msg }, "Retryable OpenRouter error");
-        lastError = new Error(msg);
+      let response: Response;
+      try {
+        response = await fetch(OPENROUTER_CHAT_URL, { method: "POST", headers, body });
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Network error");
         continue;
       }
-      throw new Error(msg);
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        const errObj = payload?.error;
+        const msg = errObj && typeof errObj === "object" && typeof (errObj as Record<string, unknown>).message === "string"
+          ? ((errObj as Record<string, unknown>).message as string)
+          : `HTTP ${response.status}`;
+
+        if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+          logger.warn({ status: response.status, msg, model }, "Retryable OpenRouter error");
+          lastError = new Error(msg);
+          continue;
+        }
+
+        logger.warn({ status: response.status, msg, model }, "OpenRouter model failed");
+        lastError = new Error(msg);
+        break;
+      }
+
+      const payload = (await response.json()) as Record<string, unknown>;
+      const choices = payload.choices;
+      if (!Array.isArray(choices) || choices.length === 0) throw new Error("No choices returned");
+
+      const firstChoice = choices[0] as Record<string, unknown>;
+      const message = firstChoice.message as Record<string, unknown> | undefined;
+      const content = typeof message?.content === "string" ? message.content.trim() : null;
+      if (!content) throw new Error("Empty content returned");
+
+      const parsed = JSON.parse(extractJson(content)) as unknown;
+      const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+      const rawScores = Array.isArray(record?.scores) ? record.scores : [];
+
+      const scores: ScoreResult[] = rawScores
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null;
+          const r = entry as Record<string, unknown>;
+          const documentId = Number(r.documentId);
+          const score = Number(r.score);
+          const whyRelevant = typeof r.whyRelevant === "string" ? r.whyRelevant.trim() : "";
+          if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) return null;
+          return { documentId, score: Math.max(1, Math.min(100, Math.round(score))), whyRelevant };
+        })
+        .filter((e): e is ScoreResult => e !== null);
+
+      return { model: typeof payload.model === "string" ? payload.model : model, scores };
     }
-
-    const payload = (await response.json()) as Record<string, unknown>;
-    const choices = payload.choices;
-    if (!Array.isArray(choices) || choices.length === 0) throw new Error("No choices returned");
-
-    const firstChoice = choices[0] as Record<string, unknown>;
-    const message = firstChoice.message as Record<string, unknown> | undefined;
-    const content = typeof message?.content === "string" ? message.content.trim() : null;
-    if (!content) throw new Error("Empty content returned");
-
-    const parsed = JSON.parse(extractJson(content)) as unknown;
-    const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-    const rawScores = Array.isArray(record?.scores) ? record.scores : [];
-
-    const scores: ScoreResult[] = rawScores
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") return null;
-        const r = entry as Record<string, unknown>;
-        const documentId = Number(r.documentId);
-        const score = Number(r.score);
-        const whyRelevant = typeof r.whyRelevant === "string" ? r.whyRelevant.trim() : "";
-        if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) return null;
-        return { documentId, score: Math.max(1, Math.min(100, Math.round(score))), whyRelevant };
-      })
-      .filter((e): e is ScoreResult => e !== null);
-
-    const model = typeof payload.model === "string" ? payload.model : env.OPENROUTER_MODEL;
-    return { model, scores };
   }
 
   throw lastError ?? new Error("OpenRouter request failed after retries");
@@ -159,9 +169,10 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
     .select({ id: schema.documents.id, title: schema.documents.title, summary: schema.documents.summary, bodyText: schema.documents.bodyText })
     .from(schema.documents)
     .where(notInArray(schema.documents.id, alreadyScoredIds))
-    .orderBy(schema.documents.id);
+    .orderBy(desc(documentSortKey), desc(schema.documents.id))
+    .limit(scoringConfig.maxDocumentsPerRun);
 
-  const totalBatches = Math.ceil(unscoredDocs.length / BATCH_SIZE);
+  const totalBatches = Math.ceil(unscoredDocs.length / scoringConfig.batchSize);
 
   if (unscoredDocs.length === 0) {
     logger.info({ profileId }, "No unscored documents");
@@ -176,9 +187,9 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
   const jobId = jobRow!.id;
 
   try {
-    for (let i = 0; i < unscoredDocs.length; i += BATCH_SIZE) {
-      const batch = unscoredDocs.slice(i, i + BATCH_SIZE);
-      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+    for (let i = 0; i < unscoredDocs.length; i += scoringConfig.batchSize) {
+      const batch = unscoredDocs.slice(i, i + scoringConfig.batchSize);
+      const batchNumber = Math.floor(i / scoringConfig.batchSize) + 1;
 
       const candidates: PromptCandidate[] = batch.map((doc) => ({
         id: doc.id,

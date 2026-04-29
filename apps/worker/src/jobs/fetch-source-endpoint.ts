@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import RSSParser from "rss-parser";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import { canonicalizeUrl, type FetchSourceEndpointPayload } from "@ai-intel/shared";
 import { logger } from "../logger";
@@ -10,6 +10,12 @@ import { persistRawPayload } from "../storage/local-raw-store";
 
 const parser = new RSSParser();
 const userAgent = "ai-builder-intelligence-bot/0.1 (+https://localhost)";
+const MAX_CRAWLED_DOCUMENTS = 1000;
+const MAX_DOCUMENTS_PER_SOURCE = 50;
+const CRAWL_CAP_LOCK_KEY = 4_242_001;
+
+type Db = ReturnType<typeof getDb>;
+type DocumentInsertValues = typeof schema.documents.$inferInsert;
 
 function hashValue(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -57,6 +63,42 @@ async function getExistingCanonicalUrls(db: ReturnType<typeof getDb>, canonicalU
   return new Set(rows.map((row) => row.canonicalUrl));
 }
 
+async function insertDocumentWithinCrawlCaps(db: Db, values: DocumentInsertValues) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${CRAWL_CAP_LOCK_KEY})`);
+
+    const [totalRow] = await tx.select({ count: sql<number>`count(*)::int` }).from(schema.documents);
+    const totalCount = Number(totalRow?.count ?? 0);
+
+    if (totalCount >= MAX_CRAWLED_DOCUMENTS) {
+      return { inserted: false, reason: "global_cap" as const };
+    }
+
+    const [sourceRow] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.documents)
+      .where(eq(schema.documents.sourceId, values.sourceId));
+    const sourceCount = Number(sourceRow?.count ?? 0);
+
+    if (sourceCount >= MAX_DOCUMENTS_PER_SOURCE) {
+      return { inserted: false, reason: "source_cap" as const };
+    }
+
+    const [createdDocument] = await tx
+      .insert(schema.documents)
+      .values(values)
+      .onConflictDoNothing({
+        target: schema.documents.canonicalUrl,
+      })
+      .returning({ id: schema.documents.id });
+
+    return {
+      inserted: Boolean(createdDocument),
+      reason: createdDocument ? null : ("duplicate" as const),
+    };
+  });
+}
+
 async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sourceEndpointId: number, baseUrl: string, body: string) {
   const db = getDb();
   const feed = await parser.parseString(body);
@@ -92,6 +134,7 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
   const existingCanonicalUrls = await getExistingCanonicalUrls(db, candidates.map((candidate) => candidate.canonicalUrl));
   let extractedCount = 0;
   let skippedCount = 0;
+  let capSkippedCount = 0;
 
   for (const candidate of candidates) {
     if (existingCanonicalUrls.has(candidate.canonicalUrl)) {
@@ -99,28 +142,24 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
       continue;
     }
 
-    const [createdDocument] = await db
-      .insert(schema.documents)
-      .values({
-        sourceId,
-        sourceEndpointId,
-        rawDocumentId,
-        canonicalUrl: candidate.canonicalUrl,
-        externalId: candidate.externalId,
-        title: candidate.title,
-        summary: candidate.summary,
-        bodyText: candidate.bodyText,
-        sourcePublishedAt: candidate.sourcePublishedAt,
-        contentHash: candidate.contentHash,
-        metadata: candidate.metadata,
-      })
-      .onConflictDoNothing({
-        target: schema.documents.canonicalUrl,
-      })
-      .returning({ id: schema.documents.id });
+    const result = await insertDocumentWithinCrawlCaps(db, {
+      sourceId,
+      sourceEndpointId,
+      rawDocumentId,
+      canonicalUrl: candidate.canonicalUrl,
+      externalId: candidate.externalId,
+      title: candidate.title,
+      summary: candidate.summary,
+      bodyText: candidate.bodyText,
+      sourcePublishedAt: candidate.sourcePublishedAt,
+      contentHash: candidate.contentHash,
+      metadata: candidate.metadata,
+    });
 
-    if (createdDocument) {
+    if (result.inserted) {
       extractedCount += 1;
+    } else if (result.reason === "global_cap" || result.reason === "source_cap") {
+      capSkippedCount += 1;
     } else {
       skippedCount += 1;
     }
@@ -128,6 +167,13 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
 
   if (skippedCount > 0) {
     logger.info({ skippedCount, feedTitle: feed.title ?? null }, "Skipped feed items with existing canonical URLs");
+  }
+
+  if (capSkippedCount > 0) {
+    logger.info(
+      { capSkippedCount, maxCrawledDocuments: MAX_CRAWLED_DOCUMENTS, maxDocumentsPerSource: MAX_DOCUMENTS_PER_SOURCE },
+      "Skipped feed items because crawl document caps were reached",
+    );
   }
 
   return extractedCount;
@@ -191,30 +237,24 @@ async function upsertSingleHtmlDocument(
   const canonicalUrl = canonicalizeUrl(articleUrl);
   const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
 
-  const [createdDocument] = await db
-    .insert(schema.documents)
-    .values({
-      sourceId,
-      sourceEndpointId,
-      rawDocumentId,
-      canonicalUrl,
-      externalId: null,
-      title,
-      summary,
-      bodyText,
-      sourcePublishedAt: null,
-      contentHash,
-      metadata: {
-        byline: article?.byline ?? null,
-        siteName: article?.siteName ?? null,
-      },
-    })
-    .onConflictDoNothing({
-      target: schema.documents.canonicalUrl,
-    })
-    .returning({ id: schema.documents.id });
+  const result = await insertDocumentWithinCrawlCaps(db, {
+    sourceId,
+    sourceEndpointId,
+    rawDocumentId,
+    canonicalUrl,
+    externalId: null,
+    title,
+    summary,
+    bodyText,
+    sourcePublishedAt: null,
+    contentHash,
+    metadata: {
+      byline: article?.byline ?? null,
+      siteName: article?.siteName ?? null,
+    },
+  });
 
-  return Boolean(createdDocument);
+  return result.inserted;
 }
 
 async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourceEndpointId: number, url: string, body: string) {
