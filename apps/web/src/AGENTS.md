@@ -19,3 +19,4 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - OpenRouter prompt text should come from shared prompt helpers rather than route-local or lib-local string constants.
 - Web-triggered scoring should match worker scoring by reading run size, batch size, and preferred model from shared scoring config.
 - Personalized feed time windows should filter candidate documents in SQL/application code before any OpenRouter prompt is rendered.
+- Public auth actions should call the shared login-attempt throttle before password verification and record the outcome for auditability.

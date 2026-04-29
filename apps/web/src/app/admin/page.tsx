@@ -19,6 +19,10 @@ import { ScoringProgress } from "./scoring-progress";
 
 export const dynamic = "force-dynamic";
 
+function formatScore(value: number | null) {
+  return value == null ? "-" : value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
 export default async function AdminPage() {
   await requireAdmin();
   const env = loadWebEnv();
@@ -137,44 +141,83 @@ export default async function AdminPage() {
             Scoring status by source
           </p>
           <div className="mt-6 overflow-x-auto">
-            <div className="table-shell min-w-[700px]">
-              <div className="table-head grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-                <span>Source</span>
-                <span>Total</span>
-                <span>Scored</span>
-                <span>Unscored</span>
-                <span>Avg</span>
-                <span>Min</span>
-                <span>Max</span>
-              </div>
+            <div className="table-shell min-w-[920px]">
+              <table className="w-full table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-[34%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[11%]" />
+                </colgroup>
+                <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Source</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Coverage</th>
+                    <th scope="col" className="px-4 py-3 text-right font-medium">Total</th>
+                    <th scope="col" className="px-4 py-3 text-right font-medium">Scored</th>
+                    <th scope="col" className="px-4 py-3 text-right font-medium">Unscored</th>
+                    <th scope="col" className="px-4 py-3 text-right font-medium">Avg</th>
+                    <th scope="col" className="px-4 py-3 text-right font-medium">Range</th>
+                  </tr>
+                </thead>
+                <tbody>
               {sourceScoringStats.map((source) => {
                 const pct = source.totalDocuments > 0
                   ? Math.round((source.scoredDocuments / source.totalDocuments) * 100)
                   : 0;
                 return (
-                  <div
+                  <tr
                     key={source.sourceId}
-                    className="table-row grid grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr_0.5fr_0.5fr_0.5fr] gap-4 px-4 py-3 text-sm text-[color:var(--muted)]"
+                    className="table-row text-[color:var(--muted)]"
                   >
-                    <span className="font-medium text-[color:var(--ink)]">
+                    <td className="px-4 py-3 align-middle font-medium leading-6 text-[color:var(--ink)]">
                       {source.sourceName}
-                      <span className="ml-2 text-xs text-[color:var(--muted)]">
-                        {pct === 100
-                          ? "✓"
-                          : `${pct}%`}
-                      </span>
-                    </span>
-                    <span>{source.totalDocuments}</span>
-                    <span className="text-[color:var(--leaf)]">{source.scoredDocuments}</span>
-                    <span className={source.unscoredDocuments > 0 ? "text-[color:var(--warning)]" : ""}>
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-[color:color-mix(in_srgb,var(--muted)_18%,transparent)]"
+                          aria-hidden="true"
+                        >
+                          <div
+                            className="h-full rounded-full bg-[color:var(--leaf)]"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="w-10 text-right text-xs tabular-nums text-[color:var(--muted)]">
+                          {pct}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums">
+                      {source.totalDocuments.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums text-[color:var(--leaf)]">
+                      {source.scoredDocuments.toLocaleString()}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right align-middle tabular-nums ${
+                        source.unscoredDocuments > 0 ? "text-[color:var(--warning)]" : ""
+                      }`}
+                    >
                       {source.unscoredDocuments}
-                    </span>
-                    <span>{source.avgScore ?? "—"}</span>
-                    <span>{source.minScore ?? "—"}</span>
-                    <span>{source.maxScore ?? "—"}</span>
-                  </div>
+                    </td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums">
+                      {formatScore(source.avgScore)}
+                    </td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums">
+                      {source.minScore == null || source.maxScore == null
+                        ? "-"
+                        : `${formatScore(source.minScore)}-${formatScore(source.maxScore)}`}
+                    </td>
+                  </tr>
                 );
               })}
+                </tbody>
+              </table>
             </div>
           </div>
         </section>

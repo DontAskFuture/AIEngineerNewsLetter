@@ -3,11 +3,11 @@ services:
     image: postgres:16-alpine
     container_name: ai-intel-postgres
     environment:
-      POSTGRES_DB: ai_intel
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-ai_intel}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ai_intel
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-ai_intel}
       LOG_LEVEL: info
       RAW_STORAGE_DIR: /app/var/raw
       FETCH_INTERVAL_MINUTES: 60
@@ -38,7 +38,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ai_intel
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-ai_intel}
       LOG_LEVEL: info
       RAW_STORAGE_DIR: /app/var/raw
       FETCH_INTERVAL_MINUTES: 60
@@ -47,6 +47,7 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Los_Angeles}
       AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-lianglingfan@gmail.com}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-lianglingfan@gmail.com}
       AUTH_SESSION_DAYS: ${AUTH_SESSION_DAYS:-30}
       NODE_ENV: production
     ports:
@@ -58,7 +59,9 @@ services:
     depends_on:
       web:
         condition: service_started
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate run --token-file /run/secrets/cloudflare_tunnel_token
+    secrets:
+      - cloudflare_tunnel_token
     restart: unless-stopped
     profiles:
       - tunnel
@@ -71,7 +74,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ai_intel
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-ai_intel}
       LOG_LEVEL: info
       RAW_STORAGE_DIR: /app/var/raw
       FETCH_INTERVAL_MINUTES: 60
@@ -94,3 +97,7 @@ services:
 volumes:
   postgres_data:
   raw_data:
+
+secrets:
+  cloudflare_tunnel_token:
+    file: ./.secrets/cloudflare_tunnel_token

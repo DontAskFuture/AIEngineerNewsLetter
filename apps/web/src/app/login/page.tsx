@@ -11,6 +11,7 @@ const errorMessages: Record<string, string> = {
   password_too_short: "Use a password with at least 8 characters.",
   invalid_credentials: "Email or password is incorrect.",
   account_disabled: "This account is currently disabled.",
+  too_many_attempts: "Too many failed login attempts. Try again in a few minutes.",
   unknown: "We could not sign you in. Please try again.",
 };
 

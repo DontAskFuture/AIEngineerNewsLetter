@@ -1,8 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { AuthError, logoutCurrentUser, signInWithPassword, signUpWithPassword } from "@/lib/auth";
+import {
+  assertLoginAttemptAllowed,
+  AuthError,
+  logoutCurrentUser,
+  recordLoginAttempt,
+  signInWithPassword,
+  signUpWithPassword,
+} from "@/lib/auth";
 
 function getTextField(formData: FormData, fieldName: string) {
   const value = formData.get(fieldName);
@@ -24,13 +32,24 @@ function buildAuthRedirect(path: string, email: string, errorCode?: string) {
   return query ? `${path}?${query}` : path;
 }
 
+async function getClientIpAddress() {
+  const headerStore = await headers();
+  const forwardedFor = headerStore.get("cf-connecting-ip") ?? headerStore.get("x-forwarded-for") ?? "";
+  return forwardedFor.split(",")[0]?.trim() || "unknown";
+}
+
 export async function loginAction(formData: FormData) {
   const email = getTextField(formData, "email").trim().toLowerCase();
   const password = getTextField(formData, "password");
+  const ipAddress = await getClientIpAddress();
 
   try {
+    await assertLoginAttemptAllowed(email, ipAddress);
     await signInWithPassword(email, password);
+    await recordLoginAttempt(email, ipAddress, true);
   } catch (error) {
+    await recordLoginAttempt(email, ipAddress, false);
+
     if (error instanceof AuthError) {
       redirect(buildAuthRedirect("/login", email, error.code));
     }

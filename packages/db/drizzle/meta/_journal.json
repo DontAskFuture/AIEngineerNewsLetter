@@ -78,6 +78,20 @@
       "when": 1776988247066,
       "tag": "0010_common_pixie",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777433942885,
+      "tag": "0011_eminent_screwball",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777434103258,
+      "tag": "0012_cuddly_apocalypse",
+      "breakpoints": true
     }
   ]
 }

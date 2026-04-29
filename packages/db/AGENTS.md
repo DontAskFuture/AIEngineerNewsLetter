@@ -7,6 +7,7 @@ This file applies to `packages/db` and its subdirectories unless a deeper file o
 - This package is the single source of truth for the Postgres schema and Drizzle client.
 - It exports schema objects used by both the web app and the worker.
 - Key tables include `sources`, `source_endpoints`, `documents`, `document_scores`, `scoring_jobs`, `user_profiles`, `auth_users`, and `auth_sessions`.
+- `auth_login_attempts` records public login attempts for brute-force throttling.
 
 ## Implementation Guidance
 - Schema changes begin in `src/schema.ts`.

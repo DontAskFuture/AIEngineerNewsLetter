@@ -19,9 +19,11 @@ Phase 0 scaffolds a TypeScript monorepo for a curated-source intelligence produc
 Use the optional `cloudflared` Compose profile when you want a stable public DNS name without opening inbound port `3000`.
 
 1. In Cloudflare Zero Trust, create a Cloudflare Tunnel.
-2. Choose the Docker connector and copy the tunnel token into `.env`:
+2. Choose the Docker connector and copy the tunnel token into an ignored local secret file:
    ```bash
-   CLOUDFLARE_TUNNEL_TOKEN=your-token-here
+   mkdir -p .secrets
+   printf '%s\n' 'your-token-here' > .secrets/cloudflare_tunnel_token
+   chmod 600 .secrets/cloudflare_tunnel_token
    ```
 3. Add a public hostname for the tunnel, such as `news.example.com`.
 4. Point that hostname's service to the Compose web service:
@@ -65,6 +67,7 @@ The web service still binds to `127.0.0.1:3000` for local browser access, while 
 - CI enforcement lives in `.github/workflows/agents-policy.yml`.
 - The app now uses a lightweight email and password login flow backed by Postgres sessions.
 - `AUTH_ALLOWED_EMAILS` controls who can create or access an account. It defaults to `lianglingfan@gmail.com`.
+- `ADMIN_EMAILS` controls access to `/admin` and admin APIs. Production defaults to `lianglingfan@gmail.com`.
 - Passwords are stored as salted hashes, not plain text.
 - Add `OPENROUTER_API_KEY` to enable personalized feed ranking with OpenRouter Responses and `openai/gpt-5.4-mini`.
 - The personalized shortlist uses each profile's plain-English interest statement plus the title and first paragraph from today's documents.

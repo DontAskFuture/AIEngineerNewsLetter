@@ -14,6 +14,7 @@ This file applies to `packages/shared/src`.
 
 ## Implementation Guidance
 - Keep source definitions explicit and readable.
+- When expanding the registry, prefer feeds that return valid RSS/Atom and use HTML endpoints only for high-value sources without working feeds.
 - Shared types should reflect stable contracts used by both apps.
 - URL normalization rules should be conservative because they affect dedupe and document identity.
 - Prompt templates should stay centralized here and keep complex formatting in TypeScript helpers rather than hidden in template strings.

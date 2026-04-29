@@ -3,6 +3,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -91,6 +92,18 @@ export const authSessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("auth_sessions_token_hash_idx").on(table.sessionTokenHash)],
+);
+
+export const authLoginAttempts = pgTable(
+  "auth_login_attempts",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    email: text("email").notNull(),
+    ipAddress: text("ip_address").notNull(),
+    succeeded: boolean("succeeded").notNull().default(false),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("auth_login_attempts_lookup_idx").on(table.email, table.ipAddress, table.attemptedAt)],
 );
 
 export const documentReads = pgTable(

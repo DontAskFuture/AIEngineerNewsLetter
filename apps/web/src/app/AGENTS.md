@@ -10,7 +10,7 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 - `auth-actions.ts` owns top-level login and logout mutations.
 - `out/[documentId]` is the authenticated outbound redirect that records `document_reads` before redirecting to an external story URL.
 - `api/score-all` streams Server-Sent Events while iterating active profiles and delegating per-profile work to `../lib/scoring`. It must stay admin-gated and thin.
-- `api/scoring-status` is a read-only JSON endpoint that surfaces the current scoring job and recent history via `../lib/scoring-tracker`, powering the admin progress UI polling loop.
+- `api/scoring-status` is an admin-only JSON endpoint that surfaces the current scoring job and recent history via `../lib/scoring-tracker`, powering the admin progress UI polling loop.
 - `/` is a thin redirect to `/feed?window=week`, which is the canonical default public feed entrypoint.
 
 ## Implementation Guidance

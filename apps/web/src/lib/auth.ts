@@ -1,13 +1,15 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, gt } from "drizzle-orm";
+import { and, count, eq, gt } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import { loadWebEnv } from "@/lib/env";
 
 const SESSION_COOKIE_NAME = "ai_intel_session";
 const PASSWORD_HASH_BYTES = 64;
 const PASSWORD_MIN_LENGTH = 8;
+const LOGIN_ATTEMPT_WINDOW_MINUTES = 15;
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 
 export interface AuthenticatedUser {
   id: number;
@@ -20,7 +22,8 @@ export type AuthErrorCode =
   | "password_too_short"
   | "invalid_credentials"
   | "account_disabled"
-  | "email_already_exists";
+  | "email_already_exists"
+  | "too_many_attempts";
 
 export class AuthError extends Error {
   code: AuthErrorCode;
@@ -72,6 +75,49 @@ export function getAllowedEmails() {
 
 export function getAllowedEmailLabel() {
   return getAllowedEmails().join(", ");
+}
+
+export async function assertLoginAttemptAllowed(email: string, ipAddress: string) {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail) {
+    return;
+  }
+
+  const db = getDb();
+  const attemptedAfter = new Date(Date.now() - LOGIN_ATTEMPT_WINDOW_MINUTES * 60 * 1000);
+  const [row] = await db
+    .select({ failedCount: count() })
+    .from(schema.authLoginAttempts)
+    .where(
+      and(
+        eq(schema.authLoginAttempts.email, normalizedEmail),
+        eq(schema.authLoginAttempts.ipAddress, ipAddress),
+        eq(schema.authLoginAttempts.succeeded, false),
+        gt(schema.authLoginAttempts.attemptedAt, attemptedAfter),
+      ),
+    );
+
+  if ((row?.failedCount ?? 0) >= MAX_FAILED_LOGIN_ATTEMPTS) {
+    throw new AuthError(
+      "too_many_attempts",
+      `Too many failed login attempts. Try again in ${LOGIN_ATTEMPT_WINDOW_MINUTES} minutes.`,
+    );
+  }
+}
+
+export async function recordLoginAttempt(email: string, ipAddress: string, succeeded: boolean) {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail) {
+    return;
+  }
+
+  await getDb().insert(schema.authLoginAttempts).values({
+    email: normalizedEmail,
+    ipAddress,
+    succeeded,
+  });
 }
 
 export async function signUpWithPassword(email: string, password: string): Promise<AuthenticatedUser> {
