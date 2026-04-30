@@ -7,6 +7,7 @@ const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}
 const MAX_CANDIDATE_DOCUMENTS = 200;
 const MAX_SELECTED_DOCUMENTS = 10;
 const MAX_PER_SOURCE = 5;
+const MAX_FRESHNESS_BOOST = 20;
 const PUBLIC_FEED_OWNER_EMAIL = "lianglingfan@gmail.com";
 const PUBLIC_FEED_PROFILE_SLUG = "founding-analyst";
 
@@ -97,6 +98,13 @@ function selectTopDocuments(
   }
 
   return selected;
+}
+
+function getFreshnessAdjustedScore(score: number, sortTime: Date, cutoff: Date, now: Date) {
+  const windowMs = Math.max(now.getTime() - cutoff.getTime(), 1);
+  const ageMs = Math.max(now.getTime() - sortTime.getTime(), 0);
+  const freshnessRatio = Math.max(0, 1 - ageMs / windowMs);
+  return score + freshnessRatio * MAX_FRESHNESS_BOOST;
 }
 
 export interface FeedUserProfile {
@@ -658,11 +666,31 @@ async function buildPersonalizedFeedSnapshot({
         gt(documentSortKey, cutoff),
       ),
     )
-    .orderBy(desc(schema.documentScores.score))
+    .orderBy(desc(schema.documentScores.score), desc(documentSortKey))
     .limit(MAX_CANDIDATE_DOCUMENTS);
 
   if (scoredRows.length > 0) {
-    const scoredDocs: PersonalizedFeedDocument[] = scoredRows.map((row, index) => ({
+    const rankedScoredRows = scoredRows
+      .map((row) => ({
+        row,
+        adjustedScore: getFreshnessAdjustedScore(
+          row.score,
+          row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime),
+          cutoff,
+          new Date(),
+        ),
+      }))
+      .sort((a, b) => {
+        if (b.adjustedScore !== a.adjustedScore) {
+          return b.adjustedScore - a.adjustedScore;
+        }
+
+        const aTime = a.row.sortTime instanceof Date ? a.row.sortTime.getTime() : new Date(a.row.sortTime).getTime();
+        const bTime = b.row.sortTime instanceof Date ? b.row.sortTime.getTime() : new Date(b.row.sortTime).getTime();
+        return bTime - aTime;
+      });
+
+    const scoredDocs: PersonalizedFeedDocument[] = rankedScoredRows.map(({ row }, index) => ({
       ...mapCandidateRow(row),
       llmRank: index + 1,
       matchScore: row.score,
@@ -679,7 +707,7 @@ async function buildPersonalizedFeedSnapshot({
       ...unscoredCandidates,
     ];
 
-    const firstModel = scoredRows[0]?.model ?? null;
+    const firstModel = rankedScoredRows[0]?.row.model ?? null;
     const documentsWithReadState = await withReadState(topDocuments, remaining);
 
     return {
@@ -689,7 +717,7 @@ async function buildPersonalizedFeedSnapshot({
       remainingDocuments: documentsWithReadState.remainingDocuments,
       candidateCount: candidateDocuments.length,
       rankingMode: "interest_ranked",
-      rankingSummary: "Ranked by pre-computed relevance scores.",
+      rankingSummary: "Ranked by pre-computed relevance scores with a freshness boost.",
       rankingStatusLabel: "Ranked by relevance",
       model: firstModel,
       windowLabel,

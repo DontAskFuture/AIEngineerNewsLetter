@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import RSSParser from "rss-parser";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import { canonicalizeUrl, type FetchSourceEndpointPayload } from "@ai-intel/shared";
 import { logger } from "../logger";
@@ -10,13 +10,10 @@ import { persistRawPayload } from "../storage/local-raw-store";
 
 const parser = new RSSParser();
 const userAgent = "ai-builder-intelligence-bot/0.1 (+https://localhost)";
-const MAX_CRAWLED_DOCUMENTS = 1000;
 const MAX_DOCUMENTS_PER_SOURCE = 50;
-const CRAWL_CAP_LOCK_KEY = 4_242_001;
 const FETCH_MAX_ATTEMPTS = 3;
 const FETCH_RETRY_BASE_MS = 500;
 
-type Db = ReturnType<typeof getDb>;
 type DocumentInsertValues = typeof schema.documents.$inferInsert;
 
 class FetchHttpError extends Error {
@@ -112,6 +109,34 @@ function toDate(value: string | undefined) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function firstMetaContent(dom: JSDOM, selectors: string[]) {
+  for (const selector of selectors) {
+    const value = dom.window.document.querySelector(selector)?.getAttribute("content")?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function extractPublishedAt(dom: JSDOM) {
+  const content = firstMetaContent(dom, [
+    'meta[property="article:published_time"]',
+    'meta[property="og:published_time"]',
+    'meta[name="date"]',
+    'meta[name="pubdate"]',
+    'meta[name="publishdate"]',
+    'meta[name="publish_date"]',
+    'meta[name="published"]',
+    'meta[itemprop="datePublished"]',
+    'meta[name="parsely-pub-date"]',
+    'meta[name="sailthru.date"]',
+  ]);
+
+  return toDate(content ?? undefined);
+}
+
 function inferMimeType(contentTypeHeader: string | null) {
   if (!contentTypeHeader) {
     return "text/html";
@@ -137,40 +162,16 @@ async function getExistingCanonicalUrls(db: ReturnType<typeof getDb>, canonicalU
   return new Set(rows.map((row) => row.canonicalUrl));
 }
 
-async function insertDocumentWithinCrawlCaps(db: Db, values: DocumentInsertValues) {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${CRAWL_CAP_LOCK_KEY})`);
+async function insertDocument(db: ReturnType<typeof getDb>, values: DocumentInsertValues) {
+  const [createdDocument] = await db
+    .insert(schema.documents)
+    .values(values)
+    .onConflictDoNothing({
+      target: schema.documents.canonicalUrl,
+    })
+    .returning({ id: schema.documents.id });
 
-    const [totalRow] = await tx.select({ count: sql<number>`count(*)::int` }).from(schema.documents);
-    const totalCount = Number(totalRow?.count ?? 0);
-
-    if (totalCount >= MAX_CRAWLED_DOCUMENTS) {
-      return { inserted: false, reason: "global_cap" as const };
-    }
-
-    const [sourceRow] = await tx
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.documents)
-      .where(eq(schema.documents.sourceId, values.sourceId));
-    const sourceCount = Number(sourceRow?.count ?? 0);
-
-    if (sourceCount >= MAX_DOCUMENTS_PER_SOURCE) {
-      return { inserted: false, reason: "source_cap" as const };
-    }
-
-    const [createdDocument] = await tx
-      .insert(schema.documents)
-      .values(values)
-      .onConflictDoNothing({
-        target: schema.documents.canonicalUrl,
-      })
-      .returning({ id: schema.documents.id });
-
-    return {
-      inserted: Boolean(createdDocument),
-      reason: createdDocument ? null : ("duplicate" as const),
-    };
-  });
+  return Boolean(createdDocument);
 }
 
 async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sourceEndpointId: number, baseUrl: string, body: string) {
@@ -208,7 +209,7 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
   const existingCanonicalUrls = await getExistingCanonicalUrls(db, candidates.map((candidate) => candidate.canonicalUrl));
   let extractedCount = 0;
   let skippedCount = 0;
-  let capSkippedCount = 0;
+  let sourceCapSkippedCount = 0;
 
   for (const candidate of candidates) {
     if (existingCanonicalUrls.has(candidate.canonicalUrl)) {
@@ -216,7 +217,12 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
       continue;
     }
 
-    const result = await insertDocumentWithinCrawlCaps(db, {
+    if (extractedCount >= MAX_DOCUMENTS_PER_SOURCE) {
+      sourceCapSkippedCount += 1;
+      continue;
+    }
+
+    const inserted = await insertDocument(db, {
       sourceId,
       sourceEndpointId,
       rawDocumentId,
@@ -230,10 +236,8 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
       metadata: candidate.metadata,
     });
 
-    if (result.inserted) {
+    if (inserted) {
       extractedCount += 1;
-    } else if (result.reason === "global_cap" || result.reason === "source_cap") {
-      capSkippedCount += 1;
     } else {
       skippedCount += 1;
     }
@@ -243,10 +247,10 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
     logger.info({ skippedCount, feedTitle: feed.title ?? null }, "Skipped feed items with existing canonical URLs");
   }
 
-  if (capSkippedCount > 0) {
+  if (sourceCapSkippedCount > 0) {
     logger.info(
-      { capSkippedCount, maxCrawledDocuments: MAX_CRAWLED_DOCUMENTS, maxDocumentsPerSource: MAX_DOCUMENTS_PER_SOURCE },
-      "Skipped feed items because crawl document caps were reached",
+      { sourceCapSkippedCount, maxDocumentsPerSource: MAX_DOCUMENTS_PER_SOURCE },
+      "Skipped feed items because the per-source fetch cap was reached",
     );
   }
 
@@ -299,7 +303,12 @@ async function upsertSingleHtmlDocument(
   sourceEndpointId: number,
   articleUrl: string,
   body: string,
-): Promise<boolean> {
+  insertedForSource: number,
+): Promise<boolean | "source_cap"> {
+  if (insertedForSource >= MAX_DOCUMENTS_PER_SOURCE) {
+    return "source_cap";
+  }
+
   const dom = new JSDOM(body, { url: articleUrl });
   const article = new Readability(dom.window.document).parse();
 
@@ -310,8 +319,9 @@ async function upsertSingleHtmlDocument(
   const bodyText = article?.textContent?.trim() || null;
   const canonicalUrl = canonicalizeUrl(articleUrl);
   const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
+  const sourcePublishedAt = extractPublishedAt(dom);
 
-  const result = await insertDocumentWithinCrawlCaps(db, {
+  return insertDocument(db, {
     sourceId,
     sourceEndpointId,
     rawDocumentId,
@@ -320,15 +330,13 @@ async function upsertSingleHtmlDocument(
     title,
     summary,
     bodyText,
-    sourcePublishedAt: null,
+    sourcePublishedAt,
     contentHash,
     metadata: {
       byline: article?.byline ?? null,
       siteName: article?.siteName ?? null,
     },
   });
-
-  return result.inserted;
 }
 
 async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourceEndpointId: number, url: string, body: string) {
@@ -344,6 +352,7 @@ async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourc
 
   let extractedCount = 0;
   let skippedCount = 0;
+  let sourceCapSkippedCount = 0;
   const existingCanonicalUrls = await getExistingCanonicalUrls(db, articleLinks);
 
   for (const articleUrl of articleLinks) {
@@ -363,9 +372,19 @@ async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourc
       if (!response.ok) continue;
 
       const articleBody = await response.text();
-      const inserted = await upsertSingleHtmlDocument(db, rawDocumentId, sourceId, sourceEndpointId, articleUrl, articleBody);
+      const inserted = await upsertSingleHtmlDocument(
+        db,
+        rawDocumentId,
+        sourceId,
+        sourceEndpointId,
+        articleUrl,
+        articleBody,
+        extractedCount,
+      );
 
-      if (inserted) {
+      if (inserted === "source_cap") {
+        sourceCapSkippedCount += 1;
+      } else if (inserted) {
         extractedCount += 1;
         logger.info({ articleUrl }, "Extracted article from listing page");
       } else {
@@ -379,6 +398,13 @@ async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourc
 
   if (skippedCount > 0) {
     logger.info({ url, skippedCount }, "Skipped article URLs already present in documents");
+  }
+
+  if (sourceCapSkippedCount > 0) {
+    logger.info(
+      { url, sourceCapSkippedCount, maxDocumentsPerSource: MAX_DOCUMENTS_PER_SOURCE },
+      "Skipped article URLs because the per-source fetch cap was reached",
+    );
   }
 
   return extractedCount;

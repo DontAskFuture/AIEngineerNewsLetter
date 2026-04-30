@@ -17,6 +17,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Personalized feed reads and writes must stay scoped to the authenticated user, and deletes should preserve history with soft deletion.
 - Public feed reads may use the configured public owner profile but must not expose profile mutation controls or public-owner read state.
 - Personalized feed rendering must not block on live LLM calls; it should use pre-computed scores or fall back to newest in-window stories.
+- Personalized feed ranking should stay relevance-led while applying the configured freshness boost so recent high-signal stories do not get buried by older marginally higher scores.
 - OpenRouter prompt text should come from shared prompt helpers rather than route-local or lib-local string constants.
 - Web-triggered scoring should match worker scoring by reading run size, batch size, and preferred model from shared scoring config.
 - Web OpenRouter env defaults should match the shared scoring default model unless a deliberate fallback is set in deployment env.
