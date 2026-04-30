@@ -13,6 +13,7 @@ This file applies to `apps/worker/src/jobs`.
 - Use content hashes and canonical URLs consistently for fetch jobs.
 - Fetch jobs should skip normalized document inserts and article-page fetches when the canonical URL already exists in `documents`.
 - Crawl inserts are capped at 1,000 total documents and 50 documents per source, enforced at document insert time.
+- Fetch jobs retry transient network failures, HTTP 429, and HTTP 5xx responses before recording a failed attempt, and failed attempts should preserve the HTTP status when available.
 - Scoring jobs create a `scoring_jobs` row at start and update it per batch with scored/failed counts.
 - Scoring jobs should read batch size, per-run document cap, and preferred model from `packages/shared/src/scoring-config.ts`.
 - The shared LLM scoring prompt asks for a 1-100 relevance score plus a `whyRelevant` explanation per document.

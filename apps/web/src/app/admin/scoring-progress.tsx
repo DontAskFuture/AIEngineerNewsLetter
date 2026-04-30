@@ -121,40 +121,69 @@ export function ScoringProgress() {
       {hasHistory && (
         <div className="overflow-x-auto">
           <div className="table-shell min-w-[700px]">
-            <div className="table-head grid grid-cols-[0.5fr_0.6fr_0.6fr_0.5fr_0.6fr_0.6fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-              <span>Status</span>
-              <span>Progress</span>
-              <span>Scored / Total</span>
-              <span>Failed</span>
-              <span>Started</span>
-              <span>Duration</span>
-            </div>
-            {history.map((job, index) => {
-              const jobPct = job.totalDocuments > 0
-                ? Math.round(((job.scoredDocuments + job.failedDocuments) / job.totalDocuments) * 100)
-                : 0;
+            <table className="w-full table-fixed border-collapse text-sm">
+              <colgroup>
+                <col className="w-[13%]" />
+                <col className="w-[13%]" />
+                <col className="w-[16%]" />
+                <col className="w-[10%]" />
+                <col className="w-[18%]" />
+                <col className="w-[12%]" />
+                <col className="w-[18%]" />
+              </colgroup>
+              <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                <tr>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Status</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Progress</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Scored / Total</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Failed</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Started</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Duration</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((job, index) => {
+                  const jobPct = job.totalDocuments > 0
+                    ? Math.round(((job.scoredDocuments + job.failedDocuments) / job.totalDocuments) * 100)
+                    : 0;
 
-              return (
-                <div
-                  key={`${job.startedAt}-${index}`}
-                  className="table-row grid grid-cols-[0.5fr_0.6fr_0.6fr_0.5fr_0.6fr_0.6fr] gap-4 px-4 py-3 text-sm text-[color:var(--muted)]"
-                >
-                  <span><StatusBadge status={job.status} /></span>
-                  <span>
-                    <span className="mr-2">{jobPct}%</span>
-                    <span className="text-xs">({job.currentBatch}/{job.totalBatches})</span>
-                  </span>
-                  <span>
-                    <strong className="text-[color:var(--leaf)]">{job.scoredDocuments}</strong> / {job.totalDocuments}
-                  </span>
-                  <span className={job.failedDocuments > 0 ? "text-[color:var(--danger)]" : ""}>
-                    {job.failedDocuments}
-                  </span>
-                  <span>{formatTime(job.startedAt)}</span>
-                  <span>{formatDuration(job.startedAt, job.completedAt)}</span>
-                </div>
-              );
-            })}
+                  return (
+                    <tr
+                      key={`${job.startedAt}-${index}`}
+                      className="table-row text-[color:var(--muted)]"
+                    >
+                      <td className="px-4 py-3 align-middle"><StatusBadge status={job.status} /></td>
+                      <td className="px-4 py-3 align-middle tabular-nums">
+                        <span className="mr-2">{jobPct}%</span>
+                        <span className="text-xs">({job.currentBatch}/{job.totalBatches})</span>
+                      </td>
+                      <td className="px-4 py-3 align-middle tabular-nums">
+                        <strong className="text-[color:var(--leaf)]">{job.scoredDocuments}</strong> / {job.totalDocuments}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right align-middle tabular-nums ${
+                          job.failedDocuments > 0 ? "text-[color:var(--danger)]" : ""
+                        }`}
+                      >
+                        {job.failedDocuments}
+                      </td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums">
+                        {formatTime(job.startedAt)}
+                      </td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums">
+                        {formatDuration(job.startedAt, job.completedAt)}
+                      </td>
+                      <td className="px-4 py-3 align-middle">
+                        <span className="line-clamp-2" title={job.errorMessage ?? ""}>
+                          {job.errorMessage ?? "-"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

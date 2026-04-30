@@ -13,12 +13,86 @@ const userAgent = "ai-builder-intelligence-bot/0.1 (+https://localhost)";
 const MAX_CRAWLED_DOCUMENTS = 1000;
 const MAX_DOCUMENTS_PER_SOURCE = 50;
 const CRAWL_CAP_LOCK_KEY = 4_242_001;
+const FETCH_MAX_ATTEMPTS = 3;
+const FETCH_RETRY_BASE_MS = 500;
 
 type Db = ReturnType<typeof getDb>;
 type DocumentInsertValues = typeof schema.documents.$inferInsert;
 
+class FetchHttpError extends Error {
+  status: number;
+
+  constructor(status: number) {
+    super(`Request failed with HTTP ${status}`);
+    this.name = "FetchHttpError";
+    this.status = status;
+  }
+}
+
 function hashValue(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetryStatus(status: number) {
+  return status === 429 || status >= 500;
+}
+
+function getRetryDelayMs(attempt: number, response?: Response) {
+  const retryAfter = response?.headers.get("retry-after");
+
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return seconds * 1000;
+    }
+  }
+
+  return FETCH_RETRY_BASE_MS * 2 ** attempt;
+}
+
+async function fetchEndpoint(url: string) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < FETCH_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "user-agent": userAgent,
+          accept: "application/rss+xml, application/xml, text/html;q=0.9, */*;q=0.8",
+        },
+      });
+
+      if (!response.ok) {
+        const error = new FetchHttpError(response.status);
+
+        if (attempt < FETCH_MAX_ATTEMPTS - 1 && shouldRetryStatus(response.status)) {
+          await sleep(getRetryDelayMs(attempt, response));
+          continue;
+        }
+
+        throw error;
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error;
+
+      if (error instanceof FetchHttpError) {
+        throw error;
+      }
+
+      if (attempt < FETCH_MAX_ATTEMPTS - 1) {
+        await sleep(getRetryDelayMs(attempt));
+        continue;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Fetch failed after retries");
 }
 
 function requireRow<T>(value: T | undefined, context: string) {
@@ -344,21 +418,12 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
   const startedAt = Date.now();
 
   try {
-    const response = await fetch(endpoint.url, {
-      headers: {
-        "user-agent": userAgent,
-        accept: "application/rss+xml, application/xml, text/html;q=0.9, */*;q=0.8",
-      },
-    });
+    const response = await fetchEndpoint(endpoint.url);
     const body = await response.text();
     const finishedAt = new Date();
     const durationMs = Date.now() - startedAt;
     const mimeType = inferMimeType(response.headers.get("content-type"));
     const contentHash = hashValue(body);
-
-    if (!response.ok) {
-      throw new Error(`Request failed with HTTP ${response.status}`);
-    }
 
     const storedPayload = await persistRawPayload(contentHash, mimeType, body);
 
@@ -426,12 +491,13 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown fetch error";
+    const httpStatus = error instanceof FetchHttpError ? error.status : undefined;
     const finishedAt = new Date();
 
     await db.insert(schema.fetchAttempts).values({
       fetchJobId: fetchJob.id,
       status: "failed",
-      httpStatus: undefined,
+      httpStatus,
       contentHash: undefined,
       rawDocumentId: undefined,
       responseHeaders: {},

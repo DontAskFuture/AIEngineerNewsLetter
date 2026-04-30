@@ -43,7 +43,7 @@ services:
       RAW_STORAGE_DIR: /app/var/raw
       FETCH_INTERVAL_MINUTES: 60
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Los_Angeles}
       AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-lianglingfan@gmail.com}
@@ -82,7 +82,7 @@ services:
       NEWSLETTER_CHECK_INTERVAL_MINUTES: ${NEWSLETTER_CHECK_INTERVAL_MINUTES:-30}
       NEWSLETTER_SEND_HOUR: ${NEWSLETTER_SEND_HOUR:-8}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Los_Angeles}
       SENDPULSE_CLIENT_ID: ${SENDPULSE_CLIENT_ID:-}

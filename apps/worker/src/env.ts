@@ -27,7 +27,7 @@ const envSchema = z.object({
   NEWSLETTER_CHECK_INTERVAL_MINUTES: z.coerce.number().int().positive().default(30),
   NEWSLETTER_SEND_HOUR: z.coerce.number().int().min(0).max(23).default(8),
   OPENROUTER_API_KEY: z.string().optional(),
-  OPENROUTER_MODEL: z.string().default("nvidia/nemotron-3-super-120b-a12b:free"),
+  OPENROUTER_MODEL: z.string().default("deepseek/deepseek-v4-flash"),
   APP_BASE_URL: z.string().default("http://localhost:3000"),
   APP_TIME_ZONE: z.string().default("America/Los_Angeles"),
   SENDPULSE_API_BASE_URL: z.string().url().default("https://api.sendpulse.com"),

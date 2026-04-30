@@ -10,6 +10,7 @@ import {
   formatPercent,
   formatRelativeTime,
 } from "@/lib/formatters";
+import { getOperationsSnapshot } from "@/lib/operations";
 import { getScoringStats, getScoringStatsBySource } from "@/lib/scoring";
 import { getDb, schema } from "@ai-intel/db";
 import { eq, asc } from "drizzle-orm";
@@ -21,6 +22,16 @@ export const dynamic = "force-dynamic";
 
 function formatScore(value: number | null) {
   return value == null ? "-" : value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+function formatQueueName(name: string) {
+  if (name === "fetch-source-endpoint") return "Crawl";
+  if (name === "score-documents") return "Scoring";
+  return name;
+}
+
+function formatErrorMessage(message: string | null) {
+  return message?.trim() || "No error message captured.";
 }
 
 export default async function AdminPage() {
@@ -36,11 +47,12 @@ export default async function AdminPage() {
     .limit(1);
   const firstProfileId = profiles[0]?.id ?? null;
 
-  const [snapshot, crawlStatus, scoringStats, sourceScoringStats] = await Promise.all([
+  const [snapshot, crawlStatus, scoringStats, sourceScoringStats, operationsSnapshot] = await Promise.all([
     getDashboardSnapshot(),
     getCrawlJobStatuses(),
     firstProfileId ? getScoringStats(firstProfileId) : Promise.resolve(null),
     firstProfileId ? getScoringStatsBySource(firstProfileId) : Promise.resolve([]),
+    getOperationsSnapshot(),
   ]);
 
   const adminCards = [
@@ -132,6 +144,78 @@ export default async function AdminPage() {
         </p>
         <div className="mt-6">
           <ScoringProgress />
+        </div>
+      </section>
+
+      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+              Queue status
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+              Live pg-boss status for crawl and scoring jobs created in the last 24 hours.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 overflow-x-auto">
+          <div className="table-shell min-w-[860px]">
+            <table className="w-full table-fixed border-collapse text-sm">
+              <colgroup>
+                <col className="w-[20%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+                <col className="w-[10%]" />
+                <col className="w-[13%]" />
+                <col className="w-[13%]" />
+              </colgroup>
+              <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                <tr>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Job</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Queued</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Active</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Retry</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Completed</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Failed</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Latest queued</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Latest done</th>
+                </tr>
+              </thead>
+              <tbody>
+                {operationsSnapshot.queueSummaries.map((summary) => (
+                  <tr key={summary.name} className="table-row text-[color:var(--muted)]">
+                    <td className="px-4 py-3 align-middle font-medium text-[color:var(--ink)]">
+                      {formatQueueName(summary.name)}
+                    </td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums">{summary.created}</td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums text-[color:var(--warning)]">
+                      {summary.active}
+                    </td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums">{summary.retry}</td>
+                    <td className="px-4 py-3 text-right align-middle tabular-nums text-[color:var(--leaf)]">
+                      {summary.completed}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right align-middle tabular-nums ${
+                        summary.failed > 0 ? "text-[color:var(--danger)]" : ""
+                      }`}
+                    >
+                      {summary.failed}
+                    </td>
+                    <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums">
+                      {formatRelativeTime(summary.latestCreatedAt)}
+                    </td>
+                    <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums">
+                      {formatRelativeTime(summary.latestCompletedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -247,37 +331,254 @@ export default async function AdminPage() {
         </div>
 
         <div className="mt-6 overflow-x-auto">
-          <div className="table-shell min-w-[700px]">
-            <div className="table-head grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-              <span>Source</span>
-              <span>State</span>
-              <span>Enqueued</span>
-              <span>Completed</span>
-            </div>
-            {crawlStatus.jobs.map((job) => (
-              <div
-                key={job.id}
-                className="table-row grid grid-cols-[1.2fr_0.6fr_0.9fr_0.9fr] gap-4 px-4 py-3 text-sm text-[color:var(--muted)]"
-              >
-                <span className="font-medium text-[color:var(--ink)]">{job.sourceName}</span>
-                <span
-                  className={
-                    job.state === "completed"
-                      ? "text-[color:var(--leaf)]"
-                      : job.state === "failed"
-                        ? "text-[color:var(--danger)]"
-                        : job.state === "active"
-                          ? "text-[color:var(--warning)]"
-                          : ""
-                  }
-                >
-                  {job.state}
-                </span>
-                <span>{formatRelativeTime(job.createdOn)}</span>
-                <span>{job.completedOn ? formatRelativeTime(job.completedOn) : "—"}</span>
-              </div>
-            ))}
+          <div className="table-shell min-w-[760px]">
+            <table className="w-full table-fixed border-collapse text-sm">
+              <colgroup>
+                <col className="w-[42%]" />
+                <col className="w-[18%]" />
+                <col className="w-[20%]" />
+                <col className="w-[20%]" />
+              </colgroup>
+              <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                <tr>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Source</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">State</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Enqueued</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Completed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {crawlStatus.jobs.map((job) => (
+                  <tr
+                    key={job.id}
+                    className="table-row text-[color:var(--muted)]"
+                  >
+                    <td className="px-4 py-3 align-middle font-medium text-[color:var(--ink)]">
+                      <span className="block truncate" title={job.sourceName}>
+                        {job.sourceName}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-4 py-3 align-middle font-medium ${
+                        job.state === "completed"
+                          ? "text-[color:var(--leaf)]"
+                          : job.state === "failed"
+                            ? "text-[color:var(--danger)]"
+                            : job.state === "active"
+                              ? "text-[color:var(--warning)]"
+                              : ""
+                      }`}
+                    >
+                      {job.state}
+                    </td>
+                    <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums">
+                      {formatRelativeTime(job.createdOn)}
+                    </td>
+                    <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums">
+                      {job.completedOn ? formatRelativeTime(job.completedOn) : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+        </div>
+      </section>
+
+      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+              Error logs
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+              Recent crawl failures, scoring failures, and pg-boss job output captured by the pipeline.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+            <span className="surface-chip px-3 py-2">{operationsSnapshot.crawlErrors.length} crawl</span>
+            <span className="surface-chip px-3 py-2">{operationsSnapshot.scoringErrors.length} scoring</span>
+            <span className="surface-chip px-3 py-2">{operationsSnapshot.queueErrors.length} queue</span>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-6">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--muted)]">
+              Crawl errors
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <div className="table-shell min-w-[920px]">
+                <table className="w-full table-fixed border-collapse text-sm">
+                  <colgroup>
+                    <col className="w-[18%]" />
+                    <col className="w-[25%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[24%]" />
+                  </colgroup>
+                  <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                    <tr>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Source</th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Endpoint</th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Status</th>
+                      <th scope="col" className="px-4 py-3 text-right font-medium">HTTP</th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Finished</th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {operationsSnapshot.crawlErrors.length > 0 ? (
+                      operationsSnapshot.crawlErrors.map((error) => (
+                        <tr key={error.id} className="table-row text-[color:var(--muted)]">
+                          <td className="px-4 py-3 align-middle font-medium text-[color:var(--ink)]">
+                            <span className="block truncate" title={error.sourceName}>{error.sourceName}</span>
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            <span className="block truncate" title={error.endpointUrl}>{error.endpointUrl}</span>
+                          </td>
+                          <td className="px-4 py-3 align-middle font-medium text-[color:var(--danger)]">
+                            {error.status}
+                          </td>
+                          <td className="px-4 py-3 text-right align-middle tabular-nums">
+                            {error.httpStatus ?? "n/a"}
+                          </td>
+                          <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums" title={formatDateTime(error.finishedAt)}>
+                            {formatRelativeTime(error.finishedAt)}
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            <span className="line-clamp-2" title={formatErrorMessage(error.errorMessage)}>
+                              {formatErrorMessage(error.errorMessage)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr className="table-row text-[color:var(--muted)]">
+                        <td className="px-4 py-4" colSpan={6}>No crawl errors captured.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--muted)]">
+              Scoring errors
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <div className="table-shell min-w-[920px]">
+                <table className="w-full table-fixed border-collapse text-sm">
+                  <colgroup>
+                    <col className="w-[18%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[34%]" />
+                  </colgroup>
+                  <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                    <tr>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Profile</th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Status</th>
+                      <th scope="col" className="px-4 py-3 text-right font-medium">Scored</th>
+                      <th scope="col" className="px-4 py-3 text-right font-medium">Failed</th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Started</th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {operationsSnapshot.scoringErrors.length > 0 ? (
+                      operationsSnapshot.scoringErrors.map((error) => (
+                        <tr key={error.id} className="table-row text-[color:var(--muted)]">
+                          <td className="px-4 py-3 align-middle font-medium text-[color:var(--ink)]">
+                            <span className="block truncate" title={error.profileName}>{error.profileName}</span>
+                          </td>
+                          <td className="px-4 py-3 align-middle font-medium text-[color:var(--danger)]">
+                            {error.status}
+                          </td>
+                          <td className="px-4 py-3 text-right align-middle tabular-nums">
+                            {error.scoredDocuments.toLocaleString()} / {error.totalDocuments.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-right align-middle tabular-nums text-[color:var(--danger)]">
+                            {error.failedDocuments.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums" title={formatDateTime(error.startedAt)}>
+                            {formatRelativeTime(error.startedAt)}
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            <span className="line-clamp-2" title={formatErrorMessage(error.errorMessage)}>
+                              {formatErrorMessage(error.errorMessage)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr className="table-row text-[color:var(--muted)]">
+                        <td className="px-4 py-4" colSpan={6}>No scoring errors captured.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {operationsSnapshot.queueErrors.length > 0 && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--muted)]">
+                Queue output
+              </p>
+              <div className="mt-3 overflow-x-auto">
+                <div className="table-shell min-w-[860px]">
+                  <table className="w-full table-fixed border-collapse text-sm">
+                    <colgroup>
+                      <col className="w-[16%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[46%]" />
+                    </colgroup>
+                    <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                      <tr>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Job</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">State</th>
+                        <th scope="col" className="px-4 py-3 text-right font-medium">Retries</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Created</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Output</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {operationsSnapshot.queueErrors.map((error) => (
+                        <tr key={error.id} className="table-row text-[color:var(--muted)]">
+                          <td className="px-4 py-3 align-middle font-medium text-[color:var(--ink)]">
+                            {formatQueueName(error.name)}
+                          </td>
+                          <td className="px-4 py-3 align-middle font-medium text-[color:var(--danger)]">
+                            {error.state}
+                          </td>
+                          <td className="px-4 py-3 text-right align-middle tabular-nums">
+                            {error.retryCount} / {error.retryLimit}
+                          </td>
+                          <td className="px-4 py-3 align-middle whitespace-nowrap tabular-nums" title={formatDateTime(error.createdOn)}>
+                            {formatRelativeTime(error.createdOn)}
+                          </td>
+                          <td className="px-4 py-3 align-middle">
+                            <span className="line-clamp-2" title={formatErrorMessage(error.output)}>
+                              {formatErrorMessage(error.output)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -349,29 +650,61 @@ export default async function AdminPage() {
         </p>
         <div className="mt-6 overflow-x-auto">
           <div className="table-shell min-w-[880px]">
-            <div className="table-head grid grid-cols-[1.1fr_1.6fr_0.65fr_0.6fr_0.75fr_0.95fr] gap-4 px-4 py-3 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-              <span>Source</span>
-              <span>Endpoint</span>
-              <span>Status</span>
-              <span>HTTP</span>
-              <span>Duration</span>
-              <span>Finished</span>
-            </div>
-            {snapshot.recentFetchAttempts.map((attempt) => (
-              <div
-                key={attempt.id}
-                className="table-row grid grid-cols-[1.1fr_1.6fr_0.65fr_0.6fr_0.75fr_0.95fr] gap-4 px-4 py-4 text-sm text-[color:var(--muted)]"
-              >
-                <span className="font-medium text-[color:var(--ink)]">{attempt.sourceName}</span>
-                <span className="truncate">{attempt.endpointUrl}</span>
-                <span className={attempt.status === "succeeded" ? "text-[color:var(--leaf)]" : "text-[color:var(--danger)]"}>
-                  {attempt.status}
-                </span>
-                <span>{attempt.httpStatus ?? "n/a"}</span>
-                <span>{formatDuration(attempt.durationMs)}</span>
-                <span title={formatDateTime(attempt.finishedAt)}>{formatRelativeTime(attempt.finishedAt)}</span>
-              </div>
-            ))}
+            <table className="w-full table-fixed border-collapse text-sm">
+              <colgroup>
+                <col className="w-[22%]" />
+                <col className="w-[30%]" />
+                <col className="w-[13%]" />
+                <col className="w-[10%]" />
+                <col className="w-[12%]" />
+                <col className="w-[13%]" />
+              </colgroup>
+              <thead className="table-head text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+                <tr>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Source</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Endpoint</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Status</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">HTTP</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Duration</th>
+                  <th scope="col" className="px-4 py-3 text-left font-medium">Finished</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.recentFetchAttempts.map((attempt) => (
+                  <tr
+                    key={attempt.id}
+                    className="table-row text-[color:var(--muted)]"
+                  >
+                    <td className="px-4 py-4 align-middle font-medium text-[color:var(--ink)]">
+                      <span className="block truncate" title={attempt.sourceName}>
+                        {attempt.sourceName}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 align-middle">
+                      <span className="block truncate" title={attempt.endpointUrl}>
+                        {attempt.endpointUrl}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-4 py-4 align-middle font-medium ${
+                        attempt.status === "succeeded" ? "text-[color:var(--leaf)]" : "text-[color:var(--danger)]"
+                      }`}
+                    >
+                      {attempt.status}
+                    </td>
+                    <td className="px-4 py-4 text-right align-middle tabular-nums">
+                      {attempt.httpStatus ?? "n/a"}
+                    </td>
+                    <td className="px-4 py-4 text-right align-middle whitespace-nowrap tabular-nums">
+                      {formatDuration(attempt.durationMs)}
+                    </td>
+                    <td className="px-4 py-4 align-middle whitespace-nowrap tabular-nums" title={formatDateTime(attempt.finishedAt)}>
+                      {formatRelativeTime(attempt.finishedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>

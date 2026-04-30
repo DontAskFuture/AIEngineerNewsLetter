@@ -1,5 +1,6 @@
 import { PgBoss, type Job } from "pg-boss";
-import { closePool } from "@ai-intel/db";
+import { closePool, getDb, schema } from "@ai-intel/db";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { FetchSourceEndpointPayload, ScoreDocumentsPayload, SendDailyNewsletterPayload } from "@ai-intel/shared";
 import { logger } from "./logger";
 import { loadWorkerEnv } from "./env";
@@ -48,6 +49,55 @@ async function enqueueDueFetches(boss: PgBoss) {
   }
 }
 
+async function enqueueScoringForActiveProfiles(boss: PgBoss, reason: string) {
+  const db = getDb();
+  const profiles = await db
+    .select({ id: schema.userProfiles.id })
+    .from(schema.userProfiles)
+    .where(and(eq(schema.userProfiles.isActive, true), sql`length(btrim(${schema.userProfiles.interestStatement})) > 0`))
+    .orderBy(asc(schema.userProfiles.id));
+
+  let enqueuedCount = 0;
+
+  for (const profile of profiles) {
+    const jobId = await boss.send(
+      scoreQueueName,
+      { profileId: profile.id },
+      {
+        singletonKey: `score-profile:${profile.id}`,
+        singletonSeconds: 10 * 60,
+      },
+    );
+
+    if (jobId) {
+      enqueuedCount += 1;
+    }
+  }
+
+  logger.info({ enqueuedCount, profileCount: profiles.length, reason }, "Enqueued scoring for active profiles");
+}
+
+async function runFetchJob(job: Job<FetchSourceEndpointPayload>, boss: PgBoss) {
+  const result = await fetchSourceEndpoint(job.data, job.id);
+
+  if (result.extractedCount <= 0) {
+    return;
+  }
+
+  try {
+    await enqueueScoringForActiveProfiles(boss, `crawl:${job.data.endpointId}`);
+  } catch (error) {
+    logger.error(
+      {
+        endpointId: job.data.endpointId,
+        extractedCount: result.extractedCount,
+        error,
+      },
+      "Failed to enqueue scoring after crawl",
+    );
+  }
+}
+
 async function enqueueDueNewsletter(boss: PgBoss, env: ReturnType<typeof loadWorkerEnv>) {
   if (!hasNewsletterConfig(env)) {
     logger.info("Daily newsletter is disabled because SendPulse env vars are not configured");
@@ -90,7 +140,7 @@ async function main() {
     fetchQueueName,
     { localConcurrency: env.FETCH_WORKER_CONCURRENCY },
     async (jobs: Job<FetchSourceEndpointPayload>[]) => {
-      await Promise.all(jobs.map((job) => fetchSourceEndpoint(job.data, job.id)));
+      await Promise.all(jobs.map((job) => runFetchJob(job, boss)));
     },
   );
 
