@@ -11,10 +11,54 @@ import { persistRawPayload } from "../storage/local-raw-store";
 const parser = new RSSParser();
 const userAgent = "ai-builder-intelligence-bot/0.1 (+https://localhost)";
 const MAX_DOCUMENTS_PER_SOURCE = 50;
+const MAX_ENDPOINT_RESPONSE_BYTES = 15 * 1024 * 1024;
+const MAX_ARTICLE_RESPONSE_BYTES = 5 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 20_000;
 const FETCH_MAX_ATTEMPTS = 3;
 const FETCH_RETRY_BASE_MS = 500;
+const HTML_ARTICLE_FETCH_CONCURRENCY = 4;
 
 type DocumentInsertValues = typeof schema.documents.$inferInsert;
+type ExpectedContent = "feed" | "html";
+
+interface FetchTextOptions {
+  accept: string;
+  expectedContent: ExpectedContent;
+  maxBytes?: number;
+  timeoutMs?: number;
+}
+
+interface HtmlParserConfig {
+  selectors: string[];
+  pathPattern?: RegExp;
+}
+
+const htmlParserConfigs: Record<string, HtmlParserConfig> = {
+  "anthropic-news": {
+    selectors: ['a[href^="/news/"]'],
+    pathPattern: /^\/news\/[^/]+\/?$/,
+  },
+  "cerebras-blog": {
+    selectors: ['a[href^="/blog/"]'],
+    pathPattern: /^\/blog\/[^/]+\/?$/,
+  },
+  "cohere-blog": {
+    selectors: ['a[href*="/blog/"]'],
+    pathPattern: /^\/blog\/[^/]+\/?$/,
+  },
+  "langchain-blog": {
+    selectors: ['a[href^="/blog/"]'],
+    pathPattern: /^\/blog\/[^/]+\/?$/,
+  },
+  "mistral-news": {
+    selectors: ['a[href^="/news/"]'],
+    pathPattern: /^\/news\/[^/]+\/?$/,
+  },
+  "openrouter-announcements": {
+    selectors: ['a[href^="/announcements/"]'],
+    pathPattern: /^\/announcements\/[^/]+\/?$/,
+  },
+};
 
 class FetchHttpError extends Error {
   status: number;
@@ -23,6 +67,20 @@ class FetchHttpError extends Error {
     super(`Request failed with HTTP ${status}`);
     this.name = "FetchHttpError";
     this.status = status;
+  }
+}
+
+class FetchBodyTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`Response body exceeded ${maxBytes} bytes`);
+    this.name = "FetchBodyTooLargeError";
+  }
+}
+
+class FetchUnsupportedContentTypeError extends Error {
+  constructor(readonly contentType: string | null, readonly expectedContent: ExpectedContent) {
+    super(`Response content type ${contentType ?? "unknown"} did not look like ${expectedContent}`);
+    this.name = "FetchUnsupportedContentTypeError";
   }
 }
 
@@ -51,15 +109,90 @@ function getRetryDelayMs(attempt: number, response?: Response) {
   return FETCH_RETRY_BASE_MS * 2 ** attempt;
 }
 
-async function fetchEndpoint(url: string) {
+function isNonRetryableFetchError(error: unknown) {
+  return error instanceof FetchBodyTooLargeError || error instanceof FetchUnsupportedContentTypeError;
+}
+
+function isExpectedContentType(contentTypeHeader: string | null, expectedContent: ExpectedContent) {
+  if (!contentTypeHeader) {
+    return true;
+  }
+
+  const mimeType = inferMimeType(contentTypeHeader);
+
+  if (mimeType.startsWith("text/")) {
+    return true;
+  }
+
+  if (expectedContent === "feed") {
+    return mimeType.includes("xml") || mimeType.includes("rss") || mimeType.includes("atom");
+  }
+
+  return mimeType.includes("html") || mimeType.includes("xhtml");
+}
+
+async function readBoundedText(response: Response, maxBytes: number) {
+  const contentLength = Number(response.headers.get("content-length"));
+
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new FetchBodyTooLargeError(maxBytes);
+  }
+
+  if (!response.body) {
+    const text = await response.text();
+
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+      throw new FetchBodyTooLargeError(maxBytes);
+    }
+
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    receivedBytes += value.byteLength;
+
+    if (receivedBytes > maxBytes) {
+      await reader.cancel();
+      throw new FetchBodyTooLargeError(maxBytes);
+    }
+
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(receivedBytes);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return new TextDecoder().decode(body);
+}
+
+async function fetchText(url: string, options: FetchTextOptions) {
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < FETCH_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? FETCH_TIMEOUT_MS);
+
     try {
       const response = await fetch(url, {
+        signal: controller.signal,
         headers: {
           "user-agent": userAgent,
-          accept: "application/rss+xml, application/xml, text/html;q=0.9, */*;q=0.8",
+          accept: options.accept,
         },
       });
 
@@ -74,7 +207,13 @@ async function fetchEndpoint(url: string) {
         throw error;
       }
 
-      return response;
+      if (!isExpectedContentType(response.headers.get("content-type"), options.expectedContent)) {
+        throw new FetchUnsupportedContentTypeError(response.headers.get("content-type"), options.expectedContent);
+      }
+
+      const body = await readBoundedText(response, options.maxBytes ?? MAX_ENDPOINT_RESPONSE_BYTES);
+
+      return { response, body };
     } catch (error) {
       lastError = error;
 
@@ -82,14 +221,37 @@ async function fetchEndpoint(url: string) {
         throw error;
       }
 
+      if (isNonRetryableFetchError(error)) {
+        throw error;
+      }
+
       if (attempt < FETCH_MAX_ATTEMPTS - 1) {
         await sleep(getRetryDelayMs(attempt));
         continue;
       }
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
   throw lastError ?? new Error("Fetch failed after retries");
+}
+
+function fetchEndpoint(url: string, expectedContent: ExpectedContent) {
+  const accept =
+    expectedContent === "feed"
+      ? "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.8, */*;q=0.5"
+      : "text/html, application/xhtml+xml;q=0.9, */*;q=0.5";
+
+  return fetchText(url, { accept, expectedContent });
+}
+
+function fetchArticleHtml(url: string) {
+  return fetchText(url, {
+    accept: "text/html, application/xhtml+xml;q=0.9, */*;q=0.5",
+    expectedContent: "html",
+    maxBytes: MAX_ARTICLE_RESPONSE_BYTES,
+  });
 }
 
 function requireRow<T>(value: T | undefined, context: string) {
@@ -120,6 +282,31 @@ function firstMetaContent(dom: JSDOM, selectors: string[]) {
   return null;
 }
 
+function normalizeMetaTitle(value: string | null | undefined) {
+  return value?.trim().replace(/\s+/g, " ") || null;
+}
+
+function extractTitle(dom: JSDOM, fallbackTitle: string | null | undefined) {
+  return normalizeMetaTitle(
+    firstMetaContent(dom, [
+      'meta[property="og:title"]',
+      'meta[name="twitter:title"]',
+      'meta[name="title"]',
+      'meta[itemprop="headline"]',
+    ]) ?? fallbackTitle,
+  );
+}
+
+function extractSummary(dom: JSDOM, fallbackSummary: string | null | undefined) {
+  return normalizeMetaTitle(
+    firstMetaContent(dom, [
+      'meta[property="og:description"]',
+      'meta[name="twitter:description"]',
+      'meta[name="description"]',
+    ]) ?? fallbackSummary,
+  );
+}
+
 function extractPublishedAt(dom: JSDOM) {
   const content = firstMetaContent(dom, [
     'meta[property="article:published_time"]',
@@ -147,6 +334,21 @@ function inferMimeType(contentTypeHeader: string | null) {
 
 function buildFallbackUrl(baseUrl: string, title: string, externalId: string | null) {
   return `${baseUrl.replace(/\/$/, "")}#${hashValue(externalId ?? title).slice(0, 16)}`;
+}
+
+async function runWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const item = items[nextIndex] as T;
+        nextIndex += 1;
+        await worker(item);
+      }
+    }),
+  );
 }
 
 async function getExistingCanonicalUrls(db: ReturnType<typeof getDb>, canonicalUrls: string[]) {
@@ -257,14 +459,20 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
   return extractedCount;
 }
 
-function extractArticleLinks(dom: JSDOM, baseUrl: string): string[] {
+function getHtmlParserConfig(parserKey: string | null) {
+  return parserKey ? htmlParserConfigs[parserKey] : undefined;
+}
+
+function extractArticleLinks(dom: JSDOM, baseUrl: string, parserKey: string | null): string[] {
   const parsed = new URL(baseUrl);
   const baseDomain = parsed.hostname;
   const basePath = parsed.pathname.replace(/\/$/, "");
   const seen = new Set<string>();
   const links: string[] = [];
+  const parserConfig = getHtmlParserConfig(parserKey);
+  const selectors = parserConfig?.selectors ?? ["a[href]"];
 
-  const anchors = dom.window.document.querySelectorAll("a[href]");
+  const anchors = selectors.flatMap((selector) => Array.from(dom.window.document.querySelectorAll<HTMLAnchorElement>(selector)));
 
   for (const anchor of anchors) {
     const href = anchor.getAttribute("href");
@@ -281,10 +489,14 @@ function extractArticleLinks(dom: JSDOM, baseUrl: string): string[] {
 
     const resolvedPath = resolved.pathname.replace(/\/$/, "");
 
-    if (!resolvedPath.startsWith(basePath + "/")) continue;
+    if (parserConfig?.pathPattern) {
+      if (!parserConfig.pathPattern.test(resolvedPath)) continue;
+    } else if (!resolvedPath.startsWith(basePath + "/")) {
+      continue;
+    }
 
     const remainder = resolvedPath.slice(basePath.length + 1);
-    if (!remainder || remainder.includes("/")) continue;
+    if (!parserConfig && (!remainder || remainder.includes("/"))) continue;
 
     const normalized = canonicalizeUrl(resolved.toString());
     if (seen.has(normalized)) continue;
@@ -303,19 +515,14 @@ async function upsertSingleHtmlDocument(
   sourceEndpointId: number,
   articleUrl: string,
   body: string,
-  insertedForSource: number,
-): Promise<boolean | "source_cap"> {
-  if (insertedForSource >= MAX_DOCUMENTS_PER_SOURCE) {
-    return "source_cap";
-  }
-
+): Promise<boolean> {
   const dom = new JSDOM(body, { url: articleUrl });
   const article = new Readability(dom.window.document).parse();
 
-  const title = article?.title?.trim() || dom.window.document.title?.trim();
+  const title = extractTitle(dom, article?.title?.trim() || dom.window.document.title?.trim());
   if (!title) return false;
 
-  const summary = article?.excerpt?.trim() || null;
+  const summary = extractSummary(dom, article?.excerpt?.trim() || null);
   const bodyText = article?.textContent?.trim() || null;
   const canonicalUrl = canonicalizeUrl(articleUrl);
   const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
@@ -339,52 +546,37 @@ async function upsertSingleHtmlDocument(
   });
 }
 
-async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourceEndpointId: number, url: string, body: string) {
+async function upsertHtmlDocument(
+  rawDocumentId: number,
+  sourceId: number,
+  sourceEndpointId: number,
+  url: string,
+  body: string,
+  parserKey: string | null,
+) {
   const db = getDb();
   const dom = new JSDOM(body, { url });
 
-  const articleLinks = extractArticleLinks(dom, url);
+  const articleLinks = extractArticleLinks(dom, url, parserKey);
 
   if (articleLinks.length === 0) {
-    logger.info({ url }, "No article links found on listing page, skipping");
+    logger.info({ url, parserKey }, "No article links found on listing page, skipping");
     return 0;
   }
 
   let extractedCount = 0;
   let skippedCount = 0;
-  let sourceCapSkippedCount = 0;
   const existingCanonicalUrls = await getExistingCanonicalUrls(db, articleLinks);
+  const newArticleLinks = articleLinks.filter((articleUrl) => !existingCanonicalUrls.has(articleUrl));
+  const cappedArticleLinks = newArticleLinks.slice(0, MAX_DOCUMENTS_PER_SOURCE);
+  const sourceCapSkippedCount = Math.max(0, newArticleLinks.length - cappedArticleLinks.length);
 
-  for (const articleUrl of articleLinks) {
+  await runWithConcurrency(cappedArticleLinks, HTML_ARTICLE_FETCH_CONCURRENCY, async (articleUrl) => {
     try {
-      if (existingCanonicalUrls.has(articleUrl)) {
-        skippedCount += 1;
-        continue;
-      }
+      const { body: articleBody } = await fetchArticleHtml(articleUrl);
+      const inserted = await upsertSingleHtmlDocument(db, rawDocumentId, sourceId, sourceEndpointId, articleUrl, articleBody);
 
-      const response = await fetch(articleUrl, {
-        headers: {
-          "user-agent": userAgent,
-          accept: "text/html;q=0.9, */*;q=0.8",
-        },
-      });
-
-      if (!response.ok) continue;
-
-      const articleBody = await response.text();
-      const inserted = await upsertSingleHtmlDocument(
-        db,
-        rawDocumentId,
-        sourceId,
-        sourceEndpointId,
-        articleUrl,
-        articleBody,
-        extractedCount,
-      );
-
-      if (inserted === "source_cap") {
-        sourceCapSkippedCount += 1;
-      } else if (inserted) {
+      if (inserted) {
         extractedCount += 1;
         logger.info({ articleUrl }, "Extracted article from listing page");
       } else {
@@ -394,7 +586,9 @@ async function upsertHtmlDocument(rawDocumentId: number, sourceId: number, sourc
       const message = error instanceof Error ? error.message : "Unknown error";
       logger.warn({ articleUrl, error: message }, "Failed to fetch article from listing page");
     }
-  }
+  });
+
+  skippedCount += articleLinks.length - newArticleLinks.length;
 
   if (skippedCount > 0) {
     logger.info({ url, skippedCount }, "Skipped article URLs already present in documents");
@@ -420,6 +614,7 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
       baseUrl: schema.sources.baseUrl,
       kind: schema.sourceEndpoints.kind,
       url: schema.sourceEndpoints.url,
+      parserKey: schema.sourceEndpoints.parserKey,
     })
     .from(schema.sourceEndpoints)
     .innerJoin(schema.sources, eq(schema.sources.id, schema.sourceEndpoints.sourceId))
@@ -444,8 +639,7 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
   const startedAt = Date.now();
 
   try {
-    const response = await fetchEndpoint(endpoint.url);
-    const body = await response.text();
+    const { response, body } = await fetchEndpoint(endpoint.url, endpoint.kind === "rss" ? "feed" : "html");
     const finishedAt = new Date();
     const durationMs = Date.now() - startedAt;
     const mimeType = inferMimeType(response.headers.get("content-type"));
@@ -477,7 +671,7 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
     const extractedCount =
       endpoint.kind === "rss"
         ? await upsertFeedDocuments(rawDocument.id, endpoint.sourceId, endpoint.id, endpoint.baseUrl, body)
-        : await upsertHtmlDocument(rawDocument.id, endpoint.sourceId, endpoint.id, endpoint.url, body);
+        : await upsertHtmlDocument(rawDocument.id, endpoint.sourceId, endpoint.id, endpoint.url, body, endpoint.parserKey ?? null);
 
     await db.insert(schema.fetchAttempts).values({
       fetchJobId: fetchJob.id,

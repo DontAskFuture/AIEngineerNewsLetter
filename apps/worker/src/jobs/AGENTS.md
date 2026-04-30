@@ -13,8 +13,11 @@ This file applies to `apps/worker/src/jobs`.
 - Use content hashes and canonical URLs consistently for fetch jobs.
 - Fetch jobs should skip normalized document inserts and article-page fetches when the canonical URL already exists in `documents`.
 - Crawl inserts are capped per fetch/source pass rather than by lifetime database totals; dedupe still relies on canonical URLs.
+- Remote fetches should enforce timeout and response-size bounds before persisting raw payloads or parsing HTML/RSS.
 - Fetch jobs retry transient network failures, HTTP 429, and HTTP 5xx responses before recording a failed attempt, and failed attempts should preserve the HTTP status when available.
+- HTML listing pages should use bounded-concurrency article fetches through the shared fetch helper rather than ad hoc sequential `fetch()` calls.
 - HTML article extraction should preserve publication dates from common article/meta tags when available instead of relying only on discovery time.
+- Source-specific HTML extraction should use endpoint `parserKey` selectors where known and fall back to the generic same-path strategy only for simple listing pages.
 - Scoring jobs create a `scoring_jobs` row at start and update it per batch with scored/failed counts.
 - Scoring jobs should read batch size, per-run document cap, and preferred model from `packages/shared/src/scoring-config.ts`.
 - The shared LLM scoring prompt asks for a 1-100 relevance score plus a `whyRelevant` explanation per document.

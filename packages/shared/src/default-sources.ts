@@ -93,6 +93,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "html",
         url: "https://www.anthropic.com/news",
+        parserKey: "anthropic-news",
         cadenceMinutes: 60,
       },
     ],
@@ -191,6 +192,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "html",
         url: "https://cohere.com/blog",
+        parserKey: "cohere-blog",
         cadenceMinutes: 60,
       },
     ],
@@ -223,6 +225,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "html",
         url: "https://mistral.ai/news",
+        parserKey: "mistral-news",
         cadenceMinutes: 60,
       },
     ],
@@ -271,6 +274,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "html",
         url: "https://www.langchain.com/blog",
+        parserKey: "langchain-blog",
         cadenceMinutes: 60,
       },
     ],
@@ -799,6 +803,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "html",
         url: "https://www.cerebras.ai/blog",
+        parserKey: "cerebras-blog",
         cadenceMinutes: 60,
       },
     ],
@@ -847,6 +852,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "html",
         url: "https://openrouter.ai/announcements",
+        parserKey: "openrouter-announcements",
         cadenceMinutes: 60,
       },
     ],
