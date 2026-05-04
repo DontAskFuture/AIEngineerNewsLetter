@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PgBoss, type Job } from "pg-boss";
 import { closePool, getDb, schema } from "@ai-intel/db";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -7,11 +8,13 @@ import { loadWorkerEnv } from "./env";
 import { sendDailyNewsletter } from "./jobs/send-daily-newsletter";
 import { fetchSourceEndpoint } from "./jobs/fetch-source-endpoint";
 import { scoreDocuments } from "./jobs/score-documents";
+import { cleanupCrawledDocuments } from "./jobs/cleanup-crawled-documents";
 import { listActiveSourceEndpoints, seedDefaultSources } from "./services/source-registry";
 
 const fetchQueueName = "fetch-source-endpoint";
 const scoreQueueName = "score-documents";
 const newsletterQueueName = "send-daily-newsletter";
+let crawledDocumentCleanupInFlight = false;
 
 function getLocalDateHour(timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -49,8 +52,9 @@ async function enqueueDueFetches(boss: PgBoss) {
   }
 }
 
-async function enqueueScoringForActiveProfiles(boss: PgBoss, reason: string) {
+async function enqueueScoringForActiveProfiles(boss: PgBoss, reason: string, documentIds: number[] = []) {
   const db = getDb();
+  const uniqueDocumentIds = Array.from(new Set(documentIds)).sort((a, b) => a - b);
   const profiles = await db
     .select({ id: schema.userProfiles.id })
     .from(schema.userProfiles)
@@ -60,11 +64,17 @@ async function enqueueScoringForActiveProfiles(boss: PgBoss, reason: string) {
   let enqueuedCount = 0;
 
   for (const profile of profiles) {
+    const targetedJobSuffix = uniqueDocumentIds.length > 0
+      ? `:${createHash("sha256").update(uniqueDocumentIds.join(",")).digest("hex").slice(0, 16)}`
+      : "";
     const jobId = await boss.send(
       scoreQueueName,
-      { profileId: profile.id },
       {
-        singletonKey: `score-profile:${profile.id}`,
+        profileId: profile.id,
+        ...(uniqueDocumentIds.length > 0 ? { documentIds: uniqueDocumentIds } : {}),
+      },
+      {
+        singletonKey: `score-profile:${profile.id}${targetedJobSuffix}`,
         singletonSeconds: 10 * 60,
       },
     );
@@ -74,7 +84,10 @@ async function enqueueScoringForActiveProfiles(boss: PgBoss, reason: string) {
     }
   }
 
-  logger.info({ enqueuedCount, profileCount: profiles.length, reason }, "Enqueued scoring for active profiles");
+  logger.info(
+    { enqueuedCount, profileCount: profiles.length, reason, documentCount: uniqueDocumentIds.length },
+    "Enqueued scoring for active profiles",
+  );
 }
 
 async function runFetchJob(job: Job<FetchSourceEndpointPayload>, boss: PgBoss) {
@@ -85,7 +98,7 @@ async function runFetchJob(job: Job<FetchSourceEndpointPayload>, boss: PgBoss) {
   }
 
   try {
-    await enqueueScoringForActiveProfiles(boss, `crawl:${job.data.endpointId}`);
+    await enqueueScoringForActiveProfiles(boss, `crawl:${job.data.endpointId}`, result.documentIds);
   } catch (error) {
     logger.error(
       {
@@ -118,6 +131,23 @@ async function enqueueDueNewsletter(boss: PgBoss, env: ReturnType<typeof loadWor
       singletonSeconds: 36 * 60 * 60,
     },
   );
+}
+
+async function runCrawledDocumentCleanup() {
+  if (crawledDocumentCleanupInFlight) {
+    logger.info("Skipped crawled document cleanup because a prior run is still active");
+    return;
+  }
+
+  crawledDocumentCleanupInFlight = true;
+
+  try {
+    await cleanupCrawledDocuments();
+  } catch (error) {
+    logger.error({ error }, "Failed to clean up expired crawled documents");
+  } finally {
+    crawledDocumentCleanupInFlight = false;
+  }
 }
 
 async function main() {
@@ -164,6 +194,7 @@ async function main() {
 
   await enqueueDueFetches(boss);
   await enqueueDueNewsletter(boss, env);
+  await runCrawledDocumentCleanup();
 
   const interval = setInterval(() => {
     enqueueDueFetches(boss).catch((error) => {
@@ -175,10 +206,14 @@ async function main() {
       logger.error({ error }, "Failed to enqueue due newsletter");
     });
   }, env.NEWSLETTER_CHECK_INTERVAL_MINUTES * 60 * 1000);
+  const crawledDocumentCleanupInterval = setInterval(() => {
+    runCrawledDocumentCleanup();
+  }, env.CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
 
   const shutdown = async () => {
     clearInterval(interval);
     clearInterval(newsletterInterval);
+    clearInterval(crawledDocumentCleanupInterval);
     await boss.stop();
     await closePool();
     process.exit(0);
@@ -196,6 +231,11 @@ async function main() {
       newsletterSendHour: env.NEWSLETTER_SEND_HOUR,
       newsletterTimeZone: env.APP_TIME_ZONE,
       newsletterEnabled: hasNewsletterConfig(env),
+      crawledDocumentTtlDays: env.CRAWLED_DOCUMENT_TTL_DAYS,
+      crawledDocumentCleanupIntervalMinutes: env.CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES,
+      crawledDocumentCleanupBatchSize: env.CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE,
+      scoringMaxDocumentsPerRun: env.SCORING_MAX_DOCUMENTS_PER_RUN,
+      scoringLookbackDays: env.SCORING_LOOKBACK_DAYS,
     },
     "Worker is running",
   );

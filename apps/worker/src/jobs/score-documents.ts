@@ -1,5 +1,5 @@
 import { getDb, schema } from "@ai-intel/db";
-import { desc, eq, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
 import {
   renderScoreDocumentsPrompt,
   scoringConfig,
@@ -13,6 +13,7 @@ const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function stripHtml(value: string): string {
   return value
@@ -40,7 +41,35 @@ function extractPreview(summary: string | null, bodyText: string | null): string
 interface ScoreResult {
   documentId: number;
   score: number;
+  confidence: "high" | "medium" | "low" | null;
+  matchedSignals: string[];
   whyRelevant: string;
+}
+
+function parseConfidence(value: unknown) {
+  return value === "high" || value === "medium" || value === "low" ? value : null;
+}
+
+function parseMatchedSignals(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((signal) => (typeof signal === "string" ? signal.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function formatWhyRelevant(result: ScoreResult) {
+  const metadata = [
+    result.confidence ? `Confidence: ${result.confidence}` : null,
+    result.matchedSignals.length > 0 ? `Signals: ${result.matchedSignals.join(", ")}` : null,
+  ].filter(Boolean);
+
+  return metadata.length > 0
+    ? `${result.whyRelevant}\n\n${metadata.join(" | ")}`
+    : result.whyRelevant;
 }
 
 function extractJson(rawText: string): string {
@@ -133,9 +162,11 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
           const r = entry as Record<string, unknown>;
           const documentId = Number(r.documentId);
           const score = Number(r.score);
+          const confidence = parseConfidence(r.confidence);
+          const matchedSignals = parseMatchedSignals(r.matchedSignals);
           const whyRelevant = typeof r.whyRelevant === "string" ? r.whyRelevant.trim() : "";
           if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) return null;
-          return { documentId, score: Math.max(1, Math.min(100, Math.round(score))), whyRelevant };
+          return { documentId, score: Math.max(1, Math.min(100, Math.round(score))), confidence, matchedSignals, whyRelevant };
         })
         .filter((e): e is ScoreResult => e !== null);
 
@@ -148,7 +179,11 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
 
 export async function scoreDocuments(payload: ScoreDocumentsPayload) {
   const db = getDb();
+  const env = loadWorkerEnv();
   const { profileId } = payload;
+  const targetedDocumentIds = Array.from(
+    new Set((payload.documentIds ?? []).filter((id) => Number.isInteger(id) && id > 0)),
+  );
 
   const [profile] = await db
     .select({ id: schema.userProfiles.id, interestStatement: schema.userProfiles.interestStatement })
@@ -165,12 +200,29 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
     .from(schema.documentScores)
     .where(eq(schema.documentScores.profileId, profileId));
 
+  const documentFilters = [notInArray(schema.documents.id, alreadyScoredIds)];
+  if (targetedDocumentIds.length > 0) {
+    documentFilters.push(inArray(schema.documents.id, targetedDocumentIds));
+  } else {
+    const cutoff = new Date(Date.now() - env.SCORING_LOOKBACK_DAYS * DAY_MS);
+    documentFilters.push(gt(documentSortKey, cutoff));
+  }
+
   const unscoredDocs = await db
-    .select({ id: schema.documents.id, title: schema.documents.title, summary: schema.documents.summary, bodyText: schema.documents.bodyText })
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      summary: schema.documents.summary,
+      bodyText: schema.documents.bodyText,
+      sourceName: schema.sources.name,
+      sourceCategory: schema.sources.category,
+      sortTime: documentSortKey,
+    })
     .from(schema.documents)
-    .where(notInArray(schema.documents.id, alreadyScoredIds))
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .where(and(...documentFilters))
     .orderBy(desc(documentSortKey), desc(schema.documents.id))
-    .limit(scoringConfig.maxDocumentsPerRun);
+    .limit(env.SCORING_MAX_DOCUMENTS_PER_RUN);
 
   const totalBatches = Math.ceil(unscoredDocs.length / scoringConfig.batchSize);
 
@@ -195,6 +247,9 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
         id: doc.id,
         title: doc.title,
         previewParagraph: extractPreview(doc.summary, doc.bodyText),
+        sourceName: doc.sourceName,
+        sourceCategory: doc.sourceCategory,
+        publishedAt: doc.sortTime,
       }));
 
       try {
@@ -208,7 +263,7 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
               documentId: s.documentId,
               profileId,
               score: s.score,
-              whyRelevant: s.whyRelevant,
+              whyRelevant: formatWhyRelevant(s),
               model: result.model,
             })))
             .onConflictDoUpdate({

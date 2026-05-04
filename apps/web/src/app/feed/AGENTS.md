@@ -18,6 +18,7 @@ This file applies to `apps/web/src/app/feed`.
 - Both the top shortlist and the expandable "More stories" section should surface `whyRelevant` copy when the ranking layer provides it.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
 - Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s `AI Engineer` profile; profile management stays signed-in only.
+- The anonymous public-profile row should use a contact CTA to `mailto:michael@audivolt.ai` rather than a sign-in CTA.
 - Preserve clear visual separation between feed hero controls, profile editing, top stories, more stories, and source registry, and keep those surfaces theme-aware.
 - Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.
 - Profile creation and update should preserve the user’s current feed window and make the selected profile obvious in the interest chip list.

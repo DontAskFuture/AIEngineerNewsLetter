@@ -4,7 +4,7 @@
 This file applies to `packages/shared/src`.
 
 ## Architecture
-- `types.ts` defines shared source, fetch payload, scoring payload, and newsletter payload types (`FetchSourceEndpointPayload`, `ScoreDocumentsPayload`, `SendDailyNewsletterPayload`).
+- `types.ts` defines shared source, fetch payload, scoring payload, and newsletter payload types (`FetchSourceEndpointPayload`, `ScoreDocumentsPayload`, `SendDailyNewsletterPayload`); scoring payloads may include `documentIds` for targeted worker scoring.
 - `default-sources.ts` is the curated registry seed set.
 - `prompts.ts` owns shared LLM prompt templates and rendering helpers used by both web and worker code.
 - `scoring-config.ts` owns shared scoring knobs such as batch size, run size, and preferred model.
@@ -19,5 +19,6 @@ This file applies to `packages/shared/src`.
 - Shared types should reflect stable contracts used by both apps.
 - URL normalization rules should be conservative because they affect dedupe and document identity.
 - Prompt templates should stay centralized here and keep complex formatting in TypeScript helpers rather than hidden in template strings.
+- Scoring and ranking prompts should include calibrated score rubrics, negative criteria, prompt-injection boundaries, confidence, matched signals, and source/date metadata in the shared candidate format.
 - Shared scoring configuration should live here instead of being hardcoded in web or worker business logic.
 - Ranking prompts should not include time-window metadata; callers must filter candidates deterministically before rendering prompt text.

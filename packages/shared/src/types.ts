@@ -39,6 +39,7 @@ export interface FetchSourceEndpointPayload {
 
 export interface ScoreDocumentsPayload {
   profileId: number;
+  documentIds?: number[];
 }
 
 export interface SendDailyNewsletterPayload {

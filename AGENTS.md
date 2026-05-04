@@ -27,6 +27,8 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Crawl jobs default to 5 local pg-boss fetch workers per worker process; scoring stays separately queued.
 - Scoring uses a singleton key per profile to prevent duplicate concurrent scoring.
 - Newsletter sends require SendPulse credentials in the worker environment and are deduped by user/date.
+- Crawled documents and raw payloads are pruned by the worker according to `CRAWLED_DOCUMENT_TTL_DAYS`, capped at 365 days, with cleanup batch/interval env controls.
+- Crawl-triggered scoring should pass newly inserted document IDs so profile scoring stays bounded to fresh work; broad scoring is additionally capped by scoring max/lookback env controls.
 
 ## Implementation Guidance
 - Keep route files thin. Put data access, auth, and ranking logic in `apps/web/src/lib`.
@@ -41,6 +43,8 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Cloudflare Tunnel support lives in Compose as an optional `tunnel` profile; keep `web` and Postgres bound to localhost on the host, and route public web traffic through `cloudflared` to `http://web:3000`.
 - Cloudflare Tunnel tokens should be mounted from ignored local secret files, not interpolated into Compose commands or committed env examples.
 - Local server operations are exposed through `pnpm ops`, which wraps Docker Compose lifecycle commands and crawl/scoring job log queries.
+- Production Compose exposes crawled-document TTL controls through `CRAWLED_DOCUMENT_TTL_DAYS`, `CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES`, and `CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE`.
+- Production Compose exposes scoring spend controls through `SCORING_MAX_DOCUMENTS_PER_RUN` and `SCORING_LOOKBACK_DAYS`.
 - E2E smoke credentials live in local env as `E2E_TEST_EMAIL` and `E2E_TEST_PASSWORD`; keep the password synthetic and ensure the email is included in `AUTH_ALLOWED_EMAILS`.
 - Project-local Codex skills live in `.codex/skills`; update the relevant skill reference when testing workflows or credential conventions change.
 - Playwright is installed as a root dev dependency for browser-based E2E smoke tests.

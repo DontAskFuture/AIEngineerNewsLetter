@@ -120,12 +120,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-[color:var(--muted)]">
-            Don&apos;t have an account?{" "}
-            <Link href="/signup" className="font-medium text-[color:var(--ink)] underline underline-offset-4">
-              Sign up
-            </Link>
-          </p>
         </div>
       </section>
     </main>

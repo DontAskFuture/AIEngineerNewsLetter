@@ -19,6 +19,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Personalized feed rendering must not block on live LLM calls; it should use pre-computed scores or fall back to newest in-window stories.
 - Personalized feed ranking should stay relevance-led while applying the configured freshness boost so recent high-signal stories do not get buried by older marginally higher scores.
 - OpenRouter prompt text should come from shared prompt helpers rather than route-local or lib-local string constants.
+- Web OpenRouter parsing should tolerate shared scoring/ranking responses with confidence and matched-signal fields while preserving displayable relevance explanations.
 - Web-triggered scoring should match worker scoring by reading run size, batch size, and preferred model from shared scoring config.
 - Web OpenRouter env defaults should match the shared scoring default model unless a deliberate fallback is set in deployment env.
 - Personalized feed time windows should filter candidate documents in SQL/application code before any OpenRouter prompt is rendered.

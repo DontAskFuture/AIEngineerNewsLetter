@@ -11,6 +11,7 @@ This file applies to `packages/db/src`.
 - `newsletter_sends` records successful daily newsletter delivery per user/date to prevent duplicate emails.
 - `client.ts` owns pool and Drizzle client creation.
 - `index.ts` is the public export surface for the package.
+- `schema.ts` includes supporting indexes for feed sort order, profile-scoped score lookup, fetch history, and raw/document retention cleanup.
 
 ## Implementation Guidance
 - Keep exports intentional and stable.

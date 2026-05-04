@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import RSSParser from "rss-parser";
@@ -17,6 +19,7 @@ const FETCH_TIMEOUT_MS = 20_000;
 const FETCH_MAX_ATTEMPTS = 3;
 const FETCH_RETRY_BASE_MS = 500;
 const HTML_ARTICLE_FETCH_CONCURRENCY = 4;
+const MAX_REDIRECTS = 5;
 
 type DocumentInsertValues = typeof schema.documents.$inferInsert;
 type ExpectedContent = "feed" | "html";
@@ -24,6 +27,7 @@ type ExpectedContent = "feed" | "html";
 interface FetchTextOptions {
   accept: string;
   expectedContent: ExpectedContent;
+  allowedDomain: string;
   maxBytes?: number;
   timeoutMs?: number;
 }
@@ -94,6 +98,78 @@ function sleep(ms: number) {
 
 function shouldRetryStatus(status: number) {
   return status === 429 || status >= 500;
+}
+
+function isAllowedHost(hostname: string, allowedDomain: string) {
+  const normalizedHost = hostname.toLowerCase().replace(/\.$/, "");
+  const normalizedDomain = allowedDomain.toLowerCase().replace(/\.$/, "");
+
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+}
+
+function isPrivateIpv4(address: string) {
+  const parts = address.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return true;
+  }
+
+  const [a, b] = parts as [number, number, number, number];
+
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    a >= 224
+  );
+}
+
+function isUnsafeIpAddress(address: string) {
+  const family = isIP(address);
+
+  if (family === 4) {
+    return isPrivateIpv4(address);
+  }
+
+  if (family === 6) {
+    const normalized = address.toLowerCase();
+    const ipv4MappedMatch = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (ipv4MappedMatch) {
+      return isPrivateIpv4(ipv4MappedMatch[1]!);
+    }
+
+    return (
+      normalized === "::1" ||
+      normalized === "::" ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd") ||
+      normalized.startsWith("fe80:")
+    );
+  }
+
+  return true;
+}
+
+function validateSourceUrl(url: URL, allowedDomain: string) {
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`Blocked unsupported source URL protocol: ${url.protocol}`);
+  }
+
+  if (!isAllowedHost(url.hostname, allowedDomain)) {
+    throw new Error(`Blocked source URL outside allowed domain ${allowedDomain}: ${url.hostname}`);
+  }
+}
+
+async function validateSourceEgress(url: URL, allowedDomain: string) {
+  validateSourceUrl(url, allowedDomain);
+
+  const addresses = await lookup(url.hostname, { all: true, verbatim: false });
+  if (addresses.length === 0 || addresses.some((entry) => isUnsafeIpAddress(entry.address))) {
+    throw new Error(`Blocked source URL resolving to an internal or unsafe address: ${url.hostname}`);
+  }
 }
 
 function getRetryDelayMs(attempt: number, response?: Response) {
@@ -188,13 +264,40 @@ async function fetchText(url: string, options: FetchTextOptions) {
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? FETCH_TIMEOUT_MS);
 
     try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "user-agent": userAgent,
-          accept: options.accept,
-        },
-      });
+      let currentUrl = new URL(url);
+      await validateSourceEgress(currentUrl, options.allowedDomain);
+
+      let response: Response | null = null;
+      for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+        response = await fetch(currentUrl, {
+          redirect: "manual",
+          signal: controller.signal,
+          headers: {
+            "user-agent": userAgent,
+            accept: options.accept,
+          },
+        });
+
+        if (response.status < 300 || response.status >= 400) {
+          break;
+        }
+
+        const location = response.headers.get("location");
+        if (!location) {
+          throw new FetchHttpError(response.status);
+        }
+
+        if (redirectCount === MAX_REDIRECTS) {
+          throw new Error(`Too many redirects while fetching ${url}`);
+        }
+
+        currentUrl = new URL(location, currentUrl);
+        await validateSourceEgress(currentUrl, options.allowedDomain);
+      }
+
+      if (!response) {
+        throw new Error("Fetch failed before a response was returned");
+      }
 
       if (!response.ok) {
         const error = new FetchHttpError(response.status);
@@ -237,19 +340,20 @@ async function fetchText(url: string, options: FetchTextOptions) {
   throw lastError ?? new Error("Fetch failed after retries");
 }
 
-function fetchEndpoint(url: string, expectedContent: ExpectedContent) {
+function fetchEndpoint(url: string, expectedContent: ExpectedContent, allowedDomain: string) {
   const accept =
     expectedContent === "feed"
       ? "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.8, */*;q=0.5"
       : "text/html, application/xhtml+xml;q=0.9, */*;q=0.5";
 
-  return fetchText(url, { accept, expectedContent });
+  return fetchText(url, { accept, expectedContent, allowedDomain });
 }
 
-function fetchArticleHtml(url: string) {
+function fetchArticleHtml(url: string, allowedDomain: string) {
   return fetchText(url, {
     accept: "text/html, application/xhtml+xml;q=0.9, */*;q=0.5",
     expectedContent: "html",
+    allowedDomain,
     maxBytes: MAX_ARTICLE_RESPONSE_BYTES,
   });
 }
@@ -373,7 +477,7 @@ async function insertDocument(db: ReturnType<typeof getDb>, values: DocumentInse
     })
     .returning({ id: schema.documents.id });
 
-  return Boolean(createdDocument);
+  return createdDocument?.id ?? null;
 }
 
 async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sourceEndpointId: number, baseUrl: string, body: string) {
@@ -409,7 +513,7 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
     }];
   });
   const existingCanonicalUrls = await getExistingCanonicalUrls(db, candidates.map((candidate) => candidate.canonicalUrl));
-  let extractedCount = 0;
+  const insertedDocumentIds: number[] = [];
   let skippedCount = 0;
   let sourceCapSkippedCount = 0;
 
@@ -419,12 +523,12 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
       continue;
     }
 
-    if (extractedCount >= MAX_DOCUMENTS_PER_SOURCE) {
+    if (insertedDocumentIds.length >= MAX_DOCUMENTS_PER_SOURCE) {
       sourceCapSkippedCount += 1;
       continue;
     }
 
-    const inserted = await insertDocument(db, {
+    const insertedDocumentId = await insertDocument(db, {
       sourceId,
       sourceEndpointId,
       rawDocumentId,
@@ -438,8 +542,8 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
       metadata: candidate.metadata,
     });
 
-    if (inserted) {
-      extractedCount += 1;
+    if (insertedDocumentId) {
+      insertedDocumentIds.push(insertedDocumentId);
     } else {
       skippedCount += 1;
     }
@@ -456,7 +560,7 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
     );
   }
 
-  return extractedCount;
+  return insertedDocumentIds;
 }
 
 function getHtmlParserConfig(parserKey: string | null) {
@@ -515,12 +619,12 @@ async function upsertSingleHtmlDocument(
   sourceEndpointId: number,
   articleUrl: string,
   body: string,
-): Promise<boolean> {
+): Promise<number | null> {
   const dom = new JSDOM(body, { url: articleUrl });
   const article = new Readability(dom.window.document).parse();
 
   const title = extractTitle(dom, article?.title?.trim() || dom.window.document.title?.trim());
-  if (!title) return false;
+  if (!title) return null;
 
   const summary = extractSummary(dom, article?.excerpt?.trim() || null);
   const bodyText = article?.textContent?.trim() || null;
@@ -553,6 +657,7 @@ async function upsertHtmlDocument(
   url: string,
   body: string,
   parserKey: string | null,
+  allowedDomain: string,
 ) {
   const db = getDb();
   const dom = new JSDOM(body, { url });
@@ -561,10 +666,10 @@ async function upsertHtmlDocument(
 
   if (articleLinks.length === 0) {
     logger.info({ url, parserKey }, "No article links found on listing page, skipping");
-    return 0;
+    return [];
   }
 
-  let extractedCount = 0;
+  const insertedDocumentIds: number[] = [];
   let skippedCount = 0;
   const existingCanonicalUrls = await getExistingCanonicalUrls(db, articleLinks);
   const newArticleLinks = articleLinks.filter((articleUrl) => !existingCanonicalUrls.has(articleUrl));
@@ -573,11 +678,11 @@ async function upsertHtmlDocument(
 
   await runWithConcurrency(cappedArticleLinks, HTML_ARTICLE_FETCH_CONCURRENCY, async (articleUrl) => {
     try {
-      const { body: articleBody } = await fetchArticleHtml(articleUrl);
-      const inserted = await upsertSingleHtmlDocument(db, rawDocumentId, sourceId, sourceEndpointId, articleUrl, articleBody);
+      const { body: articleBody } = await fetchArticleHtml(articleUrl, allowedDomain);
+      const insertedDocumentId = await upsertSingleHtmlDocument(db, rawDocumentId, sourceId, sourceEndpointId, articleUrl, articleBody);
 
-      if (inserted) {
-        extractedCount += 1;
+      if (insertedDocumentId) {
+        insertedDocumentIds.push(insertedDocumentId);
         logger.info({ articleUrl }, "Extracted article from listing page");
       } else {
         skippedCount += 1;
@@ -601,7 +706,7 @@ async function upsertHtmlDocument(
     );
   }
 
-  return extractedCount;
+  return insertedDocumentIds;
 }
 
 export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, bossJobId: string | null = null) {
@@ -612,6 +717,7 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
       sourceId: schema.sourceEndpoints.sourceId,
       sourceName: schema.sources.name,
       baseUrl: schema.sources.baseUrl,
+      canonicalDomain: schema.sources.canonicalDomain,
       kind: schema.sourceEndpoints.kind,
       url: schema.sourceEndpoints.url,
       parserKey: schema.sourceEndpoints.parserKey,
@@ -639,7 +745,7 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
   const startedAt = Date.now();
 
   try {
-    const { response, body } = await fetchEndpoint(endpoint.url, endpoint.kind === "rss" ? "feed" : "html");
+    const { response, body } = await fetchEndpoint(endpoint.url, endpoint.kind === "rss" ? "feed" : "html", endpoint.canonicalDomain);
     const finishedAt = new Date();
     const durationMs = Date.now() - startedAt;
     const mimeType = inferMimeType(response.headers.get("content-type"));
@@ -668,10 +774,19 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
       .returning({ id: schema.rawDocuments.id });
     const rawDocument = requireRow(rawDocumentRow, `raw document ${endpoint.id}`);
 
-    const extractedCount =
+    const insertedDocumentIds =
       endpoint.kind === "rss"
         ? await upsertFeedDocuments(rawDocument.id, endpoint.sourceId, endpoint.id, endpoint.baseUrl, body)
-        : await upsertHtmlDocument(rawDocument.id, endpoint.sourceId, endpoint.id, endpoint.url, body, endpoint.parserKey ?? null);
+        : await upsertHtmlDocument(
+            rawDocument.id,
+            endpoint.sourceId,
+            endpoint.id,
+            endpoint.url,
+            body,
+            endpoint.parserKey ?? null,
+            endpoint.canonicalDomain,
+          );
+    const extractedCount = insertedDocumentIds.length;
 
     await db.insert(schema.fetchAttempts).values({
       fetchJobId: fetchJob.id,
@@ -708,6 +823,7 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
     return {
       endpointId: endpoint.id,
       extractedCount,
+      documentIds: insertedDocumentIds,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown fetch error";

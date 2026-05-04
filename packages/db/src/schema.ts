@@ -172,7 +172,9 @@ export const fetchJobs = pgTable("fetch_jobs", {
   attemptCount: integer("attempt_count").notNull().default(0),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("fetch_jobs_endpoint_completed_idx").on(table.sourceEndpointId, table.completedAt),
+]);
 
 export const rawDocuments = pgTable("raw_documents", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -191,7 +193,9 @@ export const rawDocuments = pgTable("raw_documents", {
   contentLength: integer("content_length").notNull(),
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
   metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
-});
+}, (table) => [
+  index("raw_documents_fetched_at_idx").on(table.fetchedAt),
+]);
 
 export const fetchAttempts = pgTable("fetch_attempts", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -209,7 +213,9 @@ export const fetchAttempts = pgTable("fetch_attempts", {
   finishedAt: timestamp("finished_at", { withTimezone: true }).notNull(),
   durationMs: integer("duration_ms").notNull(),
   errorMessage: text("error_message"),
-});
+}, (table) => [
+  index("fetch_attempts_finished_at_idx").on(table.finishedAt),
+]);
 
 export const documents = pgTable(
   "documents",
@@ -237,7 +243,12 @@ export const documents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("documents_canonical_url_idx").on(table.canonicalUrl)],
+  (table) => [
+    uniqueIndex("documents_canonical_url_idx").on(table.canonicalUrl),
+    index("documents_sort_time_idx").on(sql`coalesce(${table.sourcePublishedAt}, ${table.discoveredAt})`, table.id),
+    index("documents_source_id_idx").on(table.sourceId),
+    index("documents_discovered_at_idx").on(table.discoveredAt),
+  ],
 );
 
 export const entities = pgTable(
@@ -287,6 +298,8 @@ export const documentScores = pgTable(
   },
   (table) => [
     uniqueIndex("document_scores_doc_profile_idx").on(table.documentId, table.profileId),
+    index("document_scores_profile_doc_idx").on(table.profileId, table.documentId),
+    index("document_scores_profile_score_idx").on(table.profileId, table.score),
   ],
 );
 

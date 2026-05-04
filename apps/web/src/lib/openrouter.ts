@@ -9,11 +9,16 @@ export interface InterestRankingCandidate {
   id: number;
   title: string;
   previewParagraph: string;
+  sourceName?: string | null;
+  sourceCategory?: string | null;
+  publishedAt?: string | Date | null;
 }
 
 export interface InterestRankingSelection {
   documentId: number;
   score: number;
+  confidence: "high" | "medium" | "low" | null;
+  matchedSignals: string[];
   whyRelevant: string;
 }
 
@@ -152,6 +157,8 @@ function parseRankingResponse(rawText: string) {
           const record = selection as Record<string, unknown>;
           const documentId = Number(record.documentId);
           const score = Number(record.score);
+          const confidence = parseConfidence(record.confidence);
+          const matchedSignals = parseMatchedSignals(record.matchedSignals);
           const whyRelevant = typeof record.whyRelevant === "string" ? record.whyRelevant.trim() : "";
 
           if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) {
@@ -161,6 +168,8 @@ function parseRankingResponse(rawText: string) {
           return {
             documentId,
             score: Math.max(1, Math.min(100, Math.round(score))),
+            confidence,
+            matchedSignals,
             whyRelevant,
           };
         })
@@ -198,7 +207,24 @@ export async function rankDocumentsForInterest({
 export interface BatchScoreResult {
   documentId: number;
   score: number;
+  confidence: "high" | "medium" | "low" | null;
+  matchedSignals: string[];
   whyRelevant: string;
+}
+
+function parseConfidence(value: unknown) {
+  return value === "high" || value === "medium" || value === "low" ? value : null;
+}
+
+function parseMatchedSignals(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((signal) => (typeof signal === "string" ? signal.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 4);
 }
 
 function parseBatchScoreResponse(rawText: string): BatchScoreResult[] {
@@ -214,6 +240,8 @@ function parseBatchScoreResponse(rawText: string): BatchScoreResult[] {
       const record = entry as Record<string, unknown>;
       const documentId = Number(record.documentId);
       const score = Number(record.score);
+      const confidence = parseConfidence(record.confidence);
+      const matchedSignals = parseMatchedSignals(record.matchedSignals);
       const whyRelevant = typeof record.whyRelevant === "string" ? record.whyRelevant.trim() : "";
 
       if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) return null;
@@ -221,6 +249,8 @@ function parseBatchScoreResponse(rawText: string): BatchScoreResult[] {
       return {
         documentId,
         score: Math.max(1, Math.min(100, Math.round(score))),
+        confidence,
+        matchedSignals,
         whyRelevant,
       };
     })

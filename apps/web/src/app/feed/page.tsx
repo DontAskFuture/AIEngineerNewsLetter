@@ -268,12 +268,12 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               </p>
               <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
                 You are viewing {personalizedFeed.selectedProfile.displayName} as a read-only public feed.
-                Sign in to create and tune your own profiles.
+                Contact us to create and tune your own profiles.
               </p>
             </div>
-            <Link href="/login" className="button-primary w-fit">
-              Sign in
-            </Link>
+            <a href="mailto:michael@audivolt.ai" className="button-primary w-fit">
+              Contact us
+            </a>
           </div>
         </section>
       )}

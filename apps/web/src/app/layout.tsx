@@ -97,9 +97,6 @@ export default async function RootLayout({
                     <Link href="/login" className="button-secondary">
                       Login
                     </Link>
-                    <Link href="/signup" className="button-primary">
-                      Sign up
-                    </Link>
                   </>
                 )}
               </nav>

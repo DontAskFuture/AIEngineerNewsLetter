@@ -45,6 +45,17 @@ function extractPreview(summary: string | null, bodyText: string | null): string
   return summaryText ? summaryText.slice(0, 300) : "";
 }
 
+function formatWhyRelevant(result: { whyRelevant: string; confidence: string | null; matchedSignals: string[] }) {
+  const metadata = [
+    result.confidence ? `Confidence: ${result.confidence}` : null,
+    result.matchedSignals.length > 0 ? `Signals: ${result.matchedSignals.join(", ")}` : null,
+  ].filter(Boolean);
+
+  return metadata.length > 0
+    ? `${result.whyRelevant}\n\n${metadata.join(" | ")}`
+    : result.whyRelevant;
+}
+
 export interface ScoringProgress {
   totalUnscored: number;
   scored: number;
@@ -84,8 +95,12 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
       title: schema.documents.title,
       summary: schema.documents.summary,
       bodyText: schema.documents.bodyText,
+      sourceName: schema.sources.name,
+      sourceCategory: schema.sources.category,
+      sortTime: documentSortKey,
     })
     .from(schema.documents)
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
     .where(notInArray(schema.documents.id, alreadyScoredIds))
     .orderBy(desc(documentSortKey), desc(schema.documents.id))
     .limit(scoringConfig.maxDocumentsPerRun);
@@ -112,6 +127,9 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
         id: doc.id,
         title: doc.title,
         previewParagraph: extractPreview(doc.summary, doc.bodyText),
+        sourceName: doc.sourceName,
+        sourceCategory: doc.sourceCategory,
+        publishedAt: doc.sortTime,
       }));
 
       try {
@@ -132,7 +150,7 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
                 documentId: s.documentId,
                 profileId,
                 score: s.score,
-                whyRelevant: s.whyRelevant,
+                whyRelevant: formatWhyRelevant(s),
                 model: result.model,
               })),
             )
