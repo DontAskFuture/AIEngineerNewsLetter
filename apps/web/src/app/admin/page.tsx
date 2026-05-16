@@ -13,6 +13,7 @@ import {
 import { getOperationsSnapshot } from "@/lib/operations";
 import { getScoringStats, getScoringStatsBySource } from "@/lib/scoring";
 import { getDb, schema } from "@ai-intel/db";
+import { scoringConfig } from "@ai-intel/shared";
 import { eq, asc } from "drizzle-orm";
 import { forceTopStoriesSummaryAction, triggerCrawlAction, triggerScoreAllAction } from "./actions";
 import { ActionButton } from "./action-button";
@@ -102,18 +103,20 @@ export default async function AdminPage() {
               {env.openRouterModel}
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              This is the configured OpenRouter model used when the app needs to rank or score stories.
+              This env-configured model remains an explicit fallback after the shared model pool.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">
             <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-              Summary model
+              Model pool
             </p>
-            <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
-              deepseek/deepseek-v4-flash
+            <p className="display-font mt-2 break-all text-2xl font-semibold tracking-tight">
+              {scoringConfig.modelPool
+                .map((entry) => `${entry.model} ${Math.round(entry.trafficWeight * 100)}%`)
+                .join(" / ")}
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              Top-story profile briefings are pinned to DeepSeek V4 Flash even when the general ranking model changes.
+              Ranking, scoring, and top-story briefings split primary OpenRouter traffic across this pool, then fail over within the pool.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">

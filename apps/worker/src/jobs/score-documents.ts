@@ -3,6 +3,7 @@ import { and, desc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
 import {
   renderScoreDocumentsPrompt,
   scoringConfig,
+  selectScoringModelCandidates,
   type PromptCandidate,
   type ScoreDocumentsPayload,
 } from "@ai-intel/shared";
@@ -96,7 +97,7 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
     "X-Title": "AI Builder Intelligence",
   };
 
-  const models = Array.from(new Set([scoringConfig.preferredModel, env.OPENROUTER_MODEL]));
+  const models = Array.from(new Set([...selectScoringModelCandidates(), env.OPENROUTER_MODEL]));
   let lastError: Error | null = null;
 
   for (const model of models) {

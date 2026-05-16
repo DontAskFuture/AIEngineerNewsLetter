@@ -2,7 +2,7 @@ import {
   renderRankDocumentsPrompt,
   renderScoreDocumentsPrompt,
   renderSummarizeTopStoriesPrompt,
-  scoringConfig,
+  selectScoringModelCandidates,
   type TopStoriesSummaryCandidate,
 } from "@ai-intel/shared";
 import { loadWebEnv } from "@/lib/env";
@@ -36,6 +36,7 @@ export interface InterestRankingResponse {
 export interface ProfileTopStoriesSummaryResponse {
   summary: string;
   takeaways: string[];
+  furtherStudy: string;
 }
 
 function extractJson(rawText: string): string {
@@ -200,6 +201,7 @@ function parseTopStoriesSummaryResponse(rawText: string): ProfileTopStoriesSumma
   const parsed = JSON.parse(extractJson(rawText)) as unknown;
   const parsedRecord = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
   const summary = typeof parsedRecord?.summary === "string" ? parsedRecord.summary.trim() : "";
+  const furtherStudy = typeof parsedRecord?.furtherStudy === "string" ? parsedRecord.furtherStudy.trim() : "";
   const takeaways = Array.isArray(parsedRecord?.takeaways)
     ? parsedRecord.takeaways
         .map((takeaway) => (typeof takeaway === "string" ? takeaway.trim() : ""))
@@ -210,6 +212,9 @@ function parseTopStoriesSummaryResponse(rawText: string): ProfileTopStoriesSumma
   return {
     summary: summary || "The current top stories are relevant to the selected profile, but no concise summary was returned.",
     takeaways,
+    furtherStudy:
+      furtherStudy ||
+      "Use the top stories as a reading list: compare the recurring technologies, companies, and product decisions they mention, then follow the highest-signal topics into primary docs, technical posts, benchmarks, and market analysis.",
   };
 }
 
@@ -221,8 +226,12 @@ export async function rankDocumentsForInterest({
   candidates: InterestRankingCandidate[];
 }) {
   const prompt = renderRankDocumentsPrompt({ interestStatement, candidates });
+  const env = loadWebEnv();
 
-  const result = await chatCompletion(prompt.system, prompt.user, 3500);
+  const result = await chatCompletion(prompt.system, prompt.user, 3500, [
+    ...selectScoringModelCandidates(),
+    env.openRouterModel,
+  ]);
   const ranking = parseRankingResponse(result.content);
 
   return {
@@ -242,7 +251,11 @@ export async function summarizeTopStoriesForProfile({
   candidates: TopStoriesSummaryCandidate[];
 }): Promise<{ model: string; responseId: string | null; summary: ProfileTopStoriesSummaryResponse }> {
   const prompt = renderSummarizeTopStoriesPrompt({ profileName, interestStatement, candidates });
-  const result = await chatCompletion(prompt.system, prompt.user, 1200, [scoringConfig.preferredModel]);
+  const env = loadWebEnv();
+  const result = await chatCompletion(prompt.system, prompt.user, 2000, [
+    ...selectScoringModelCandidates(),
+    env.openRouterModel,
+  ]);
 
   return {
     model: result.model,
@@ -314,7 +327,10 @@ export async function scoreDocumentBatch({
   const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
   const env = loadWebEnv();
 
-  const result = await chatCompletion(prompt.system, prompt.user, 4000, [scoringConfig.preferredModel, env.openRouterModel]);
+  const result = await chatCompletion(prompt.system, prompt.user, 4000, [
+    ...selectScoringModelCandidates(),
+    env.openRouterModel,
+  ]);
   const scores = parseBatchScoreResponse(result.content);
 
   return { model: result.model, scores };

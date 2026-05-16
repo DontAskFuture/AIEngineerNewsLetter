@@ -21,9 +21,10 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Personalized feed ordering should include deterministic tie-breakers, usually descending document id after score/time, because top-story summary cache keys preserve the selected story order.
 - OpenRouter prompt text should come from shared prompt helpers rather than route-local or lib-local string constants.
 - Profile-level feed summary prompts should come from shared prompt helpers and summarize the selected top stories as a collection rather than replacing stored document scores.
-- Top-story profile briefings should use the existing `ranking_cache` table keyed by profile and selected story set so admin refreshes can force regeneration without changing ranking.
+- Top-story profile briefings should use the existing `ranking_cache` table keyed by profile and selected story set so admin refreshes can force regeneration without changing ranking; cache version changes should force regeneration when the briefing JSON contract changes.
 - Web OpenRouter parsing should tolerate shared scoring/ranking responses with confidence and matched-signal fields while preserving displayable relevance explanations.
 - Web-triggered scoring should match worker scoring by reading run size, batch size, and preferred model from shared scoring config.
+- Web OpenRouter calls should select primary models from the shared weighted model pool and keep env model overrides as explicit fallbacks.
 - Web OpenRouter env defaults should match the shared scoring default model unless a deliberate fallback is set in deployment env.
 - Personalized feed time windows should filter candidate documents in SQL/application code before any OpenRouter prompt is rendered.
 - Public auth actions should call the shared login-attempt throttle before password verification and record the outcome for auditability.

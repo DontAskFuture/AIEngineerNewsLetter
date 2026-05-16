@@ -324,6 +324,14 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 ))}
               </ul>
             ) : null}
+            <div className="surface-panel mt-4 rounded-[1rem] px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                Study next
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                {personalizedFeed.topStoriesSummary.furtherStudy}
+              </p>
+            </div>
           </div>
         ) : null}
 

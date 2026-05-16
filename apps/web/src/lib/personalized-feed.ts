@@ -13,7 +13,7 @@ const MAX_PER_SOURCE = 5;
 const MAX_FRESHNESS_BOOST = 20;
 const PUBLIC_FEED_OWNER_EMAIL = "lianglingfan@gmail.com";
 const PUBLIC_FEED_PROFILE_SLUG = "founding-analyst";
-const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v1";
+const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v3";
 const TOP_STORIES_SUMMARY_CACHE_TTL_HOURS = 24;
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
@@ -157,6 +157,7 @@ export interface PersonalizedFeedDocument {
 export interface ProfileTopStoriesSummary {
   summary: string;
   takeaways: string[];
+  furtherStudy: string;
   model: string;
   generatedAt: Date;
 }
@@ -196,6 +197,7 @@ interface TopStoriesSummaryCachePayload {
   type: "top_stories_summary";
   summary: string;
   takeaways: string[];
+  furtherStudy: string;
   storyIds: number[];
   timeWindow: TimeWindow;
 }
@@ -325,6 +327,10 @@ function parseTopStoriesSummaryCachePayload(
           .filter(Boolean)
           .slice(0, 4)
       : [],
+    furtherStudy:
+      typeof record.furtherStudy === "string" && record.furtherStudy.trim()
+        ? record.furtherStudy.trim()
+        : "Use the top stories as a reading list: compare the recurring technologies, companies, and product decisions they mention, then follow the highest-signal topics into primary docs, technical posts, benchmarks, and market analysis.",
   };
 }
 
@@ -392,6 +398,7 @@ async function saveTopStoriesSummary({
     type: "top_stories_summary",
     summary: summary.summary,
     takeaways: summary.takeaways,
+    furtherStudy: summary.furtherStudy,
     storyIds,
     timeWindow,
   };
@@ -469,6 +476,7 @@ async function summarizeTopDocumentsForProfile(
     const summary = {
       summary: result.summary.summary,
       takeaways: result.summary.takeaways,
+      furtherStudy: result.summary.furtherStudy,
       model: result.model,
       generatedAt: new Date(),
     };

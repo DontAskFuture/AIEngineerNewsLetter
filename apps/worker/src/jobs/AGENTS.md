@@ -21,7 +21,7 @@ This file applies to `apps/worker/src/jobs`.
 - HTML article extraction should preserve publication dates from common article/meta tags when available instead of relying only on discovery time.
 - Source-specific HTML extraction should use endpoint `parserKey` selectors where known and fall back to the generic same-path strategy only for simple listing pages.
 - Scoring jobs create a `scoring_jobs` row at start and update it per batch with scored/failed counts.
-- Scoring jobs should read batch size, per-run document cap, and preferred model from `packages/shared/src/scoring-config.ts`.
+- Scoring jobs should read batch size, per-run document cap, preferred model, and model-pool traffic weights from `packages/shared/src/scoring-config.ts`.
 - Scoring jobs may receive `documentIds` to restrict work to newly inserted documents; broad scoring should stay bounded by worker max-document and lookback env controls.
 - The shared LLM scoring prompt asks for a 1-100 relevance score plus a `whyRelevant` explanation per document.
 - Retry OpenRouter on 429 and 5xx with exponential backoff (up to 3 retries).
