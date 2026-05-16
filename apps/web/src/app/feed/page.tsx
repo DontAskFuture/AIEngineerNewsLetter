@@ -288,8 +288,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               Top stories
             </p>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-              Pre-computed relevance scores are capped for source diversity, then mixed with newest fallback
-              stories so you can review the most recent high-signal items first.
+              {personalizedFeed.topStoriesSummary
+                ? "Pre-computed relevance scores are capped for source diversity, then summarized for the selected profile before you review the individual stories."
+                : "Pre-computed relevance scores are capped for source diversity so you can review the most recent high-signal items first."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
@@ -298,6 +299,33 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             <span className="surface-chip px-3 py-2">{personalizedFeed.selectedProfile.displayName}</span>
           </div>
         </div>
+
+        {personalizedFeed.topStoriesSummary ? (
+          <div className="surface-panel-strong mt-6 rounded-[1.25rem] p-5 sm:p-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                  Profile briefing
+                </p>
+                <p className="mt-3 max-w-4xl text-sm leading-7 text-[color:var(--ink)] sm:text-base">
+                  {personalizedFeed.topStoriesSummary.summary}
+                </p>
+              </div>
+              <span className="surface-chip w-fit max-w-full break-all px-3 py-1 text-left text-xs uppercase tracking-[0.16em]">
+                {personalizedFeed.topStoriesSummary.model}
+              </span>
+            </div>
+            {personalizedFeed.topStoriesSummary.takeaways.length > 0 ? (
+              <ul className="mt-4 grid gap-2 text-sm leading-6 text-[color:var(--muted)] sm:grid-cols-2">
+                {personalizedFeed.topStoriesSummary.takeaways.map((takeaway) => (
+                  <li key={takeaway} className="surface-panel rounded-[1rem] px-4 py-3">
+                    {takeaway}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="mt-6 grid gap-4">
           {personalizedFeed.topDocuments.map((document) => (
@@ -338,7 +366,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
-                  {document.whyRelevant ? (
+                  {personalizedFeed.showWhyRelevant && document.whyRelevant ? (
                     <div className="surface-panel-strong mt-4 rounded-[1.25rem] p-4">
                       <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
                         Why Relevant To You
@@ -378,6 +406,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             isRead: doc.isRead,
             readAt: doc.readAt ? doc.readAt.toISOString() : null,
           }))}
+          showWhyRelevant={personalizedFeed.showWhyRelevant}
         />
       )}
 

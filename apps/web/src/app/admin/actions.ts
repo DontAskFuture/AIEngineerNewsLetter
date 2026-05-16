@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { triggerCrawl, triggerScoring } from "@/lib/crawler";
+import { forceTopStoriesSummaryForProfile } from "@/lib/personalized-feed";
 
 export async function triggerCrawlAction() {
   const user = await requireAdmin();
@@ -25,6 +26,19 @@ export async function triggerScoreAllAction() {
   }
 
   await triggerScoring();
+
+  revalidatePath("/admin");
+  revalidatePath("/feed");
+}
+
+export async function forceTopStoriesSummaryAction(profileId: number) {
+  const user = await requireAdmin();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  await forceTopStoriesSummaryForProfile(profileId, "week");
 
   revalidatePath("/admin");
   revalidatePath("/feed");

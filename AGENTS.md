@@ -46,6 +46,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Production Compose exposes crawled-document TTL controls through `CRAWLED_DOCUMENT_TTL_DAYS`, `CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES`, and `CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE`.
 - Production Compose exposes scoring spend controls through `SCORING_MAX_DOCUMENTS_PER_RUN` and `SCORING_LOOKBACK_DAYS`.
 - E2E smoke credentials live in local env as `E2E_TEST_EMAIL` and `E2E_TEST_PASSWORD`; keep the password synthetic and ensure the email is included in `AUTH_ALLOWED_EMAILS`.
+- `FEED_SHOW_WHY_RELEVANT` controls whether stored per-story relevance explanations render in the feed; keep it off by default when the profile-level top-story briefing is the primary explanation surface.
 - Project-local Codex skills live in `.codex/skills`; update the relevant skill reference when testing workflows or credential conventions change.
 - Playwright is installed as a root dev dependency for browser-based E2E smoke tests.
 

@@ -16,9 +16,12 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Admin observability helpers may read pg-boss and pipeline tables for status/error reporting, but they should not execute long-running worker logic.
 - Personalized feed reads and writes must stay scoped to the authenticated user, and deletes should preserve history with soft deletion.
 - Public feed reads may use the configured public owner profile but must not expose profile mutation controls or public-owner read state.
-- Personalized feed rendering must not block on live LLM calls; it should use pre-computed scores or fall back to newest in-window stories.
+- Personalized feed ranking should use pre-computed scores or fall back to newest in-window stories; live LLM calls during feed render are limited to failure-tolerant profile-level summaries of the already-selected top stories.
 - Personalized feed ranking should stay relevance-led while applying the configured freshness boost so recent high-signal stories do not get buried by older marginally higher scores.
+- Personalized feed ordering should include deterministic tie-breakers, usually descending document id after score/time, because top-story summary cache keys preserve the selected story order.
 - OpenRouter prompt text should come from shared prompt helpers rather than route-local or lib-local string constants.
+- Profile-level feed summary prompts should come from shared prompt helpers and summarize the selected top stories as a collection rather than replacing stored document scores.
+- Top-story profile briefings should use the existing `ranking_cache` table keyed by profile and selected story set so admin refreshes can force regeneration without changing ranking.
 - Web OpenRouter parsing should tolerate shared scoring/ranking responses with confidence and matched-signal fields while preserving displayable relevance explanations.
 - Web-triggered scoring should match worker scoring by reading run size, batch size, and preferred model from shared scoring config.
 - Web OpenRouter env defaults should match the shared scoring default model unless a deliberate fallback is set in deployment env.

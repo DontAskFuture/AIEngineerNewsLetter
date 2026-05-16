@@ -1,4 +1,10 @@
-import { renderRankDocumentsPrompt, renderScoreDocumentsPrompt, scoringConfig } from "@ai-intel/shared";
+import {
+  renderRankDocumentsPrompt,
+  renderScoreDocumentsPrompt,
+  renderSummarizeTopStoriesPrompt,
+  scoringConfig,
+  type TopStoriesSummaryCandidate,
+} from "@ai-intel/shared";
 import { loadWebEnv } from "@/lib/env";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -25,6 +31,11 @@ export interface InterestRankingSelection {
 export interface InterestRankingResponse {
   shortlistSummary: string;
   selectedDocuments: InterestRankingSelection[];
+}
+
+export interface ProfileTopStoriesSummaryResponse {
+  summary: string;
+  takeaways: string[];
 }
 
 function extractJson(rawText: string): string {
@@ -185,6 +196,23 @@ function parseRankingResponse(rawText: string) {
   } satisfies InterestRankingResponse;
 }
 
+function parseTopStoriesSummaryResponse(rawText: string): ProfileTopStoriesSummaryResponse {
+  const parsed = JSON.parse(extractJson(rawText)) as unknown;
+  const parsedRecord = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  const summary = typeof parsedRecord?.summary === "string" ? parsedRecord.summary.trim() : "";
+  const takeaways = Array.isArray(parsedRecord?.takeaways)
+    ? parsedRecord.takeaways
+        .map((takeaway) => (typeof takeaway === "string" ? takeaway.trim() : ""))
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
+
+  return {
+    summary: summary || "The current top stories are relevant to the selected profile, but no concise summary was returned.",
+    takeaways,
+  };
+}
+
 export async function rankDocumentsForInterest({
   interestStatement,
   candidates,
@@ -201,6 +229,25 @@ export async function rankDocumentsForInterest({
     model: result.model,
     responseId: result.responseId,
     ranking,
+  };
+}
+
+export async function summarizeTopStoriesForProfile({
+  profileName,
+  interestStatement,
+  candidates,
+}: {
+  profileName: string;
+  interestStatement: string;
+  candidates: TopStoriesSummaryCandidate[];
+}): Promise<{ model: string; responseId: string | null; summary: ProfileTopStoriesSummaryResponse }> {
+  const prompt = renderSummarizeTopStoriesPrompt({ profileName, interestStatement, candidates });
+  const result = await chatCompletion(prompt.system, prompt.user, 1200, [scoringConfig.preferredModel]);
+
+  return {
+    model: result.model,
+    responseId: result.responseId,
+    summary: parseTopStoriesSummaryResponse(result.content),
   };
 }
 

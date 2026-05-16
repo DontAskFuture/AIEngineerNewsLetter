@@ -24,11 +24,12 @@ interface MoreStoriesDocument {
 
 interface MoreStoriesProps {
   documents: MoreStoriesDocument[];
+  showWhyRelevant: boolean;
 }
 
 const PAGE_SIZE = 20;
 
-export function MoreStories({ documents }: MoreStoriesProps) {
+export function MoreStories({ documents, showWhyRelevant }: MoreStoriesProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
@@ -102,7 +103,7 @@ export function MoreStories({ documents }: MoreStoriesProps) {
                   <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
-                  {document.whyRelevant ? (
+                  {showWhyRelevant && document.whyRelevant ? (
                     <div className="surface-panel-strong mt-3 rounded-[1rem] p-4">
                       <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
                         Why Relevant To You

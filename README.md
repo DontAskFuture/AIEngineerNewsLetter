@@ -69,7 +69,8 @@ The web service still binds to `127.0.0.1:3000` for local browser access, while 
 - `AUTH_ALLOWED_EMAILS` controls who can create or access an account. It defaults to `lianglingfan@gmail.com`.
 - `ADMIN_EMAILS` controls access to `/admin` and admin APIs. Production defaults to `lianglingfan@gmail.com`.
 - Passwords are stored as salted hashes, not plain text.
-- Add `OPENROUTER_API_KEY` to enable personalized feed ranking with OpenRouter Responses and `openai/gpt-5.4-mini`.
-- The personalized shortlist uses each profile's plain-English interest statement plus the title and first paragraph from today's documents.
+- Add `OPENROUTER_API_KEY` to enable scoring and profile-level top-story briefings through OpenRouter.
+- Set `FEED_SHOW_WHY_RELEVANT=true` to show the stored per-story relevance notes; they are hidden by default in favor of the profile briefing.
+- The personalized shortlist uses each profile's plain-English interest statement plus the title and first paragraph from in-window documents.
 - The product and roadmap docs live in `docs/feature-and-implementation-plan.md`.
 - Docker uses the multi-stage [Dockerfile](/Users/autumn/src/AIEngineerNewsLetter/Dockerfile) and named volumes for Postgres data plus raw fetch storage.

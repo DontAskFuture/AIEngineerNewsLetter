@@ -14,7 +14,7 @@ import { getOperationsSnapshot } from "@/lib/operations";
 import { getScoringStats, getScoringStatsBySource } from "@/lib/scoring";
 import { getDb, schema } from "@ai-intel/db";
 import { eq, asc } from "drizzle-orm";
-import { triggerCrawlAction, triggerScoreAllAction } from "./actions";
+import { forceTopStoriesSummaryAction, triggerCrawlAction, triggerScoreAllAction } from "./actions";
 import { ActionButton } from "./action-button";
 import { ScoringProgress } from "./scoring-progress";
 
@@ -39,13 +39,17 @@ export default async function AdminPage() {
   const env = loadWebEnv();
 
   const db = getDb();
-  const profiles = await db
-    .select({ id: schema.userProfiles.id })
+  const activeProfiles = await db
+    .select({
+      id: schema.userProfiles.id,
+      displayName: schema.userProfiles.displayName,
+      slug: schema.userProfiles.slug,
+      updatedAt: schema.userProfiles.updatedAt,
+    })
     .from(schema.userProfiles)
     .where(eq(schema.userProfiles.isActive, true))
-    .orderBy(asc(schema.userProfiles.id))
-    .limit(1);
-  const firstProfileId = profiles[0]?.id ?? null;
+    .orderBy(asc(schema.userProfiles.id));
+  const firstProfileId = activeProfiles[0]?.id ?? null;
 
   const [snapshot, crawlStatus, scoringStats, sourceScoringStats, operationsSnapshot] = await Promise.all([
     getDashboardSnapshot(),
@@ -89,7 +93,7 @@ export default async function AdminPage() {
           This route is now backed by the live ingestion tables. It tracks crawl freshness, source
           coverage, and recent fetch attempts so we can spot parser or scheduling issues quickly.
         </p>
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
           <div className="surface-panel rounded-[1.35rem] p-4">
             <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
               Ranking model
@@ -99,6 +103,17 @@ export default async function AdminPage() {
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
               This is the configured OpenRouter model used when the app needs to rank or score stories.
+            </p>
+          </div>
+          <div className="surface-panel rounded-[1.35rem] p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              Summary model
+            </p>
+            <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
+              deepseek/deepseek-v4-flash
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+              Top-story profile briefings are pinned to DeepSeek V4 Flash even when the general ranking model changes.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">
@@ -136,6 +151,46 @@ export default async function AdminPage() {
             <span>Total: <strong>{scoringStats.totalDocuments}</strong></span>
           </div>
         )}
+      </section>
+
+      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+              Profile briefings
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+              Regenerate the cached weekly top-10 summary for a profile. The feed reuses this cached briefing
+              until the story set changes or the cache expires.
+            </p>
+          </div>
+          <span className="surface-chip w-fit px-3 py-2 text-xs uppercase tracking-[0.16em]">
+            {activeProfiles.length} active profiles
+          </span>
+        </div>
+
+        <div className="mt-6 grid gap-3">
+          {activeProfiles.map((profile) => (
+            <div
+              key={profile.id}
+              className="surface-panel flex flex-col gap-4 rounded-[1.25rem] p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div>
+                <p className="display-font text-xl font-semibold tracking-tight">{profile.displayName}</p>
+                <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
+                  {profile.slug} - updated {formatRelativeTime(profile.updatedAt)}
+                </p>
+              </div>
+              <ActionButton
+                action={forceTopStoriesSummaryAction.bind(null, profile.id)}
+                label="Force summary"
+                pendingLabel="Summarizing..."
+                successMessage="Top-10 profile summary regenerated."
+                className="button-secondary"
+              />
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="glass-card rounded-[2rem] p-6 sm:p-8">

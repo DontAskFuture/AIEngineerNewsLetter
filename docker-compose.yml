@@ -49,6 +49,7 @@ services:
       SCORING_LOOKBACK_DAYS: ${SCORING_LOOKBACK_DAYS:-30}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}
+      FEED_SHOW_WHY_RELEVANT: ${FEED_SHOW_WHY_RELEVANT:-false}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Los_Angeles}
       AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-lianglingfan@gmail.com}

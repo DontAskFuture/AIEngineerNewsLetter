@@ -20,5 +20,6 @@ This file applies to `packages/shared/src`.
 - URL normalization rules should be conservative because they affect dedupe and document identity.
 - Prompt templates should stay centralized here and keep complex formatting in TypeScript helpers rather than hidden in template strings.
 - Scoring and ranking prompts should include calibrated score rubrics, negative criteria, prompt-injection boundaries, confidence, matched signals, and source/date metadata in the shared candidate format.
+- Profile-level top-story summary prompts should summarize how the selected shortlist helps the profile notice, decide, investigate, or act, preserve prompt-injection boundaries, and keep output in a compact JSON contract.
 - Shared scoring configuration should live here instead of being hardcoded in web or worker business logic.
 - Ranking prompts should not include time-window metadata; callers must filter candidates deterministically before rendering prompt text.

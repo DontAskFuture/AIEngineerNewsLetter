@@ -13,9 +13,9 @@ This file applies to `apps/web/src/app/feed`.
 ## Implementation Guidance
 - Keep form handling and redirects here, but keep ranking and persistence logic in `../../lib/personalized-feed`.
 - Server-action redirects should fall back to `window=week` when no current window is submitted.
-- The feed reads pre-computed scores from `document_scores`; it does not call OpenRouter at render time.
-- Feed copy should describe scoring as pre-computed and non-blocking so the UI matches runtime behavior.
-- Both the top shortlist and the expandable "More stories" section should surface `whyRelevant` copy when the ranking layer provides it.
+- The feed reads pre-computed scores from `document_scores`, then may call OpenRouter once at render time to create a profile-level briefing for the selected top stories.
+- Feed copy should describe scoring as pre-computed while treating the profile briefing as a live, failure-tolerant enhancement.
+- The stored per-story `whyRelevant` copy should stay available to the UI, but rendering is gated by `FEED_SHOW_WHY_RELEVANT`.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
 - Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s `AI Engineer` profile; profile management stays signed-in only.
 - The anonymous public-profile row should use a contact CTA to `mailto:michael@audivolt.ai` rather than a sign-in CTA.

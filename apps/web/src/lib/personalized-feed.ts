@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import type { SourceCategory } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
 import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { loadWebEnv } from "@/lib/env";
+import { summarizeTopStoriesForProfile } from "@/lib/openrouter";
 import { applyReadStateToDocuments } from "@/lib/read-tracking";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
@@ -10,6 +13,8 @@ const MAX_PER_SOURCE = 5;
 const MAX_FRESHNESS_BOOST = 20;
 const PUBLIC_FEED_OWNER_EMAIL = "lianglingfan@gmail.com";
 const PUBLIC_FEED_PROFILE_SLUG = "founding-analyst";
+const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v1";
+const TOP_STORIES_SUMMARY_CACHE_TTL_HOURS = 24;
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
 
@@ -107,6 +112,20 @@ function getFreshnessAdjustedScore(score: number, sortTime: Date, cutoff: Date, 
   return score + freshnessRatio * MAX_FRESHNESS_BOOST;
 }
 
+function compareBySortTimeDescThenIdDesc(
+  a: { sortTime: Date; id: number },
+  b: { sortTime: Date; id: number },
+) {
+  const aTime = a.sortTime instanceof Date ? a.sortTime.getTime() : new Date(a.sortTime).getTime();
+  const bTime = b.sortTime instanceof Date ? b.sortTime.getTime() : new Date(b.sortTime).getTime();
+
+  if (bTime !== aTime) {
+    return bTime - aTime;
+  }
+
+  return b.id - a.id;
+}
+
 export interface FeedUserProfile {
   id: number;
   slug: string;
@@ -135,11 +154,20 @@ export interface PersonalizedFeedDocument {
   readAt: Date | null;
 }
 
+export interface ProfileTopStoriesSummary {
+  summary: string;
+  takeaways: string[];
+  model: string;
+  generatedAt: Date;
+}
+
 export interface PersonalizedFeedSnapshot {
   profiles: FeedUserProfile[];
   selectedProfile: FeedUserProfile;
   topDocuments: PersonalizedFeedDocument[];
   remainingDocuments: PersonalizedFeedDocument[];
+  topStoriesSummary: ProfileTopStoriesSummary | null;
+  showWhyRelevant: boolean;
   candidateCount: number;
   rankingMode: "interest_ranked" | "latest";
   rankingSummary: string;
@@ -162,6 +190,14 @@ interface CandidateDocumentRow {
   sourcePublishedAt: Date | null;
   discoveredAt: Date;
   sortTime: Date;
+}
+
+interface TopStoriesSummaryCachePayload {
+  type: "top_stories_summary";
+  summary: string;
+  takeaways: string[];
+  storyIds: number[];
+  timeWindow: TimeWindow;
 }
 
 function slugifyDisplayName(value: string) {
@@ -250,6 +286,209 @@ function mapCandidateRow(row: CandidateDocumentRow) {
   } satisfies PersonalizedFeedDocument;
 }
 
+function buildTopStoriesSummaryCacheKey(timeWindow: TimeWindow, documents: PersonalizedFeedDocument[]) {
+  const storyIds = documents.slice(0, MAX_SELECTED_DOCUMENTS).map((document) => document.id);
+  const cacheInput = `${TOP_STORIES_SUMMARY_CACHE_PREFIX}:${timeWindow}:${storyIds.join(",")}`;
+  return createHash("sha256").update(cacheInput).digest("hex");
+}
+
+function parseTopStoriesSummaryCachePayload(
+  value: unknown,
+  expectedTimeWindow: TimeWindow,
+  expectedStoryIds: number[],
+) {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+
+  if (
+    record?.type !== "top_stories_summary" ||
+    record.timeWindow !== expectedTimeWindow ||
+    typeof record.summary !== "string" ||
+    !Array.isArray(record.storyIds)
+  ) {
+    return null;
+  }
+
+  const cachedStoryIds = record.storyIds.map((id) => Number(id));
+  const sameStories =
+    cachedStoryIds.length === expectedStoryIds.length &&
+    cachedStoryIds.every((id, index) => id === expectedStoryIds[index]);
+
+  if (!sameStories) {
+    return null;
+  }
+
+  return {
+    summary: record.summary.trim(),
+    takeaways: Array.isArray(record.takeaways)
+      ? record.takeaways
+          .map((takeaway) => (typeof takeaway === "string" ? takeaway.trim() : ""))
+          .filter(Boolean)
+          .slice(0, 4)
+      : [],
+  };
+}
+
+async function getCachedTopStoriesSummary({
+  profileId,
+  cacheKey,
+  timeWindow,
+  storyIds,
+}: {
+  profileId: number;
+  cacheKey: string;
+  timeWindow: TimeWindow;
+  storyIds: number[];
+}): Promise<ProfileTopStoriesSummary | null> {
+  const db = getDb();
+  const [cached] = await db
+    .select({
+      rankingJson: schema.rankingCache.rankingJson,
+      model: schema.rankingCache.model,
+      createdAt: schema.rankingCache.createdAt,
+    })
+    .from(schema.rankingCache)
+    .where(
+      and(
+        eq(schema.rankingCache.profileId, profileId),
+        eq(schema.rankingCache.candidatesHash, cacheKey),
+        gt(schema.rankingCache.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+
+  if (!cached) {
+    return null;
+  }
+
+  const payload = parseTopStoriesSummaryCachePayload(cached.rankingJson, timeWindow, storyIds);
+  if (!payload?.summary) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    model: cached.model ?? "unknown",
+    generatedAt: cached.createdAt,
+  };
+}
+
+async function saveTopStoriesSummary({
+  profileId,
+  cacheKey,
+  timeWindow,
+  storyIds,
+  summary,
+}: {
+  profileId: number;
+  cacheKey: string;
+  timeWindow: TimeWindow;
+  storyIds: number[];
+  summary: ProfileTopStoriesSummary;
+}) {
+  const db = getDb();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + TOP_STORIES_SUMMARY_CACHE_TTL_HOURS * 60 * 60 * 1000);
+  const payload: TopStoriesSummaryCachePayload = {
+    type: "top_stories_summary",
+    summary: summary.summary,
+    takeaways: summary.takeaways,
+    storyIds,
+    timeWindow,
+  };
+
+  await db
+    .insert(schema.rankingCache)
+    .values({
+      profileId,
+      candidatesHash: cacheKey,
+      model: summary.model,
+      rankingJson: payload,
+      createdAt: now,
+      expiresAt,
+    })
+    .onConflictDoUpdate({
+      target: [schema.rankingCache.profileId, schema.rankingCache.candidatesHash],
+      set: {
+        model: sql`excluded.model`,
+        rankingJson: sql`excluded.ranking_json`,
+        createdAt: now,
+        expiresAt,
+      },
+    });
+}
+
+async function summarizeTopDocumentsForProfile(
+  profile: FeedUserProfile,
+  documents: PersonalizedFeedDocument[],
+  timeWindow: TimeWindow,
+  options: { forceRefresh?: boolean } = {},
+): Promise<ProfileTopStoriesSummary | null> {
+  const env = loadWebEnv();
+
+  if (!profile.interestStatement.trim() || documents.length === 0) {
+    return null;
+  }
+
+  const storyIds = documents.slice(0, MAX_SELECTED_DOCUMENTS).map((document) => document.id);
+  const cacheKey = buildTopStoriesSummaryCacheKey(timeWindow, documents);
+
+  if (!options.forceRefresh) {
+    const cachedSummary = await getCachedTopStoriesSummary({
+      profileId: profile.id,
+      cacheKey,
+      timeWindow,
+      storyIds,
+    });
+
+    if (cachedSummary) {
+      return cachedSummary;
+    }
+  }
+
+  if (!env.openRouterApiKey) {
+    return null;
+  }
+
+  try {
+    const result = await summarizeTopStoriesForProfile({
+      profileName: profile.displayName,
+      interestStatement: profile.interestStatement,
+      candidates: documents.slice(0, MAX_SELECTED_DOCUMENTS).map((document, index) => ({
+        id: document.id,
+        rank: index + 1,
+        title: document.title,
+        previewParagraph: document.previewParagraph,
+        sourceName: document.sourceName,
+        sourceCategory: document.category,
+        publishedAt: document.sortTime,
+        score: document.matchScore,
+        whyRelevant: document.whyRelevant,
+      })),
+    });
+
+    const summary = {
+      summary: result.summary.summary,
+      takeaways: result.summary.takeaways,
+      model: result.model,
+      generatedAt: new Date(),
+    };
+
+    await saveTopStoriesSummary({
+      profileId: profile.id,
+      cacheKey,
+      timeWindow,
+      storyIds,
+      summary,
+    });
+
+    return summary;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.warn(`[feed] Failed to summarize top stories for profile ${profile.id}: ${message}`);
+    return null;
+  }
+}
+
 async function getCandidateDocuments(cutoff: Date) {
   const db = getDb();
   const selectShape = {
@@ -272,7 +511,7 @@ async function getCandidateDocuments(cutoff: Date) {
     .from(schema.documents)
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
     .where(gt(documentSortKey, cutoff))
-    .orderBy(desc(documentSortKey))
+    .orderBy(desc(documentSortKey), desc(schema.documents.id))
     .limit(MAX_CANDIDATE_DOCUMENTS);
 
   return rows.map((row) => mapCandidateRow(row));
@@ -556,12 +795,15 @@ async function buildPersonalizedFeedSnapshot({
   timeWindow,
   ownerUserId,
   readStateUserId,
+  forceSummaryRefresh = false,
 }: {
   profileSlug?: string | null;
   timeWindow: TimeWindow;
   ownerUserId: number;
   readStateUserId: number | null;
+  forceSummaryRefresh?: boolean;
 }): Promise<PersonalizedFeedSnapshot> {
+  const showWhyRelevant = loadWebEnv().feedShowWhyRelevant;
   const profiles = await getProfiles(ownerUserId);
   const selectedProfile = profiles.find((profile) => profile.slug === profileSlug) ?? profiles[0];
 
@@ -577,11 +819,7 @@ async function buildPersonalizedFeedSnapshot({
   function buildRemainingDocuments(excludeIds: Set<number>) {
     return candidateDocuments
       .filter((d) => !excludeIds.has(d.id))
-      .sort((a, b) => {
-        const aTime = a.sortTime instanceof Date ? a.sortTime.getTime() : new Date(a.sortTime).getTime();
-        const bTime = b.sortTime instanceof Date ? b.sortTime.getTime() : new Date(b.sortTime).getTime();
-        return bTime - aTime;
-      });
+      .sort(compareBySortTimeDescThenIdDesc);
   }
 
   if (candidateDocuments.length === 0) {
@@ -590,6 +828,8 @@ async function buildPersonalizedFeedSnapshot({
       selectedProfile,
       topDocuments: [],
       remainingDocuments: [],
+      topStoriesSummary: null,
+      showWhyRelevant,
       candidateCount: 0,
       rankingMode: "latest",
       rankingSummary: "No documents are available yet. Run the worker again after more sources publish updates.",
@@ -627,6 +867,8 @@ async function buildPersonalizedFeedSnapshot({
       selectedProfile,
       topDocuments: documentsWithReadState.topDocuments,
       remainingDocuments: documentsWithReadState.remainingDocuments,
+      topStoriesSummary: null,
+      showWhyRelevant,
       candidateCount: candidateDocuments.length,
       rankingMode: "latest",
       rankingSummary: `No interest statement is saved for ${selectedProfile.displayName} yet, so this feed is showing the newest stories in the current window.`,
@@ -666,7 +908,7 @@ async function buildPersonalizedFeedSnapshot({
         gt(documentSortKey, cutoff),
       ),
     )
-    .orderBy(desc(schema.documentScores.score), desc(documentSortKey))
+    .orderBy(desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
     .limit(MAX_CANDIDATE_DOCUMENTS);
 
   if (scoredRows.length > 0) {
@@ -685,9 +927,7 @@ async function buildPersonalizedFeedSnapshot({
           return b.adjustedScore - a.adjustedScore;
         }
 
-        const aTime = a.row.sortTime instanceof Date ? a.row.sortTime.getTime() : new Date(a.row.sortTime).getTime();
-        const bTime = b.row.sortTime instanceof Date ? b.row.sortTime.getTime() : new Date(b.row.sortTime).getTime();
-        return bTime - aTime;
+        return compareBySortTimeDescThenIdDesc(a.row, b.row);
       });
 
     const scoredDocs: PersonalizedFeedDocument[] = rankedScoredRows.map(({ row }, index) => ({
@@ -708,13 +948,20 @@ async function buildPersonalizedFeedSnapshot({
     ];
 
     const firstModel = rankedScoredRows[0]?.row.model ?? null;
-    const documentsWithReadState = await withReadState(topDocuments, remaining);
+    const [documentsWithReadState, topStoriesSummary] = await Promise.all([
+      withReadState(topDocuments, remaining),
+      summarizeTopDocumentsForProfile(selectedProfile, topDocuments, timeWindow, {
+        forceRefresh: forceSummaryRefresh,
+      }),
+    ]);
 
     return {
       profiles,
       selectedProfile,
       topDocuments: documentsWithReadState.topDocuments,
       remainingDocuments: documentsWithReadState.remainingDocuments,
+      topStoriesSummary,
+      showWhyRelevant,
       candidateCount: candidateDocuments.length,
       rankingMode: "interest_ranked",
       rankingSummary: "Ranked by pre-computed relevance scores with a freshness boost.",
@@ -726,12 +973,20 @@ async function buildPersonalizedFeedSnapshot({
   }
 
   const topIds = new Set(defaultShortlist.map((d) => d.id));
-  const documentsWithReadState = await withReadState(defaultShortlist, buildRemainingDocuments(topIds));
+  const remainingDocuments = buildRemainingDocuments(topIds);
+  const [documentsWithReadState, topStoriesSummary] = await Promise.all([
+    withReadState(defaultShortlist, remainingDocuments),
+    summarizeTopDocumentsForProfile(selectedProfile, defaultShortlist, timeWindow, {
+      forceRefresh: forceSummaryRefresh,
+    }),
+  ]);
   return {
     profiles,
     selectedProfile,
     topDocuments: documentsWithReadState.topDocuments,
     remainingDocuments: documentsWithReadState.remainingDocuments,
+    topStoriesSummary,
+    showWhyRelevant,
     candidateCount: candidateDocuments.length,
     rankingMode: "latest",
     rankingSummary:
@@ -758,6 +1013,43 @@ export async function getPersonalizedFeedSnapshot(
     ownerUserId: currentUserId,
     readStateUserId: currentUserId,
   });
+}
+
+export async function forceTopStoriesSummaryForProfile(profileId: number, timeWindow: TimeWindow = "week") {
+  const db = getDb();
+  const [profile] = await db
+    .select({
+      id: schema.userProfiles.id,
+      userId: schema.userProfiles.userId,
+      slug: schema.userProfiles.slug,
+      displayName: schema.userProfiles.displayName,
+    })
+    .from(schema.userProfiles)
+    .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.isActive, true)))
+    .limit(1);
+
+  if (!profile) {
+    throw new Error(`Active profile ${profileId} was not found`);
+  }
+
+  const snapshot = await buildPersonalizedFeedSnapshot({
+    profileSlug: profile.slug,
+    timeWindow,
+    ownerUserId: profile.userId,
+    readStateUserId: null,
+    forceSummaryRefresh: true,
+  });
+
+  if (!snapshot.topStoriesSummary) {
+    throw new Error(`No top-story summary was generated for ${profile.displayName}`);
+  }
+
+  return {
+    profileId: profile.id,
+    profileName: profile.displayName,
+    storyCount: snapshot.topDocuments.length,
+    summary: snapshot.topStoriesSummary,
+  };
 }
 
 export async function getPublicAiEngineerFeedSnapshot(timeWindow: TimeWindow = "week"): Promise<PersonalizedFeedSnapshot> {
