@@ -3,6 +3,7 @@ import {
   renderScoreDocumentsPrompt,
   renderSummarizeTopStoriesPrompt,
   selectScoringModelCandidates,
+  selectSummaryModelCandidates,
   type TopStoriesSummaryCandidate,
 } from "@ai-intel/shared";
 import { loadWebEnv } from "@/lib/env";
@@ -253,7 +254,7 @@ export async function summarizeTopStoriesForProfile({
   const prompt = renderSummarizeTopStoriesPrompt({ profileName, interestStatement, candidates });
   const env = loadWebEnv();
   const result = await chatCompletion(prompt.system, prompt.user, 2000, [
-    ...selectScoringModelCandidates(),
+    ...selectSummaryModelCandidates(),
     env.openRouterModel,
   ]);
 

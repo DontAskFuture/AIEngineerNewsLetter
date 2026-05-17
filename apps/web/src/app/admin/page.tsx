@@ -103,20 +103,18 @@ export default async function AdminPage() {
               {env.openRouterModel}
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              This env-configured model remains an explicit fallback after the shared model pool.
+              This env-configured model remains an explicit fallback after the configured model candidates.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">
             <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-              Model pool
+              Scoring models
             </p>
             <p className="display-font mt-2 break-all text-2xl font-semibold tracking-tight">
-              {scoringConfig.modelPool
-                .map((entry) => `${entry.model} ${Math.round(entry.trafficWeight * 100)}%`)
-                .join(" / ")}
+              {scoringConfig.scoringModelCandidates.join(" → ")}
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              Ranking, scoring, and top-story briefings split primary OpenRouter traffic across this pool, then fail over within the pool.
+              Ranking and scoring use HY3 Preview first, then fall back to DeepSeek V4 Flash. Top-story summaries use the reverse order.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">
