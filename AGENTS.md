@@ -41,6 +41,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Long-running work (crawling, scoring) belongs in the worker, not the web app. The web app only enqueues.
 - Docker builds must exclude workspace `node_modules` directories so container-installed pnpm links are not overwritten by host symlinks.
 - Cloudflare Tunnel support lives in Compose as an optional `tunnel` profile; keep `web` and Postgres bound to localhost on the host, and route public web traffic through `cloudflared` to `http://web:3000`.
+- Cloudflare Tunnel should run over HTTP/2 in Compose to avoid QUIC/UDP idle timeout issues on local networks, with Docker restart policy set to keep the connector available after failures.
 - Cloudflare Tunnel tokens should be mounted from ignored local secret files, not interpolated into Compose commands or committed env examples.
 - Local server operations are exposed through `pnpm ops`, which wraps Docker Compose lifecycle commands and crawl/scoring job log queries.
 - Production Compose exposes crawled-document TTL controls through `CRAWLED_DOCUMENT_TTL_DAYS`, `CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES`, and `CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE`.

@@ -65,10 +65,10 @@ services:
     depends_on:
       web:
         condition: service_started
-    command: tunnel --no-autoupdate run --token-file /run/secrets/cloudflare_tunnel_token
+    command: tunnel --no-autoupdate --protocol http2 run --token-file /run/secrets/cloudflare_tunnel_token
     secrets:
       - cloudflare_tunnel_token
-    restart: unless-stopped
+    restart: always
     profiles:
       - tunnel
 
