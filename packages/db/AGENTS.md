@@ -8,6 +8,7 @@ This file applies to `packages/db` and its subdirectories unless a deeper file o
 - It exports schema objects used by both the web app and the worker.
 - Key tables include `sources`, `source_endpoints`, `documents`, `document_scores`, `scoring_jobs`, `user_profiles`, `auth_users`, and `auth_sessions`.
 - `auth_login_attempts` records public login attempts for brute-force throttling.
+- `user_profiles` includes an `is_default` flag for each user's preferred feed profile.
 
 ## Implementation Guidance
 - Schema changes begin in `src/schema.ts`.

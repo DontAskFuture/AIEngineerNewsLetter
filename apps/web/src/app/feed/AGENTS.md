@@ -6,7 +6,7 @@ This file applies to `apps/web/src/app/feed`.
 ## Architecture
 - This route is the personalized feed experience.
 - It displays pre-computed document scores joined with documents and sources, filtered by a configurable time window (day/week/month/quarter/year, defaulting to week).
-- Server actions in this folder mutate `user_profiles`.
+- Server actions in this folder mutate `user_profiles`, including profile CRUD and the user's default profile selection.
 - Time window and profile selection are driven by URL search params (`window`, `profile`).
 - Profile switching uses a small client selector for optimistic click feedback, but the selected profile data is still loaded by the server page from URL params.
 
@@ -22,6 +22,7 @@ This file applies to `apps/web/src/app/feed`.
 - Preserve clear visual separation between feed hero controls, profile editing, top stories, more stories, and source registry, and keep those surfaces theme-aware.
 - Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.
 - Profile creation and update should preserve the user’s current feed window and make the selected profile obvious in the interest chip list.
+- Users can choose their default feed profile; the default is used only when no explicit `profile` URL param is present.
 - Profile creation and selected-profile editing live in one combined profile workspace rather than separate page sections.
 - Profile-specific uncontrolled form fields and expandable story sections should be keyed by selected profile so browser state does not leak across profile switches.
 - Duplicate profile-name errors are surfaced through feed URL params so server actions can keep using redirects instead of client action state.

@@ -1,0 +1,1 @@
+-- The default-profile unique index is created in 0014 with the column backfill.

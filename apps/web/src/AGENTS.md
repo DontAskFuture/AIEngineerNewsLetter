@@ -16,6 +16,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Admin observability helpers may read pg-boss and pipeline tables for status/error reporting, but they should not execute long-running worker logic.
 - Personalized feed reads and writes must stay scoped to the authenticated user, and deletes should preserve history with soft deletion.
 - Public feed reads may use the configured public owner profile but must not expose profile mutation controls or public-owner read state.
+- When no explicit feed profile slug is requested, the selected feed profile should use the user's active profile marked as default, then fall back to the normal profile ordering.
 - Personalized feed ranking should use pre-computed scores or fall back to newest in-window stories; live LLM calls during feed render are limited to failure-tolerant profile-level summaries of the already-selected top stories.
 - Personalized feed ranking should stay relevance-led while applying the configured freshness boost so recent high-signal stories do not get buried by older marginally higher scores.
 - Personalized feed ordering should include deterministic tie-breakers, usually descending document id after score/time, because top-story summary cache keys preserve the selected story order.

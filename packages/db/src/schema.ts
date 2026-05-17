@@ -52,6 +52,7 @@ export const userProfiles = pgTable(
     displayName: text("display_name").notNull(),
     interestStatement: text("interest_statement").notNull().default(""),
     isActive: boolean("is_active").notNull().default(true),
+    isDefault: boolean("is_default").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -61,6 +62,9 @@ export const userProfiles = pgTable(
       table.userId,
       sql`lower(btrim(${table.displayName}))`,
     ),
+    uniqueIndex("user_profiles_user_active_default_idx")
+      .on(table.userId)
+      .where(sql`${table.isDefault} = true AND ${table.isActive} = true`),
   ],
 );
 

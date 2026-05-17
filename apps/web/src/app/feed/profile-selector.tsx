@@ -7,6 +7,7 @@ interface ProfileSelectorProfile {
   id: number;
   slug: string;
   displayName: string;
+  isDefault: boolean;
 }
 
 interface ProfileSelectorProps {
@@ -50,6 +51,8 @@ export function ProfileSelector({ profiles, selectedSlug, timeWindow }: ProfileS
             {profile.displayName}
             {isNavigating ? (
               <span className="text-xs uppercase tracking-[0.16em] opacity-70">Loading</span>
+            ) : profile.isDefault ? (
+              <span className="text-xs uppercase tracking-[0.16em] opacity-70">Default</span>
             ) : null}
           </button>
         );

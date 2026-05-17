@@ -7,7 +7,9 @@ import {
   createUserProfile,
   deleteUserProfile,
   DuplicateProfileNameError,
+  isValidTimeWindow,
   LastProfileDeleteError,
+  setDefaultUserProfile,
   updateUserProfile,
 } from "@/lib/personalized-feed";
 
@@ -18,7 +20,7 @@ function getTextField(formData: FormData, fieldName: string) {
 
 function buildFeedRedirect(slug: string | null | undefined, timeWindow: string, error?: string) {
   const params = new URLSearchParams();
-  const resolvedTimeWindow = timeWindow || "week";
+  const resolvedTimeWindow = isValidTimeWindow(timeWindow) ? timeWindow : "week";
 
   if (slug) {
     params.set("profile", slug);
@@ -65,7 +67,7 @@ export async function updateUserProfileAction(formData: FormData) {
   const profileId = Number(rawProfileId);
   const timeWindow = getTextField(formData, "timeWindow");
 
-  if (!Number.isInteger(profileId)) {
+  if (!Number.isInteger(profileId) || profileId <= 0) {
     revalidatePath("/feed");
     redirect("/feed?window=week");
   }
@@ -98,7 +100,7 @@ export async function deleteUserProfileAction(formData: FormData) {
   const profileId = Number(rawProfileId);
   const timeWindow = getTextField(formData, "timeWindow");
 
-  if (!Number.isInteger(profileId)) {
+  if (!Number.isInteger(profileId) || profileId <= 0) {
     revalidatePath("/feed");
     redirect(buildFeedRedirect(null, timeWindow));
   }
@@ -119,4 +121,33 @@ export async function deleteUserProfileAction(formData: FormData) {
 
     throw error;
   }
+}
+
+export async function setDefaultUserProfileAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const rawProfileId = getTextField(formData, "profileId");
+  const profileId = Number(rawProfileId);
+  const timeWindow = getTextField(formData, "timeWindow");
+
+  if (!Number.isInteger(profileId) || profileId <= 0) {
+    revalidatePath("/feed");
+    redirect(buildFeedRedirect(null, timeWindow));
+  }
+
+  try {
+    await setDefaultUserProfile({
+      userId: currentUser.id,
+      profileId,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("was not found")) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(null, timeWindow));
+    }
+
+    throw error;
+  }
+
+  revalidatePath("/feed");
+  redirect(buildFeedRedirect(null, timeWindow));
 }

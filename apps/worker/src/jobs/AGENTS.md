@@ -26,6 +26,6 @@ This file applies to `apps/worker/src/jobs`.
 - The shared LLM scoring prompt asks for a 1-100 relevance score plus a `whyRelevant` explanation per document.
 - Retry OpenRouter on 429 and 5xx with exponential backoff (up to 3 retries).
 - Newsletter jobs must check `newsletter_sends` before sending so worker restarts do not duplicate a user's daily email.
-- Newsletter jobs should ensure active users have a default first profile before selecting recipients.
+- Newsletter jobs should ensure active users have a default first profile before selecting recipients, then prefer the active profile marked `is_default`.
 - Cleanup jobs should delete in batches, rely on existing foreign-key cascades for dependent feed data, and tolerate missing raw payload files.
 - Log operational details, but keep return values compact and machine-friendly.

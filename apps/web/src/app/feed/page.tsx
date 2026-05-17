@@ -14,7 +14,12 @@ import {
   isValidTimeWindow,
   type TimeWindow,
 } from "@/lib/personalized-feed";
-import { createUserProfileAction, deleteUserProfileAction, updateUserProfileAction } from "./actions";
+import {
+  createUserProfileAction,
+  deleteUserProfileAction,
+  setDefaultUserProfileAction,
+  updateUserProfileAction,
+} from "./actions";
 import { MoreStories } from "./more-stories";
 import { ProfileSelector } from "./profile-selector";
 
@@ -131,6 +136,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 id: profile.id,
                 slug: profile.slug,
                 displayName: profile.displayName,
+                isDefault: profile.isDefault,
               }))}
               selectedSlug={personalizedFeed.selectedProfile.slug}
               timeWindow={timeWindow}
@@ -155,7 +161,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   </p>
                 </div>
                 <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-                  Updated {formatRelativeTime(personalizedFeed.selectedProfile.updatedAt)}
+                  {personalizedFeed.selectedProfile.isDefault
+                    ? `Default · Updated ${formatRelativeTime(personalizedFeed.selectedProfile.updatedAt)}`
+                    : `Updated ${formatRelativeTime(personalizedFeed.selectedProfile.updatedAt)}`}
                 </p>
               </div>
 
@@ -200,6 +208,23 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   </button>
                 </div>
               </form>
+
+              {personalizedFeed.selectedProfile.isDefault ? (
+                <div className="surface-panel mt-4 rounded-[1rem] px-4 py-3 text-sm leading-6 text-[color:var(--muted)]">
+                  This profile is used by default when you open the feed without choosing a profile.
+                </div>
+              ) : (
+                <form action={setDefaultUserProfileAction} className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />
+                  <input type="hidden" name="timeWindow" value={timeWindow} />
+                  <p className="max-w-lg text-xs leading-6 text-[color:var(--muted)]">
+                    Use this profile automatically when opening the feed without a profile link.
+                  </p>
+                  <button type="submit" className="button-secondary">
+                    Make default
+                  </button>
+                </form>
+              )}
 
               <form action={deleteUserProfileAction} className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <input type="hidden" name="profileId" value={personalizedFeed.selectedProfile.id} />

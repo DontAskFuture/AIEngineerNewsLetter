@@ -14,7 +14,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 1. Curated sources are defined in `packages/shared`.
 2. The worker fetches endpoints and writes `fetch_jobs`, `fetch_attempts`, `raw_documents`, and `documents`.
 3. The worker scores documents against user interest profiles via OpenRouter, writing `document_scores` and tracking progress in `scoring_jobs`.
-4. The worker sends daily SendPulse newsletter emails using each active user's first active profile, then records successful sends in `newsletter_sends`.
+4. The worker sends daily SendPulse newsletter emails using each active user's default active profile, falling back to the first active profile, then records successful sends in `newsletter_sends`.
 5. The web app reads normalized tables for dashboards and the personalized feed.
 6. Auth is handled in the web app with `auth_users`, `auth_sessions`, and an `HttpOnly` session cookie.
 7. Personalized ranking uses pre-computed `document_scores` joined with `documents` and `sources`, filtered by a time window (day/week/month/quarter/year).

@@ -14,6 +14,7 @@ const defaultNewsletterProfile = {
   displayName: "Founding analyst",
   interestStatement:
     "I care about AI coding tools, agent tooling, inference infrastructure, model serving, pricing changes, and stories that reveal product wedges or operational bottlenecks.",
+  isDefault: true,
 };
 
 interface NewsletterRecipient {
@@ -119,7 +120,12 @@ async function getRecipients() {
     .from(schema.authUsers)
     .innerJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.authUsers.id))
     .where(and(eq(schema.authUsers.isActive, true), eq(schema.userProfiles.isActive, true)))
-    .orderBy(asc(schema.authUsers.id), asc(schema.userProfiles.createdAt), asc(schema.userProfiles.id));
+    .orderBy(
+      asc(schema.authUsers.id),
+      desc(schema.userProfiles.isDefault),
+      asc(schema.userProfiles.createdAt),
+      asc(schema.userProfiles.id),
+    );
 
   const recipientsByUser = new Map<number, NewsletterRecipient>();
 

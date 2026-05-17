@@ -47,6 +47,7 @@ const defaultUserProfile = {
   displayName: "Founding analyst",
   interestStatement:
     "I care about AI coding tools, agent tooling, inference infrastructure, model serving, pricing changes, and stories that reveal product wedges or operational bottlenecks.",
+  isDefault: true,
 };
 
 const PROFILE_NAME_UNIQUE_INDEX = "user_profiles_user_display_name_idx";
@@ -131,6 +132,7 @@ export interface FeedUserProfile {
   slug: string;
   displayName: string;
   interestStatement: string;
+  isDefault: boolean;
   updatedAt: Date;
 }
 
@@ -219,6 +221,10 @@ function normalizedProfileNameSql(value: string) {
   return value.trim().toLowerCase();
 }
 
+function selectDefaultProfile(profiles: FeedUserProfile[]) {
+  return profiles.find((profile) => profile.isDefault);
+}
+
 function stripHtml(value: string) {
   return value
     .replace(/<\/(p|div|li|section|article|h[1-6])>/gi, "\n")
@@ -255,6 +261,7 @@ function normalizeProfileRow(row: {
   slug: string;
   displayName: string;
   interestStatement: string;
+  isDefault: boolean;
   updatedAt: Date;
 }) {
   return {
@@ -262,6 +269,7 @@ function normalizeProfileRow(row: {
     slug: row.slug,
     displayName: row.displayName,
     interestStatement: row.interestStatement,
+    isDefault: row.isDefault,
     updatedAt: row.updatedAt,
   } satisfies FeedUserProfile;
 }
@@ -537,6 +545,40 @@ async function ensureDefaultUserProfile(userId: number) {
     .onConflictDoNothing({
       target: [schema.userProfiles.userId, schema.userProfiles.slug],
     });
+
+  const [existingDefault] = await db
+    .select({ id: schema.userProfiles.id })
+    .from(schema.userProfiles)
+    .where(
+      and(
+        eq(schema.userProfiles.userId, userId),
+        eq(schema.userProfiles.isActive, true),
+        eq(schema.userProfiles.isDefault, true),
+      ),
+    )
+    .limit(1);
+
+  if (existingDefault) {
+    return;
+  }
+
+  const [firstActiveProfile] = await db
+    .select({ id: schema.userProfiles.id })
+    .from(schema.userProfiles)
+    .where(and(eq(schema.userProfiles.userId, userId), eq(schema.userProfiles.isActive, true)))
+    .orderBy(asc(schema.userProfiles.createdAt), asc(schema.userProfiles.id))
+    .limit(1);
+
+  if (!firstActiveProfile) {
+    return;
+  }
+
+  await db
+    .update(schema.userProfiles)
+    .set({
+      isDefault: true,
+    })
+    .where(eq(schema.userProfiles.id, firstActiveProfile.id));
 }
 
 async function getProfiles(userId: number) {
@@ -549,6 +591,7 @@ async function getProfiles(userId: number) {
       slug: schema.userProfiles.slug,
       displayName: schema.userProfiles.displayName,
       interestStatement: schema.userProfiles.interestStatement,
+      isDefault: schema.userProfiles.isDefault,
       updatedAt: schema.userProfiles.updatedAt,
     })
     .from(schema.userProfiles)
@@ -654,6 +697,7 @@ export async function createUserProfile({
         slug: string;
         displayName: string;
         interestStatement: string;
+        isDefault: boolean;
         updatedAt: Date;
       }
     | undefined;
@@ -672,6 +716,7 @@ export async function createUserProfile({
         slug: schema.userProfiles.slug,
         displayName: schema.userProfiles.displayName,
         interestStatement: schema.userProfiles.interestStatement,
+        isDefault: schema.userProfiles.isDefault,
         updatedAt: schema.userProfiles.updatedAt,
       });
   } catch (error) {
@@ -726,6 +771,7 @@ export async function updateUserProfile({
         slug: string;
         displayName: string;
         interestStatement: string;
+        isDefault: boolean;
         updatedAt: Date;
       }
     | undefined;
@@ -744,6 +790,7 @@ export async function updateUserProfile({
         slug: schema.userProfiles.slug,
         displayName: schema.userProfiles.displayName,
         interestStatement: schema.userProfiles.interestStatement,
+        isDefault: schema.userProfiles.isDefault,
         updatedAt: schema.userProfiles.updatedAt,
       });
   } catch (error) {
@@ -782,20 +829,117 @@ export async function deleteUserProfile({
     throw new LastProfileDeleteError(profileToDelete.slug);
   }
 
-  await db
-    .update(schema.userProfiles)
-    .set({
-      isActive: false,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)));
-
   const nextProfile = profiles.find((profile) => profile.id !== profileId) ?? null;
+  const now = new Date();
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.userProfiles)
+      .set({
+        isActive: false,
+        isDefault: false,
+        updatedAt: now,
+      })
+      .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)));
+
+    if (profileToDelete.isDefault && nextProfile) {
+      await tx
+        .update(schema.userProfiles)
+        .set({
+          isDefault: false,
+        })
+        .where(eq(schema.userProfiles.userId, userId));
+
+      await tx
+        .update(schema.userProfiles)
+        .set({
+          isDefault: true,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(schema.userProfiles.id, nextProfile.id),
+            eq(schema.userProfiles.userId, userId),
+            eq(schema.userProfiles.isActive, true),
+          ),
+        );
+    }
+  });
 
   return {
     deletedProfile: profileToDelete,
     nextProfile,
   };
+}
+
+export async function setDefaultUserProfile({
+  userId,
+  profileId,
+}: {
+  userId: number;
+  profileId: number;
+}) {
+  const db = getDb();
+  return db.transaction(async (tx) => {
+    const [profile] = await tx
+      .select({
+        id: schema.userProfiles.id,
+        slug: schema.userProfiles.slug,
+        displayName: schema.userProfiles.displayName,
+        interestStatement: schema.userProfiles.interestStatement,
+        isDefault: schema.userProfiles.isDefault,
+        updatedAt: schema.userProfiles.updatedAt,
+      })
+      .from(schema.userProfiles)
+      .where(
+        and(
+          eq(schema.userProfiles.id, profileId),
+          eq(schema.userProfiles.userId, userId),
+          eq(schema.userProfiles.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    if (!profile) {
+      throw new Error(`Active user profile ${profileId} was not found`);
+    }
+
+    const now = new Date();
+    await tx
+      .update(schema.userProfiles)
+      .set({
+        isDefault: false,
+      })
+      .where(and(eq(schema.userProfiles.userId, userId), eq(schema.userProfiles.isActive, true)));
+
+    const [updatedProfile] = await tx
+      .update(schema.userProfiles)
+      .set({
+        isDefault: true,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(schema.userProfiles.id, profileId),
+          eq(schema.userProfiles.userId, userId),
+          eq(schema.userProfiles.isActive, true),
+        ),
+      )
+      .returning({
+        id: schema.userProfiles.id,
+        slug: schema.userProfiles.slug,
+        displayName: schema.userProfiles.displayName,
+        interestStatement: schema.userProfiles.interestStatement,
+        isDefault: schema.userProfiles.isDefault,
+        updatedAt: schema.userProfiles.updatedAt,
+      });
+
+    if (!updatedProfile) {
+      throw new Error(`Active user profile ${profileId} was not updated`);
+    }
+
+    return normalizeProfileRow(updatedProfile);
+  });
 }
 
 async function buildPersonalizedFeedSnapshot({
@@ -813,7 +957,10 @@ async function buildPersonalizedFeedSnapshot({
 }): Promise<PersonalizedFeedSnapshot> {
   const showWhyRelevant = loadWebEnv().feedShowWhyRelevant;
   const profiles = await getProfiles(ownerUserId);
-  const selectedProfile = profiles.find((profile) => profile.slug === profileSlug) ?? profiles[0];
+  const selectedProfile =
+    profiles.find((profile) => profile.slug === profileSlug) ??
+    (profileSlug ? null : selectDefaultProfile(profiles)) ??
+    profiles[0];
 
   if (!selectedProfile) {
     throw new Error("Expected at least one active user profile");
