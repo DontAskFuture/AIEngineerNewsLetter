@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getAllowedEmailLabel, getCurrentUser } from "@/lib/auth";
+import { getAllowedEmailLabel, getCurrentUser, getSafeRedirectPath } from "@/lib/auth";
 import { loginAction } from "@/app/auth-actions";
 
 export const dynamic = "force-dynamic";
@@ -19,17 +19,20 @@ interface LoginPageProps {
   searchParams?: Promise<{
     error?: string;
     email?: string;
+    next?: string;
   }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const currentUser = await getCurrentUser();
 
+  const params = searchParams ? await searchParams : undefined;
+  const nextPath = getSafeRedirectPath(typeof params?.next === "string" ? params.next : null);
+
   if (currentUser) {
-    redirect("/feed?window=week");
+    redirect(nextPath ?? "/feed?window=week");
   }
 
-  const params = searchParams ? await searchParams : undefined;
   const errorCode = typeof params?.error === "string" ? params.error : "";
   const email = typeof params?.email === "string" ? params.email : "";
   const errorMessage = errorCode ? errorMessages[errorCode] ?? errorMessages.unknown : null;
@@ -82,6 +85,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </p>
 
           <form action={loginAction} className="mt-6 grid gap-4">
+            {nextPath ? <input type="hidden" name="next" value={nextPath} /> : null}
             <div className="grid gap-2">
               <label htmlFor="email" className="text-sm font-medium text-[color:var(--ink)]">
                 Email

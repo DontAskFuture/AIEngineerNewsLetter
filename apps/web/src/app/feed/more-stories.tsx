@@ -7,6 +7,7 @@ import {
   formatRelativeTime,
   summarizeText,
 } from "@/lib/formatters";
+import { FeedStoryActions } from "./feed-story-actions";
 
 interface MoreStoriesDocument {
   id: number;
@@ -25,13 +26,25 @@ interface MoreStoriesDocument {
 interface MoreStoriesProps {
   documents: MoreStoriesDocument[];
   showWhyRelevant: boolean;
+  showReadListActions: boolean;
+  savedDocumentIds: number[];
+  timeWindow: string;
+  profileSlug: string;
 }
 
 const PAGE_SIZE = 20;
 
-export function MoreStories({ documents, showWhyRelevant }: MoreStoriesProps) {
+export function MoreStories({
+  documents,
+  showWhyRelevant,
+  showReadListActions,
+  savedDocumentIds,
+  timeWindow,
+  profileSlug,
+}: MoreStoriesProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const savedDocumentIdSet = new Set(savedDocumentIds);
 
   const visibleDocs = documents.slice(0, visibleCount);
   const hasMore = visibleCount < documents.length;
@@ -114,9 +127,20 @@ export function MoreStories({ documents, showWhyRelevant }: MoreStoriesProps) {
                     </div>
                   ) : null}
                 </div>
-                <span className="surface-chip w-fit px-3 py-1 text-xs uppercase tracking-[0.18em] sm:ml-auto">
-                  {formatCategoryLabel(document.category)}
-                </span>
+                <div className="flex flex-col gap-2 sm:items-end">
+                  <span className="surface-chip w-fit px-3 py-1 text-xs uppercase tracking-[0.18em]">
+                    {formatCategoryLabel(document.category)}
+                  </span>
+                  {showReadListActions ? (
+                    <FeedStoryActions
+                      documentId={document.id}
+                      isRead={document.isRead}
+                      isInReadList={savedDocumentIdSet.has(document.id)}
+                      timeWindow={timeWindow}
+                      profileSlug={profileSlug}
+                    />
+                  ) : null}
+                </div>
               </div>
             </article>
           ))}

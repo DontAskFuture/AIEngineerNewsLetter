@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import {
   assertLoginAttemptAllowed,
   AuthError,
+  getSafeRedirectPath,
   logoutCurrentUser,
   recordLoginAttempt,
   signInWithPassword,
@@ -58,7 +59,8 @@ export async function loginAction(formData: FormData) {
   }
 
   revalidatePath("/", "layout");
-  redirect("/feed?window=week");
+  const nextPath = getSafeRedirectPath(getTextField(formData, "next"));
+  redirect(nextPath ?? "/feed?window=week");
 }
 
 export async function signupAction(formData: FormData) {

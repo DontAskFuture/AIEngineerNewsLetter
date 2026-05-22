@@ -5,7 +5,8 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 
 ## Architecture
 - `app` is the App Router surface: layouts, pages, and server actions.
-- `lib` is the server-side application layer for auth, dashboards, formatting, env loading, personalized ranking, scoring stats, scoring progress, operations visibility, read tracking, and job enqueueing.
+- `middleware.ts` gates `/read-list` behind the session cookie and sends anonymous users to login with a `next` return path.
+- `lib` is the server-side application layer for auth, dashboards, formatting, env loading, personalized ranking, scoring stats, scoring progress, operations visibility, read tracking, per-user source read lists, and job enqueueing.
 
 ## Implementation Guidance
 - New product behavior should usually start in `lib`, then be exposed through `app`.
@@ -15,6 +16,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Long-running work such as crawling and scoring belongs in the worker; web helpers should only enqueue jobs.
 - Admin observability helpers may read pg-boss and pipeline tables for status/error reporting, but they should not execute long-running worker logic.
 - Personalized feed reads and writes must stay scoped to the authenticated user, and deletes should preserve history with soft deletion.
+- Per-user story read lists live in `user_document_read_list`; `/read-list` shows explicitly saved documents and reuses `document_reads` for read-state.
 - Public feed reads may use the configured public owner profile but must not expose profile mutation controls or public-owner read state.
 - When no explicit feed profile slug is requested, the selected feed profile should use the user's active profile marked as default, then fall back to the normal profile ordering.
 - Personalized feed ranking should use pre-computed scores or fall back to newest in-window stories; live LLM calls during feed render are limited to failure-tolerant profile-level summaries of the already-selected top stories.

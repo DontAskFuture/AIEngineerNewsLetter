@@ -16,6 +16,7 @@ This file applies to `apps/worker/src/jobs`.
 - Fetch jobs should validate source URLs, redirects, and DNS resolution before egress, blocking non-http(s), off-domain, private, link-local, loopback, and metadata-style targets.
 - Crawl inserts are capped per fetch/source pass rather than by lifetime database totals; dedupe still relies on canonical URLs.
 - Remote fetches should enforce timeout and response-size bounds before persisting raw payloads or parsing HTML/RSS.
+- RSS ingestion should store plain-text summaries and body text by stripping HTML and rejecting CSS-heavy feed noise; when feed text is unusable, fetch the linked article with Readability (bounded per feed pass).
 - Fetch jobs retry transient network failures, HTTP 429, and HTTP 5xx responses before recording a failed attempt, and failed attempts should preserve the HTTP status when available.
 - HTML listing pages should use bounded-concurrency article fetches through the shared fetch helper rather than ad hoc sequential `fetch()` calls.
 - HTML article extraction should preserve publication dates from common article/meta tags when available instead of relying only on discovery time.

@@ -141,6 +141,7 @@ export interface PersonalizedFeedDocument {
   title: string;
   summary: string | null;
   canonicalUrl: string;
+  sourceId: number;
   sourceName: string;
   sourceSlug: string;
   sourceGroupKey: string;
@@ -186,6 +187,7 @@ interface CandidateDocumentRow {
   summary: string | null;
   bodyText: string | null;
   canonicalUrl: string;
+  sourceId: number;
   sourceName: string;
   sourceSlug: string;
   canonicalDomain: string;
@@ -280,6 +282,7 @@ function mapCandidateRow(row: CandidateDocumentRow) {
     title: row.title,
     summary: row.summary,
     canonicalUrl: row.canonicalUrl,
+    sourceId: row.sourceId,
     sourceName: row.sourceName,
     sourceSlug: row.sourceSlug,
     sourceGroupKey: row.canonicalDomain || row.sourceSlug,
@@ -513,6 +516,7 @@ async function getCandidateDocuments(cutoff: Date) {
     summary: schema.documents.summary,
     bodyText: schema.documents.bodyText,
     canonicalUrl: schema.documents.canonicalUrl,
+    sourceId: schema.sources.id,
     sourceName: schema.sources.name,
     sourceSlug: schema.sources.slug,
     canonicalDomain: schema.sources.canonicalDomain,
@@ -1043,6 +1047,7 @@ async function buildPersonalizedFeedSnapshot({
       summary: schema.documents.summary,
       bodyText: schema.documents.bodyText,
       canonicalUrl: schema.documents.canonicalUrl,
+      sourceId: schema.sources.id,
       sourceName: schema.sources.name,
       sourceSlug: schema.sources.slug,
       canonicalDomain: schema.sources.canonicalDomain,

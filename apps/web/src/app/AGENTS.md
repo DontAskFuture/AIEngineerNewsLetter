@@ -12,6 +12,7 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 - `api/score-all` streams Server-Sent Events while iterating active profiles and delegating per-profile work to `../lib/scoring`. It must stay admin-gated and thin.
 - `api/scoring-status` is an admin-only JSON endpoint that surfaces the current scoring job and recent history via `../lib/scoring-tracker`, powering the admin progress UI polling loop.
 - `/` is a thin redirect to `/feed?window=week`, which is the canonical default public feed entrypoint.
+- `/read-list` is the authenticated story read-list surface for saving individual documents and reading them later.
 
 ## Implementation Guidance
 - Keep these files focused on request handling, composition, redirects, and form actions.

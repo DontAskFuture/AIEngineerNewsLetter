@@ -4,7 +4,7 @@
 This file applies to `packages/db/src`.
 
 ## Architecture
-- `schema.ts` defines tables and enums including `documents`, `documentScores`, `documentReads`, `newsletterSends`, `scoringJobs`, `scoringJobStatusEnum`, `userProfiles`, and auth tables.
+- `schema.ts` defines tables and enums including `documents`, `documentScores`, `documentReads`, `userDocumentReadList`, `newsletterSends`, `scoringJobs`, `scoringJobStatusEnum`, `userProfiles`, and auth tables.
 - `authLoginAttempts` stores failed and successful auth attempts so the public login surface can throttle repeated failures.
 - `user_profiles` is owned by `auth_users` through `user_id`, so personalization data is stored per account rather than globally.
 - `user_profiles` enforces unique slugs and unique case-insensitive display names per user.

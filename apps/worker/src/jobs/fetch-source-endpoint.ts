@@ -390,6 +390,111 @@ function normalizeMetaTitle(value: string | null | undefined) {
   return value?.trim().replace(/\s+/g, " ") || null;
 }
 
+function stripHtml(value: string) {
+  return value
+    .replace(/<\/(p|div|li|section|article|h[1-6])>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function isUnusablePlainText(value: string | null | undefined) {
+  if (!value?.trim()) {
+    return true;
+  }
+
+  const text = value.trim();
+  if (/^:root\s*\{/.test(text)) {
+    return true;
+  }
+
+  if ((text.match(/--[\w-]+:/g)?.length ?? 0) >= 3 && text.includes("{")) {
+    return true;
+  }
+
+  const letters = (text.match(/[a-zA-Z]/g) ?? []).length;
+  return letters / text.length < 0.15;
+}
+
+function toPlainText(value: string | null | undefined) {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  let text = value.trim();
+  if (/<[a-z][\s\S]*>/i.test(text)) {
+    text = stripHtml(text);
+  }
+
+  const normalized = normalizeMetaTitle(text);
+  return normalized && !isUnusablePlainText(normalized) ? normalized : null;
+}
+
+function firstReadableParagraph(body: string | null) {
+  if (!body) {
+    return null;
+  }
+
+  const paragraphs = body
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length >= 60 && !isUnusablePlainText(paragraph));
+
+  if (paragraphs.length > 0) {
+    return paragraphs[0]!;
+  }
+
+  return body.length >= 60 && !isUnusablePlainText(body) ? body.slice(0, 500) : null;
+}
+
+function extractFeedItemText(item: { content?: string; summary?: string; contentSnippet?: string }) {
+  const encodedContent = (item as Record<string, string | undefined>)["content:encoded"];
+  const rawBody = item.content?.trim() || encodedContent?.trim() || null;
+  const rawSummary = item.contentSnippet?.trim() || item.summary?.trim() || null;
+
+  let summary = toPlainText(rawSummary);
+  let bodyText = toPlainText(rawBody);
+
+  if (!summary && bodyText) {
+    summary = firstReadableParagraph(bodyText);
+  }
+
+  if (!bodyText && summary) {
+    bodyText = summary;
+  }
+
+  return { summary, bodyText };
+}
+
+const MAX_FEED_ARTICLE_ENRICHMENTS = 5;
+
+async function enrichFeedItemFromArticle(articleUrl: string, allowedDomain: string) {
+  try {
+    const { body } = await fetchArticleHtml(articleUrl, allowedDomain);
+    const dom = new JSDOM(body, { url: articleUrl });
+    const article = new Readability(dom.window.document).parse();
+    const summary = toPlainText(extractSummary(dom, article?.excerpt?.trim() || null));
+    const bodyText = toPlainText(article?.textContent?.trim() || null);
+
+    return {
+      summary: summary ?? firstReadableParagraph(bodyText),
+      bodyText: bodyText ?? summary,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function extractTitle(dom: JSDOM, fallbackTitle: string | null | undefined) {
   return normalizeMetaTitle(
     firstMetaContent(dom, [
@@ -480,7 +585,14 @@ async function insertDocument(db: ReturnType<typeof getDb>, values: DocumentInse
   return createdDocument?.id ?? null;
 }
 
-async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sourceEndpointId: number, baseUrl: string, body: string) {
+async function upsertFeedDocuments(
+  rawDocumentId: number,
+  sourceId: number,
+  sourceEndpointId: number,
+  baseUrl: string,
+  body: string,
+  allowedDomain: string,
+) {
   const db = getDb();
   const feed = await parser.parseString(body);
   const candidates = feed.items.flatMap((item) => {
@@ -491,13 +603,12 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
     }
 
     const canonicalUrl = canonicalizeUrl(item.link ?? buildFallbackUrl(baseUrl, title, item.guid ?? null));
-    const summary = item.contentSnippet?.trim() || item.summary?.trim() || null;
-    const encodedContent = (item as Record<string, string | undefined>)["content:encoded"];
-    const bodyText = item.content?.trim() || encodedContent?.trim() || summary;
+    const { summary, bodyText } = extractFeedItemText(item);
     const sourcePublishedAt = toDate(item.isoDate ?? item.pubDate);
     const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
 
     return [{
+      articleUrl: item.link?.trim() || null,
       canonicalUrl,
       title,
       externalId: item.guid ?? null,
@@ -516,6 +627,7 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
   const insertedDocumentIds: number[] = [];
   let skippedCount = 0;
   let sourceCapSkippedCount = 0;
+  let articleEnrichmentCount = 0;
 
   for (const candidate of candidates) {
     if (existingCanonicalUrls.has(candidate.canonicalUrl)) {
@@ -528,6 +640,23 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
       continue;
     }
 
+    let summary = candidate.summary;
+    let bodyText = candidate.bodyText;
+
+    if (
+      articleEnrichmentCount < MAX_FEED_ARTICLE_ENRICHMENTS &&
+      candidate.articleUrl &&
+      (isUnusablePlainText(summary) || isUnusablePlainText(bodyText))
+    ) {
+      const enriched = await enrichFeedItemFromArticle(candidate.articleUrl, allowedDomain);
+      articleEnrichmentCount += 1;
+
+      if (enriched) {
+        summary = enriched.summary ?? summary;
+        bodyText = enriched.bodyText ?? bodyText;
+      }
+    }
+
     const insertedDocumentId = await insertDocument(db, {
       sourceId,
       sourceEndpointId,
@@ -535,10 +664,10 @@ async function upsertFeedDocuments(rawDocumentId: number, sourceId: number, sour
       canonicalUrl: candidate.canonicalUrl,
       externalId: candidate.externalId,
       title: candidate.title,
-      summary: candidate.summary,
-      bodyText: candidate.bodyText,
+      summary,
+      bodyText,
       sourcePublishedAt: candidate.sourcePublishedAt,
-      contentHash: candidate.contentHash,
+      contentHash: hashValue([candidate.title, summary ?? "", bodyText ?? ""].join("\n")),
       metadata: candidate.metadata,
     });
 
@@ -776,7 +905,14 @@ export async function fetchSourceEndpoint(payload: FetchSourceEndpointPayload, b
 
     const insertedDocumentIds =
       endpoint.kind === "rss"
-        ? await upsertFeedDocuments(rawDocument.id, endpoint.sourceId, endpoint.id, endpoint.baseUrl, body)
+        ? await upsertFeedDocuments(
+            rawDocument.id,
+            endpoint.sourceId,
+            endpoint.id,
+            endpoint.baseUrl,
+            body,
+            endpoint.canonicalDomain,
+          )
         : await upsertHtmlDocument(
             rawDocument.id,
             endpoint.sourceId,

@@ -79,6 +79,9 @@ export default async function RootLayout({
                     <Link href="/feed?window=week" className="button-secondary">
                       Feed
                     </Link>
+                    <Link href="/read-list" className="button-secondary">
+                      Read list
+                    </Link>
                     {isAdmin(currentUser.email) ? (
                       <Link href="/admin" className="button-secondary">
                         Admin

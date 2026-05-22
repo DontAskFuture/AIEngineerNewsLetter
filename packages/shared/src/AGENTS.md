@@ -5,7 +5,7 @@ This file applies to `packages/shared/src`.
 
 ## Architecture
 - `types.ts` defines shared source, fetch payload, scoring payload, and newsletter payload types (`FetchSourceEndpointPayload`, `ScoreDocumentsPayload`, `SendDailyNewsletterPayload`); scoring payloads may include `documentIds` for targeted worker scoring.
-- `default-sources.ts` is the curated registry seed set.
+- `default-sources.ts` is the curated registry seed set. It includes lab blogs, engineering blogs, and individual feeds from prominent AI practitioners and researchers (e.g., Andrej Karpathy, Lilian Weng, Eugene Yan, Chip Huyen, Sebastian Raschka, Eric Jang).
 - `prompts.ts` owns shared LLM prompt templates and rendering helpers used by both web and worker code.
 - `scoring-config.ts` owns shared scoring knobs such as batch size, run size, preferred model, and ordered OpenRouter candidate lists for scoring and summaries.
 - Seeded source endpoints should default to hourly cadence unless there is a deliberate reason to poll faster.

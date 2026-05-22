@@ -873,4 +873,100 @@ export const defaultSources: SeedSource[] = [
       },
     ],
   },
+  {
+    slug: "andrej-karpathy-blog",
+    name: "Andrej Karpathy's Blog",
+    description: "Personal thoughts and notes on deep learning, AI, and software engineering from Andrej Karpathy.",
+    category: "community_feed",
+    baseUrl: "https://karpathy.bearblog.dev",
+    canonicalDomain: "karpathy.bearblog.dev",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://karpathy.bearblog.dev/feed/",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "lilian-weng-lil-log",
+    name: "Lilian Weng (Lil'Log)",
+    description: "Deep dive reviews of machine learning algorithms, reinforcement learning, and safety systems from Lilian Weng.",
+    category: "community_feed",
+    baseUrl: "https://lilianweng.github.io",
+    canonicalDomain: "lilianweng.github.io",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://lilianweng.github.io/index.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "eugene-yan-blog",
+    name: "Eugene Yan's Blog",
+    description: "Practical guides and thoughts on building machine learning systems, recommendation engines, and LLMs in production from Eugene Yan.",
+    category: "community_feed",
+    baseUrl: "https://eugeneyan.com",
+    canonicalDomain: "eugeneyan.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://eugeneyan.com/rss/",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "chip-huyen-blog",
+    name: "Chip Huyen's Blog",
+    description: "Deep-dives and insights on machine learning systems, real-time ML, and AI engineering practices from Chip Huyen.",
+    category: "community_feed",
+    baseUrl: "https://huyenchip.com",
+    canonicalDomain: "huyenchip.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://huyenchip.com/feed.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "sebastian-raschka-blog",
+    name: "Sebastian Raschka's Blog",
+    description: "Practical tutorials, deep machine learning research notes, and neural network guides from Sebastian Raschka.",
+    category: "community_feed",
+    baseUrl: "https://sebastianraschka.com",
+    canonicalDomain: "sebastianraschka.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://sebastianraschka.com/rss_feed.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "eric-jang-blog",
+    name: "Eric Jang's Blog",
+    description: "Robotics, reinforcement learning, and machine learning research thoughts from Eric Jang.",
+    category: "community_feed",
+    baseUrl: "https://evjang.com",
+    canonicalDomain: "evjang.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://evjang.com/feed.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
 ];

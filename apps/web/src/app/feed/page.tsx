@@ -14,12 +14,14 @@ import {
   isValidTimeWindow,
   type TimeWindow,
 } from "@/lib/personalized-feed";
+import { listUserReadListDocumentIds } from "@/lib/document-read-list";
 import {
   createUserProfileAction,
   deleteUserProfileAction,
   setDefaultUserProfileAction,
   updateUserProfileAction,
 } from "./actions";
+import { FeedStoryActions } from "./feed-story-actions";
 import { MoreStories } from "./more-stories";
 import { ProfileSelector } from "./profile-selector";
 
@@ -56,12 +58,14 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         ? "You need at least one active profile. Create another profile before deleting this one."
       : null;
 
-  const [snapshot, personalizedFeed] = await Promise.all([
+  const [snapshot, personalizedFeed, savedDocumentIds] = await Promise.all([
     getDashboardSnapshot(),
     currentUser
       ? getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow, currentUser.id)
       : getPublicAiEngineerFeedSnapshot(timeWindow),
+    currentUser ? listUserReadListDocumentIds(currentUser.id) : Promise.resolve([] as number[]),
   ]);
+  const savedDocumentIdSet = new Set(savedDocumentIds);
   const orderedProfiles = [
     personalizedFeed.selectedProfile,
     ...personalizedFeed.profiles.filter((profile) => profile.id !== personalizedFeed.selectedProfile.id),
@@ -92,6 +96,14 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             stories.
           </p>
         </div>
+
+        {!isPublicView ? (
+          <div className="mt-6">
+            <Link href="/read-list" className="button-secondary">
+              Open read list
+            </Link>
+          </div>
+        ) : null}
 
         <div className="mt-6 flex flex-wrap gap-2">
           {TIME_WINDOW_OPTIONS.map((option) => {
@@ -416,6 +428,15 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   </span>
                   <span className="text-sm text-[color:var(--muted)]">{formatRelativeTime(document.sortTime)}</span>
                   <span className="text-xs text-[color:var(--muted)]">{formatDateTime(document.sortTime)}</span>
+                  {!isPublicView ? (
+                    <FeedStoryActions
+                      documentId={document.id}
+                      isRead={document.isRead}
+                      isInReadList={savedDocumentIdSet.has(document.id)}
+                      timeWindow={timeWindow}
+                      profileSlug={personalizedFeed.selectedProfile.slug}
+                    />
+                  ) : null}
                 </div>
               </div>
             </article>
@@ -426,6 +447,10 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
       {personalizedFeed.remainingDocuments.length > 0 && (
         <MoreStories
           key={`more-stories-${personalizedFeed.selectedProfile.id}`}
+          showReadListActions={!isPublicView}
+          savedDocumentIds={savedDocumentIds}
+          timeWindow={timeWindow}
+          profileSlug={personalizedFeed.selectedProfile.slug}
           documents={personalizedFeed.remainingDocuments.map((doc) => ({
             id: doc.id,
             title: doc.title,

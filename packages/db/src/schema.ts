@@ -127,6 +127,24 @@ export const documentReads = pgTable(
   (table) => [uniqueIndex("document_reads_user_document_idx").on(table.userId, table.documentId)],
 );
 
+export const userDocumentReadList = pgTable(
+  "user_document_read_list",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    documentId: bigint("document_id", { mode: "number" })
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("user_document_read_list_user_document_idx").on(table.userId, table.documentId),
+    index("user_document_read_list_user_idx").on(table.userId),
+  ],
+);
+
 export const sources = pgTable(
   "sources",
   {

@@ -294,11 +294,25 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
   } satisfies AuthenticatedUser;
 }
 
-export async function requireCurrentUser() {
+export function getSafeRedirectPath(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+export async function requireCurrentUser(loginNextPath?: string | null) {
   const currentUser = await getCurrentUser();
 
   if (!currentUser) {
-    redirect("/login");
+    const safeNext = getSafeRedirectPath(loginNextPath);
+    redirect(safeNext ? `/login?next=${encodeURIComponent(safeNext)}` : "/login");
   }
 
   return currentUser;

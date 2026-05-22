@@ -27,3 +27,5 @@ This file applies to `apps/web/src/app/feed`.
 - Profile-specific uncontrolled form fields and expandable story sections should be keyed by selected profile so browser state does not leak across profile switches.
 - Duplicate profile-name errors are surfaced through feed URL params so server actions can keep using redirects instead of client action state.
 - Profile deletes should be soft deletes (`is_active=false`) and redirect to a remaining profile; the UI should prevent deleting the last active profile with a clear error.
+- Read-list controls on story cards render only for signed-in users; the public feed stays read-only.
+- Signed-in users save individual stories to their read list from each story card via shared read-list server actions; unread stories also expose an inline Mark read action.
