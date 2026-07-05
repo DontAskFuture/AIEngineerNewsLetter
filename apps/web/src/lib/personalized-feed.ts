@@ -106,6 +106,47 @@ function selectTopDocuments(
   return selected;
 }
 
+function promoteUnreadTopStories(
+  topDocuments: PersonalizedFeedDocument[],
+  remainingDocuments: PersonalizedFeedDocument[],
+  limit: number,
+) {
+  const pool = [...topDocuments, ...remainingDocuments];
+  const seenIds = new Set<number>();
+  const unreadTop: PersonalizedFeedDocument[] = [];
+
+  for (const document of pool) {
+    if (document.isRead || seenIds.has(document.id)) {
+      continue;
+    }
+
+    unreadTop.push(document);
+    seenIds.add(document.id);
+
+    if (unreadTop.length >= limit) {
+      break;
+    }
+  }
+
+  const topIds = new Set(unreadTop.map((document) => document.id));
+  const dedupedRemaining: PersonalizedFeedDocument[] = [];
+  const remainingSeen = new Set<number>();
+
+  for (const document of pool) {
+    if (topIds.has(document.id) || remainingSeen.has(document.id)) {
+      continue;
+    }
+
+    dedupedRemaining.push(document);
+    remainingSeen.add(document.id);
+  }
+
+  return {
+    topDocuments: unreadTop,
+    remainingDocuments: dedupedRemaining,
+  };
+}
+
 function getFreshnessAdjustedScore(score: number, sortTime: Date, cutoff: Date, now: Date) {
   const windowMs = Math.max(now.getTime() - cutoff.getTime(), 1);
   const ageMs = Math.max(now.getTime() - sortTime.getTime(), 0);
@@ -1012,10 +1053,11 @@ async function buildPersonalizedFeedSnapshot({
       applyReadStateToDocuments(readStateUserId, remainingDocuments),
     ]);
 
-    return {
-      topDocuments: readTopDocuments,
-      remainingDocuments: readRemainingDocuments,
-    };
+    return promoteUnreadTopStories(
+      readTopDocuments,
+      readRemainingDocuments,
+      MAX_SELECTED_DOCUMENTS,
+    );
   }
 
   if (!selectedProfile.interestStatement.trim()) {
@@ -1108,12 +1150,15 @@ async function buildPersonalizedFeedSnapshot({
     ];
 
     const firstModel = rankedScoredRows[0]?.row.model ?? null;
-    const [documentsWithReadState, topStoriesSummary] = await Promise.all([
-      withReadState(topDocuments, remaining),
-      summarizeTopDocumentsForProfile(selectedProfile, topDocuments, timeWindow, {
+    const documentsWithReadState = await withReadState(topDocuments, remaining);
+    const topStoriesSummary = await summarizeTopDocumentsForProfile(
+      selectedProfile,
+      documentsWithReadState.topDocuments,
+      timeWindow,
+      {
         forceRefresh: forceSummaryRefresh,
-      }),
-    ]);
+      },
+    );
 
     return {
       profiles,
@@ -1134,12 +1179,15 @@ async function buildPersonalizedFeedSnapshot({
 
   const topIds = new Set(defaultShortlist.map((d) => d.id));
   const remainingDocuments = buildRemainingDocuments(topIds);
-  const [documentsWithReadState, topStoriesSummary] = await Promise.all([
-    withReadState(defaultShortlist, remainingDocuments),
-    summarizeTopDocumentsForProfile(selectedProfile, defaultShortlist, timeWindow, {
+  const documentsWithReadState = await withReadState(defaultShortlist, remainingDocuments);
+  const topStoriesSummary = await summarizeTopDocumentsForProfile(
+    selectedProfile,
+    documentsWithReadState.topDocuments,
+    timeWindow,
+    {
       forceRefresh: forceSummaryRefresh,
-    }),
-  ]);
+    },
+  );
   return {
     profiles,
     selectedProfile,

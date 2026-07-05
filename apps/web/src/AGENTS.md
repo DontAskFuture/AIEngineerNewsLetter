@@ -21,6 +21,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - When no explicit feed profile slug is requested, the selected feed profile should use the user's active profile marked as default, then fall back to the normal profile ordering.
 - Personalized feed ranking should use pre-computed scores or fall back to newest in-window stories; live LLM calls during feed render are limited to failure-tolerant profile-level summaries of the already-selected top stories.
 - Personalized feed ranking should stay relevance-led while applying the configured freshness boost so recent high-signal stories do not get buried by older marginally higher scores.
+- Signed-in feeds should drop read stories from the top-10 shortlist and backfill with the next unread ranked candidates.
 - Personalized feed ordering should include deterministic tie-breakers, usually descending document id after score/time, because top-story summary cache keys preserve the selected story order.
 - OpenRouter prompt text should come from shared prompt helpers rather than route-local or lib-local string constants.
 - Profile-level feed summary prompts should come from shared prompt helpers and summarize the selected top stories as a collection rather than replacing stored document scores.

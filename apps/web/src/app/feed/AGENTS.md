@@ -17,6 +17,7 @@ This file applies to `apps/web/src/app/feed`.
 - Feed copy should describe scoring as pre-computed while treating the profile briefing as a live, failure-tolerant enhancement that can include trends, learnings, and a further-study paragraph.
 - The stored per-story `whyRelevant` copy should stay available to the UI, but rendering is gated by `FEED_SHOW_WHY_RELEVANT`.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
+- After read state is applied for signed-in users, stories marked read are removed from the top-10 shortlist and the next unread candidates backfill those slots.
 - Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s `AI Engineer` profile; profile management stays signed-in only.
 - The anonymous public-profile row should use a contact CTA to `mailto:michael@audivolt.ai` rather than a sign-in CTA.
 - Preserve clear visual separation between feed hero controls, profile editing, top stories, more stories, and source registry, and keep those surfaces theme-aware.
