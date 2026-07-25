@@ -11,7 +11,7 @@ This file applies to `apps/web/src/app/admin`.
 - Admin actions enqueue crawl and scoring jobs into pg-boss via server actions. The worker processes them.
 - The force-summary admin action is the exception: it runs a short OpenRouter call in the web app to refresh the cached weekly top-10 profile briefing.
 - `scoring-progress.tsx` polls `/api/scoring-status` to show live progress and job history.
-- `action-button.tsx` provides `ActionButton` for server-action-triggered operations with toast feedback.
+- `action-button.tsx` provides `ActionButton` for server-action-triggered operations with toast feedback; it also exports `StreamingActionButton` for fetch-and-stream endpoints, but no admin control currently renders it.
 
 ## Implementation Guidance
 - Keep admin-specific presentation here.

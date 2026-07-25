@@ -7,9 +7,10 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 - This folder is the HTTP entry surface for the web app.
 - `layout.tsx` defines shared chrome and bootstraps the global light/dark theme state for the app shell.
 - Route folders own page composition and route-local server actions.
-- `auth-actions.ts` owns top-level login and logout mutations.
-- `out/[documentId]` is the authenticated outbound redirect that records `document_reads` before redirecting to an external story URL.
-- `api/score-all` streams Server-Sent Events while iterating active profiles and delegating per-profile work to `../lib/scoring`. It must stay admin-gated and thin.
+- `auth-actions.ts` owns top-level login and logout mutations; `login/` and `signup/` render the forms that call into it.
+- `signup/page.tsx` is the invite-gated account creation form; it has no dedicated AGENTS.md and is governed by this file plus `../lib/auth`. Its entrypoint is intentionally not linked from app chrome.
+- `out/[documentId]` resolves a document and redirects to its canonical URL, recording `document_reads` for signed-in users first; anonymous visitors redirect without tracking.
+- `api/score-all` streams Server-Sent Events while iterating active profiles and delegating per-profile work to `../lib/scoring`. It must stay admin-gated and thin; it is not currently invoked by any admin UI control (the admin "Score all" button instead enqueues a pg-boss job via `../lib/crawler`).
 - `api/scoring-status` is an admin-only JSON endpoint that surfaces the current scoring job and recent history via `../lib/scoring-tracker`, powering the admin progress UI polling loop.
 - `/` is a thin redirect to `/feed?window=week`, which is the canonical default public feed entrypoint.
 - `/read-list` is the authenticated story read-list surface for saving individual documents and reading them later.

@@ -6,6 +6,7 @@ This file applies to `apps/web/src/app/out/[documentId]`.
 ## Architecture
 - This route resolves a document by id and redirects to the document's canonical URL.
 - Signed-in users get read tracking before redirect; anonymous public-feed users skip read tracking and still reach the story.
+- An invalid or unknown document id redirects to `/feed?window=week` instead of erroring.
 
 ## Implementation Guidance
 - Read tracking should happen before redirect when possible, but redirecting the user to the story should still succeed if the write fails.

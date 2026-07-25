@@ -9,6 +9,7 @@ This file applies to `apps/web/src/app/feed`.
 - Server actions in this folder mutate `user_profiles`, including profile CRUD and the user's default profile selection.
 - Time window and profile selection are driven by URL search params (`window`, `profile`).
 - Profile switching uses a small client selector for optimistic click feedback, but the selected profile data is still loaded by the server page from URL params.
+- `profile-selector.tsx`, `feed-story-actions.tsx`, and `more-stories.tsx` are the client components for profile switching, per-story read-list/mark-read actions, and the paginated secondary story list, respectively.
 
 ## Implementation Guidance
 - Keep form handling and redirects here, but keep ranking and persistence logic in `../../lib/personalized-feed`.

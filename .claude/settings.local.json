@@ -30,7 +30,27 @@
       "Bash(docker compose:*)",
       "Bash(curl -s --connect-timeout 10 \"https://openrouter.ai/api/v1/models\")",
       "Bash(npx tsc:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(node -e ' *)",
+      "Bash(head -13 probe.sh)",
+      "Bash(cat base.sh)",
+      "Bash(cat)",
+      "Bash(bash b1.sh)",
+      "Bash(bash b2.sh)",
+      "Bash(bash b4.sh)",
+      "Bash(curl -sL --max-time 25 -A \"Mozilla/5.0\" https://rss.arxiv.org/rss/cs.AI)",
+      "Bash(curl -sL --max-time 25 -A \"Mozilla/5.0\" https://rss.arxiv.org/rss/cs.LG)",
+      "Bash(bash b5.sh)",
+      "Bash(bash b6.sh)",
+      "Bash(python3 -)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl *)",
+      "Bash(cp .claude/settings.local.json /private/tmp/claude-501/-Users-autumn-src-AIEngineerNewsLetter/5969c49f-a026-4dfb-b025-1f592a267978/scratchpad/settings.bak)",
+      "Bash(git checkout *)",
+      "Bash(awk '/category: \"research_feed\"/{print NR\": \"$0}' default-sources.ts)",
+      "Bash(git -C /Users/autumn/src/AIEngineerNewsLetter config --get core.hooksPath)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(git config *)"
     ]
   }
 }

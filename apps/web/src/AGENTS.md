@@ -6,7 +6,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 ## Architecture
 - `app` is the App Router surface: layouts, pages, and server actions.
 - `middleware.ts` gates `/read-list` behind the session cookie and sends anonymous users to login with a `next` return path.
-- `lib` is the server-side application layer for auth, dashboards, formatting, env loading, personalized ranking, scoring stats, scoring progress, operations visibility, read tracking, per-user source read lists, and job enqueueing.
+- `lib` is the server-side application layer for auth, dashboards, formatting, env loading, personalized ranking, document scoring, scoring progress, OpenRouter integration, operations visibility, read tracking, per-user source read lists, and job enqueueing. See `lib/AGENTS.md` for the module-by-module breakdown.
 
 ## Implementation Guidance
 - New product behavior should usually start in `lib`, then be exposed through `app`.
@@ -14,6 +14,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Keep browser concerns in page components and data concerns in library modules.
 - Keep DB access centralized and explicit, with external APIs wrapped in focused modules.
 - Long-running work such as crawling and scoring belongs in the worker; web helpers should only enqueue jobs.
+- `lib/scoring.ts` also exposes an inline (non-worker) scoring path used by `app/api/score-all`; that route is not currently wired to any admin control, so treat it as a legacy exception rather than the pattern to follow for new work.
 - Admin observability helpers may read pg-boss and pipeline tables for status/error reporting, but they should not execute long-running worker logic.
 - Personalized feed reads and writes must stay scoped to the authenticated user, and deletes should preserve history with soft deletion.
 - Per-user story read lists live in `user_document_read_list`; `/read-list` shows explicitly saved documents and reuses `document_reads` for read-state.

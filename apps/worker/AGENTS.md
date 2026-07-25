@@ -4,16 +4,18 @@
 This file applies to `apps/worker` and its subdirectories unless a deeper file overrides it.
 
 ## Architecture
-- This app handles source ingestion, document normalization, and LLM-based document scoring.
+- This app handles source ingestion, document normalization, LLM-based document scoring, and daily newsletter delivery.
 - It runs pg-boss queues: `fetch-source-endpoint` for crawling, `score-documents` for relevance scoring, and `send-daily-newsletter` for email briefs.
+- A separate in-process interval (not a pg-boss queue) prunes expired documents and raw payload files once retention settings expire, guarded so overlapping runs are skipped.
 - Fetch jobs persist raw payloads and insert only new normalized documents, skipping rows whose canonical URL already exists.
 - Score jobs call OpenRouter to score documents against user interest profiles, writing results to `document_scores` and tracking progress in `scoring_jobs`.
-- Newsletter jobs call SendPulse to email the top daily stories for each active user's first active profile.
+- Newsletter jobs call SendPulse to email the top daily stories for each active user's default active profile, falling back to their earliest-created active profile.
+- Startup re-seeds the source registry from `packages/shared` and deactivates sources/endpoints that dropped out of the seed list, so retired sources stop being crawled.
 
 ## Implementation Guidance
 - Favor deterministic behavior, retry safety, and append-only storage patterns.
-- Keep fetch-time parsing close to the fetch job implementation.
+- Keep job orchestration in the job file; extract pure, dependency-light parsing helpers (for example listing-page link extraction) into their own module so they can be verified without a database.
 - Scoring jobs must be idempotent. Use upserts for `document_scores` and update `scoring_jobs` per batch.
 - OpenRouter calls use exponential backoff with retries on 429 and 5xx errors.
-- Environment requires `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `APP_BASE_URL` for scoring to function.
-- Newsletter delivery requires `SENDPULSE_CLIENT_ID`, `SENDPULSE_CLIENT_SECRET`, and `SENDPULSE_FROM_EMAIL`.
+- `OPENROUTER_API_KEY` has no default and scoring throws without it; `OPENROUTER_MODEL` and `APP_BASE_URL` fall back to working defaults.
+- Newsletter delivery requires `SENDPULSE_CLIENT_ID`, `SENDPULSE_CLIENT_SECRET`, and `SENDPULSE_FROM_EMAIL`; without them the worker logs and skips newsletter scheduling entirely.

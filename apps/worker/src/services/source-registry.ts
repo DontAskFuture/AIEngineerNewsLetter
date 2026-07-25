@@ -1,6 +1,6 @@
 import { getDb, schema } from "@ai-intel/db";
 import { defaultSources } from "@ai-intel/shared";
-import { eq } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 
 function requireRow<T>(value: T | undefined, context: string) {
   if (!value) {
@@ -64,7 +64,37 @@ export async function seedDefaultSources() {
           },
         });
     }
+
+    // Seeding is additive, so retiring or re-pointing a seed endpoint would
+    // otherwise leave the previous row active and still being crawled.
+    await db
+      .update(schema.sourceEndpoints)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.sourceEndpoints.sourceId, storedSource.id),
+          eq(schema.sourceEndpoints.isActive, true),
+          notInArray(
+            schema.sourceEndpoints.url,
+            source.endpoints.map((endpoint) => endpoint.url),
+          ),
+        ),
+      );
   }
+
+  // Same reasoning for whole sources removed from the seed registry.
+  await db
+    .update(schema.sources)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.sources.isActive, true),
+        notInArray(
+          schema.sources.slug,
+          defaultSources.map((source) => source.slug),
+        ),
+      ),
+    );
 }
 
 export async function listActiveSourceEndpoints() {
@@ -82,5 +112,5 @@ export async function listActiveSourceEndpoints() {
     })
     .from(schema.sourceEndpoints)
     .innerJoin(schema.sources, eq(schema.sources.id, schema.sourceEndpoints.sourceId))
-    .where(eq(schema.sourceEndpoints.isActive, true));
+    .where(and(eq(schema.sourceEndpoints.isActive, true), eq(schema.sources.isActive, true)));
 }

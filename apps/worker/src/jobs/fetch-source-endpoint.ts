@@ -9,6 +9,7 @@ import { getDb, schema } from "@ai-intel/db";
 import { canonicalizeUrl, type FetchSourceEndpointPayload } from "@ai-intel/shared";
 import { logger } from "../logger";
 import { persistRawPayload } from "../storage/local-raw-store";
+import { extractArticleLinks } from "./html-links";
 
 const parser = new RSSParser();
 const userAgent = "ai-builder-intelligence-bot/0.1 (+https://localhost)";
@@ -31,38 +32,6 @@ interface FetchTextOptions {
   maxBytes?: number;
   timeoutMs?: number;
 }
-
-interface HtmlParserConfig {
-  selectors: string[];
-  pathPattern?: RegExp;
-}
-
-const htmlParserConfigs: Record<string, HtmlParserConfig> = {
-  "anthropic-news": {
-    selectors: ['a[href^="/news/"]'],
-    pathPattern: /^\/news\/[^/]+\/?$/,
-  },
-  "cerebras-blog": {
-    selectors: ['a[href^="/blog/"]'],
-    pathPattern: /^\/blog\/[^/]+\/?$/,
-  },
-  "cohere-blog": {
-    selectors: ['a[href*="/blog/"]'],
-    pathPattern: /^\/blog\/[^/]+\/?$/,
-  },
-  "langchain-blog": {
-    selectors: ['a[href^="/blog/"]'],
-    pathPattern: /^\/blog\/[^/]+\/?$/,
-  },
-  "mistral-news": {
-    selectors: ['a[href^="/news/"]'],
-    pathPattern: /^\/news\/[^/]+\/?$/,
-  },
-  "openrouter-announcements": {
-    selectors: ['a[href^="/announcements/"]'],
-    pathPattern: /^\/announcements\/[^/]+\/?$/,
-  },
-};
 
 class FetchHttpError extends Error {
   status: number;
@@ -690,55 +659,6 @@ async function upsertFeedDocuments(
   }
 
   return insertedDocumentIds;
-}
-
-function getHtmlParserConfig(parserKey: string | null) {
-  return parserKey ? htmlParserConfigs[parserKey] : undefined;
-}
-
-function extractArticleLinks(dom: JSDOM, baseUrl: string, parserKey: string | null): string[] {
-  const parsed = new URL(baseUrl);
-  const baseDomain = parsed.hostname;
-  const basePath = parsed.pathname.replace(/\/$/, "");
-  const seen = new Set<string>();
-  const links: string[] = [];
-  const parserConfig = getHtmlParserConfig(parserKey);
-  const selectors = parserConfig?.selectors ?? ["a[href]"];
-
-  const anchors = selectors.flatMap((selector) => Array.from(dom.window.document.querySelectorAll<HTMLAnchorElement>(selector)));
-
-  for (const anchor of anchors) {
-    const href = anchor.getAttribute("href");
-    if (!href) continue;
-
-    let resolved: URL;
-    try {
-      resolved = new URL(href, baseUrl);
-    } catch {
-      continue;
-    }
-
-    if (resolved.hostname !== baseDomain) continue;
-
-    const resolvedPath = resolved.pathname.replace(/\/$/, "");
-
-    if (parserConfig?.pathPattern) {
-      if (!parserConfig.pathPattern.test(resolvedPath)) continue;
-    } else if (!resolvedPath.startsWith(basePath + "/")) {
-      continue;
-    }
-
-    const remainder = resolvedPath.slice(basePath.length + 1);
-    if (!parserConfig && (!remainder || remainder.includes("/"))) continue;
-
-    const normalized = canonicalizeUrl(resolved.toString());
-    if (seen.has(normalized)) continue;
-
-    seen.add(normalized);
-    links.push(normalized);
-  }
-
-  return links;
 }
 
 async function upsertSingleHtmlDocument(

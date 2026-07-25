@@ -289,8 +289,8 @@ export const defaultSources: SeedSource[] = [
     trustTier: 1,
     endpoints: [
       {
-        kind: "html",
-        url: "https://modal.com/blog",
+        kind: "rss",
+        url: "https://modal.com/blog/atom.xml",
         cadenceMinutes: 60,
       },
     ],
@@ -332,8 +332,10 @@ export const defaultSources: SeedSource[] = [
     name: "Hacker News Front Page",
     description: "Front-page discussions and launches from Hacker News via HNRSS.",
     category: "community_feed",
-    baseUrl: "https://news.ycombinator.com",
-    canonicalDomain: "news.ycombinator.com",
+    // The feed is served by hnrss.org, and canonicalDomain gates egress, so it
+    // must match the fetch host rather than the site the stories point at.
+    baseUrl: "https://hnrss.org",
+    canonicalDomain: "hnrss.org",
     trustTier: 2,
     endpoints: [
       {
@@ -371,7 +373,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://www.reddit.com/r/MachineLearning.rss",
-        cadenceMinutes: 60,
+        cadenceMinutes: 75,
       },
     ],
   },
@@ -387,7 +389,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://www.reddit.com/r/artificial.rss",
-        cadenceMinutes: 60,
+        cadenceMinutes: 90,
       },
     ],
   },
@@ -403,7 +405,7 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://www.reddit.com/r/OpenAI.rss",
-        cadenceMinutes: 60,
+        cadenceMinutes: 105,
       },
     ],
   },
@@ -418,7 +420,23 @@ export const defaultSources: SeedSource[] = [
     endpoints: [
       {
         kind: "rss",
-        url: "https://blogs.microsoft.com/ai/feed/",
+        url: "https://blogs.microsoft.com/feed/",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "azure-ai-blog",
+    name: "Azure Blog",
+    description: "Azure AI infrastructure, model hosting, and cloud platform announcements from Microsoft.",
+    category: "engineering_blog",
+    baseUrl: "https://azure.microsoft.com",
+    canonicalDomain: "azure.microsoft.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://azure.microsoft.com/en-us/blog/feed/",
         cadenceMinutes: 60,
       },
     ],
@@ -434,7 +452,7 @@ export const defaultSources: SeedSource[] = [
     endpoints: [
       {
         kind: "rss",
-        url: "https://developer.nvidia.com/blog/category/artificial-intelligence/feed/",
+        url: "https://developer.nvidia.com/blog/category/generative-ai/feed/",
         cadenceMinutes: 60,
       },
     ],
@@ -850,29 +868,16 @@ export const defaultSources: SeedSource[] = [
     trustTier: 1,
     endpoints: [
       {
-        kind: "html",
-        url: "https://openrouter.ai/announcements",
-        parserKey: "openrouter-announcements",
+        kind: "rss",
+        url: "https://openrouter.ai/blog/feed.xml",
         cadenceMinutes: 60,
       },
     ],
   },
-  {
-    slug: "x-trends-united-states",
-    name: "X Trends (United States)",
-    description: "Public X trending topics page for the United States, sourced via Trends24.",
-    category: "social_trends",
-    baseUrl: "https://trends24.in",
-    canonicalDomain: "trends24.in",
-    trustTier: 2,
-    endpoints: [
-      {
-        kind: "html",
-        url: "https://trends24.in/united-states/",
-        cadenceMinutes: 60,
-      },
-    ],
-  },
+  // X Trends (Trends24) disabled — the page links only to off-domain x.com
+  // search URLs, which the same-origin article extractor rejects, so it never
+  // produced documents. Trend terms are not articles and do not fit the
+  // fetch-then-Readability document model.
   {
     slug: "andrej-karpathy-blog",
     name: "Andrej Karpathy's Blog",
@@ -965,6 +970,488 @@ export const defaultSources: SeedSource[] = [
       {
         kind: "rss",
         url: "https://evjang.com/feed.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "arxiv-cs-cl",
+    name: "arXiv cs.CL",
+    description: "Research feed for computation and language (NLP/LLM) papers from arXiv.",
+    category: "research_feed",
+    baseUrl: "https://arxiv.org",
+    canonicalDomain: "arxiv.org",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://rss.arxiv.org/rss/cs.CL",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "qwen-blog",
+    name: "Qwen Blog",
+    description: "Model releases and technical reports from Alibaba's Qwen team.",
+    category: "lab_blog",
+    baseUrl: "https://qwenlm.github.io",
+    canonicalDomain: "qwenlm.github.io",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://qwenlm.github.io/blog/index.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "google-research-blog",
+    name: "Google Research Blog",
+    description: "Research publications and technical posts from Google Research.",
+    category: "lab_blog",
+    baseUrl: "https://research.google",
+    canonicalDomain: "research.google",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://research.google/blog/rss/",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "eleutherai-blog",
+    name: "EleutherAI Blog",
+    description: "Open model research, interpretability, and training notes from EleutherAI.",
+    category: "lab_blog",
+    baseUrl: "https://blog.eleuther.ai",
+    canonicalDomain: "blog.eleuther.ai",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://blog.eleuther.ai/index.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "interconnects",
+    name: "Interconnects",
+    description: "Nathan Lambert's analysis of open models, RLHF, and the AI research ecosystem.",
+    category: "community_feed",
+    baseUrl: "https://www.interconnects.ai",
+    canonicalDomain: "interconnects.ai",
+    trustTier: 2,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://www.interconnects.ai/feed",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "semianalysis",
+    name: "SemiAnalysis",
+    description: "Semiconductor, datacenter, and AI compute economics analysis.",
+    category: "community_feed",
+    baseUrl: "https://semianalysis.com",
+    canonicalDomain: "semianalysis.com",
+    trustTier: 2,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://semianalysis.com/feed/",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "hamel-husain-blog",
+    name: "Hamel Husain's Blog",
+    description: "Practitioner guides on LLM evaluation, fine-tuning, and applied AI engineering.",
+    category: "community_feed",
+    baseUrl: "https://hamel.dev",
+    canonicalDomain: "hamel.dev",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://hamel.dev/index.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "zvi-substack",
+    name: "Don't Worry About the Vase",
+    description: "Zvi Mowshowitz's dense weekly roundup of AI capabilities, policy, and safety.",
+    category: "community_feed",
+    baseUrl: "https://thezvi.substack.com",
+    canonicalDomain: "thezvi.substack.com",
+    trustTier: 2,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://thezvi.substack.com/feed",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "ai-snake-oil",
+    name: "AI Snake Oil",
+    description: "Critical analysis of AI capability claims and evaluation practices from Princeton researchers.",
+    category: "community_feed",
+    baseUrl: "https://www.aisnakeoil.com",
+    canonicalDomain: "aisnakeoil.com",
+    trustTier: 2,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://www.aisnakeoil.com/feed",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "hacker-news-ai-filtered",
+    name: "Hacker News AI (High Signal)",
+    description: "Hacker News posts matching AI, LLM, and agent keywords above a points threshold.",
+    category: "community_feed",
+    baseUrl: "https://hnrss.org",
+    canonicalDomain: "hnrss.org",
+    trustTier: 2,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://hnrss.org/newest?q=AI+OR+LLM+OR+agent&points=100",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "dspy-releases",
+    name: "DSPy Releases",
+    description: "Release notes for the DSPy prompt optimization and LM programming framework.",
+    category: "github",
+    baseUrl: "https://github.com/stanfordnlp/dspy",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/stanfordnlp/dspy/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "pydantic-ai-releases",
+    name: "PydanticAI Releases",
+    description: "Release notes for the PydanticAI typed agent framework.",
+    category: "github",
+    baseUrl: "https://github.com/pydantic/pydantic-ai",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/pydantic/pydantic-ai/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "openai-agents-sdk-releases",
+    name: "OpenAI Agents SDK Releases",
+    description: "Release notes for the official OpenAI Agents SDK for Python.",
+    category: "github",
+    baseUrl: "https://github.com/openai/openai-agents-python",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/openai/openai-agents-python/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "claude-code-releases",
+    name: "Claude Code Releases",
+    description: "Release notes for Anthropic's Claude Code agentic coding CLI.",
+    category: "github",
+    baseUrl: "https://github.com/anthropics/claude-code",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/anthropics/claude-code/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "unsloth-releases",
+    name: "Unsloth Releases",
+    description: "Release notes for the Unsloth efficient fine-tuning library.",
+    category: "github",
+    baseUrl: "https://github.com/unslothai/unsloth",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/unslothai/unsloth/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "trl-releases",
+    name: "TRL Releases",
+    description: "Release notes for Hugging Face TRL reinforcement learning and post-training.",
+    category: "github",
+    baseUrl: "https://github.com/huggingface/trl",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/huggingface/trl/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "pytorch-releases",
+    name: "PyTorch Releases",
+    description: "Release notes for the PyTorch deep learning framework.",
+    category: "github",
+    baseUrl: "https://github.com/pytorch/pytorch",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/pytorch/pytorch/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "comfyui-releases",
+    name: "ComfyUI Releases",
+    description: "Release notes for the ComfyUI generative media workflow engine.",
+    category: "github",
+    baseUrl: "https://github.com/comfyanonymous/ComfyUI",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/comfyanonymous/ComfyUI/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "n8n-releases",
+    name: "n8n Releases",
+    description: "Release notes for the n8n workflow automation platform and its AI nodes.",
+    category: "github",
+    baseUrl: "https://github.com/n8n-io/n8n",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/n8n-io/n8n/releases.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "mcp-spec-commits",
+    name: "MCP Specification Commits",
+    description: "Recent changes to the Model Context Protocol specification.",
+    category: "github",
+    baseUrl: "https://github.com/modelcontextprotocol/modelcontextprotocol",
+    canonicalDomain: "github.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://github.com/modelcontextprotocol/modelcontextprotocol/commits/main.atom",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "alignment-forum",
+    name: "Alignment Forum",
+    description: "Technical AI alignment research discussion and writeups.",
+    category: "community_feed",
+    baseUrl: "https://www.alignmentforum.org",
+    canonicalDomain: "alignmentforum.org",
+    trustTier: 2,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://www.alignmentforum.org/feed.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "lesswrong",
+    name: "LessWrong",
+    description: "Rationality and AI safety discussion, including frontier model analysis.",
+    category: "community_feed",
+    baseUrl: "https://www.lesswrong.com",
+    canonicalDomain: "lesswrong.com",
+    trustTier: 2,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://www.lesswrong.com/feed.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "berkeley-bair",
+    name: "Berkeley BAIR Blog",
+    description: "Research posts from the Berkeley Artificial Intelligence Research lab.",
+    category: "research_feed",
+    baseUrl: "https://bair.berkeley.edu",
+    canonicalDomain: "bair.berkeley.edu",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://bair.berkeley.edu/blog/feed.xml",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "epoch-ai",
+    name: "Epoch AI",
+    description: "Quantitative research and data insights on AI compute, scaling, and capability trends.",
+    category: "research_feed",
+    baseUrl: "https://epoch.ai",
+    canonicalDomain: "epoch.ai",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://epoch.ai/blog",
+        parserKey: "epoch-ai",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "lmarena-blog",
+    name: "LMArena Blog",
+    description: "Leaderboard updates and model evaluation analysis from LMArena.",
+    category: "engineering_blog",
+    baseUrl: "https://blog.lmarena.ai",
+    canonicalDomain: "blog.lmarena.ai",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://blog.lmarena.ai/",
+        parserKey: "lmarena-blog",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "cognition-blog",
+    name: "Cognition Blog",
+    description: "Agentic software engineering research and product updates from Cognition.",
+    category: "engineering_blog",
+    baseUrl: "https://cognition.ai",
+    canonicalDomain: "cognition.ai",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://cognition.ai/blog",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "metr-blog",
+    name: "METR Blog",
+    description: "Frontier model evaluation, autonomy, and dangerous-capability research from METR.",
+    category: "lab_blog",
+    baseUrl: "https://metr.org",
+    canonicalDomain: "metr.org",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://metr.org/blog",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "allen-ai-blog",
+    name: "Allen Institute for AI Blog",
+    description: "Open model, dataset, and research announcements from AI2.",
+    category: "lab_blog",
+    baseUrl: "https://allenai.org",
+    canonicalDomain: "allenai.org",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://allenai.org/blog",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "elevenlabs-blog",
+    name: "ElevenLabs Blog",
+    description: "Voice, speech, and audio model product and research updates from ElevenLabs.",
+    category: "engineering_blog",
+    baseUrl: "https://elevenlabs.io",
+    canonicalDomain: "elevenlabs.io",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://elevenlabs.io/blog",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "black-forest-labs-blog",
+    name: "Black Forest Labs Blog",
+    description: "Image and video generation model releases from Black Forest Labs.",
+    category: "lab_blog",
+    baseUrl: "https://bfl.ai",
+    canonicalDomain: "bfl.ai",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://bfl.ai/blog",
         cadenceMinutes: 60,
       },
     ],

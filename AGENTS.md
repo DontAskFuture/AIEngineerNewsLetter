@@ -11,7 +11,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - `docs` holds product and implementation notes that explain intent rather than runtime behavior.
 
 ## Core Runtime Flow
-1. Curated sources are defined in `packages/shared`.
+1. Curated sources (currently ~90) are defined in `packages/shared/src/default-sources.ts`; the worker reseeds this registry on startup and deactivates sources/endpoints that drop out of the seed list, so retired sources stop being crawled without deleting history.
 2. The worker fetches endpoints and writes `fetch_jobs`, `fetch_attempts`, `raw_documents`, and `documents`.
 3. The worker scores documents against user interest profiles via OpenRouter, writing `document_scores` and tracking progress in `scoring_jobs`.
 4. The worker sends daily SendPulse newsletter emails using each active user's default active profile, falling back to the first active profile, then records successful sends in `newsletter_sends`.
@@ -49,7 +49,8 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - E2E smoke credentials live in local env as `E2E_TEST_EMAIL` and `E2E_TEST_PASSWORD`; keep the password synthetic and ensure the email is included in `AUTH_ALLOWED_EMAILS`.
 - `FEED_SHOW_WHY_RELEVANT` controls whether stored per-story relevance explanations render in the feed; keep it off by default when the profile-level top-story briefing is the primary explanation surface.
 - Project-local Codex skills live in `.codex/skills`; update the relevant skill reference when testing workflows or credential conventions change.
-- Playwright is installed as a root dev dependency for browser-based E2E smoke tests.
+- The repo has no unit/integration test runner configured (no vitest/jest); Playwright (`@playwright/test`) is installed as a root dev dependency for browser-based E2E testing, driven by the `.codex/skills/e2e-functional-testing` skill. No `playwright.config` or spec files exist yet.
+- Keep worker job files thin: extract pure, dependency-light parsing helpers (for example `apps/worker/src/jobs/html-links.ts` for listing-page link extraction) into their own module so they can be verified without a database.
 
 ## Safe Change Patterns
 - Web features usually touch `apps/web/src/app`, `apps/web/src/lib`, and sometimes `packages/db/src/schema.ts`.
