@@ -1,3 +1,11 @@
+# Docker's default json-file driver never rotates, so an unbounded worker log
+# will eventually fill the host volume and take Postgres down with it.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -15,6 +23,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Without this, Postgres does not return after a host reboot while web and
+    # worker do, leaving them to crash-loop against a missing database.
+    restart: unless-stopped
+    logging: *logging
 
   migrate:
     build:
@@ -29,6 +41,7 @@ services:
       RAW_STORAGE_DIR: /app/var/raw
       FETCH_INTERVAL_MINUTES: 60
     restart: "no"
+    logging: *logging
 
   web:
     build:
@@ -42,7 +55,7 @@ services:
       LOG_LEVEL: info
       RAW_STORAGE_DIR: /app/var/raw
       FETCH_INTERVAL_MINUTES: 60
-      CRAWLED_DOCUMENT_TTL_DAYS: ${CRAWLED_DOCUMENT_TTL_DAYS:-365}
+      CRAWLED_DOCUMENT_TTL_DAYS: ${CRAWLED_DOCUMENT_TTL_DAYS:-30}
       CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES: ${CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES:-1440}
       CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE: ${CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE:-500}
       SCORING_MAX_DOCUMENTS_PER_RUN: ${SCORING_MAX_DOCUMENTS_PER_RUN:-20}
@@ -59,6 +72,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     restart: unless-stopped
+    logging: *logging
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -69,6 +83,7 @@ services:
     secrets:
       - cloudflare_tunnel_token
     restart: always
+    logging: *logging
     profiles:
       - tunnel
 
@@ -85,7 +100,7 @@ services:
       RAW_STORAGE_DIR: /app/var/raw
       FETCH_INTERVAL_MINUTES: 60
       FETCH_WORKER_CONCURRENCY: 5
-      CRAWLED_DOCUMENT_TTL_DAYS: ${CRAWLED_DOCUMENT_TTL_DAYS:-365}
+      CRAWLED_DOCUMENT_TTL_DAYS: ${CRAWLED_DOCUMENT_TTL_DAYS:-30}
       CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES: ${CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES:-1440}
       CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE: ${CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE:-500}
       SCORING_MAX_DOCUMENTS_PER_RUN: ${SCORING_MAX_DOCUMENTS_PER_RUN:-20}
@@ -104,6 +119,7 @@ services:
     volumes:
       - raw_data:/app/var/raw
     restart: unless-stopped
+    logging: *logging
 
 volumes:
   postgres_data:

@@ -45,6 +45,10 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Cloudflare Tunnel tokens should be mounted from ignored local secret files, not interpolated into Compose commands or committed env examples.
 - Local server operations are exposed through `pnpm ops`, which wraps Docker Compose lifecycle commands and crawl/scoring job log queries.
 - Production Compose exposes crawled-document TTL controls through `CRAWLED_DOCUMENT_TTL_DAYS`, `CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES`, and `CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE`.
+- `CRAWLED_DOCUMENT_TTL_DAYS` defaults to 30 in Compose because raw payloads grow roughly 8-12 GB/month at the current source count; the worker's own schema default remains 365, so any host relying on that default must set the value explicitly. Raising the TTL is only safe when `raw_data` lives on a volume with room for it.
+- Lowering a retention default is destructive to existing installs: the cleanup job prunes on the next run. Pin the prior value in an existing deployment's `.env` before changing a default, rather than assuming defaults are inert.
+- Every long-lived Compose service must declare a `restart` policy; without one it does not return after a host reboot while its dependents do, producing a crash-loop that still looks "running" in `docker ps`. Only the one-shot `migrate` service should be `restart: "no"`.
+- Compose services share the `x-logging` anchor so the default non-rotating `json-file` driver cannot fill the host volume. Apply `logging: *logging` to any new service.
 - Production Compose exposes scoring spend controls through `SCORING_MAX_DOCUMENTS_PER_RUN` and `SCORING_LOOKBACK_DAYS`.
 - E2E smoke credentials live in local env as `E2E_TEST_EMAIL` and `E2E_TEST_PASSWORD`; keep the password synthetic and ensure the email is included in `AUTH_ALLOWED_EMAILS`.
 - `FEED_SHOW_WHY_RELEVANT` controls whether stored per-story relevance explanations render in the feed; keep it off by default when the profile-level top-story briefing is the primary explanation surface.

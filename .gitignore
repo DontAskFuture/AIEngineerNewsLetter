@@ -6,6 +6,7 @@ coverage
 *.tsbuildinfo
 .env
 .env.local
+.env.bak-*
 .secrets
 .DS_Store
 var

@@ -50,7 +50,20 @@
       "Bash(awk '/category: \"research_feed\"/{print NR\": \"$0}' default-sources.ts)",
       "Bash(git -C /Users/autumn/src/AIEngineerNewsLetter config --get core.hooksPath)",
       "Bash(echo \"exit:$?\")",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(docker version *)",
+      "Bash(docker build *)",
+      "Bash(docker history *)",
+      "Bash(docker rmi *)",
+      "Bash(awk '/^ postgres:/,/^ migrate:/' docker-compose.yml)",
+      "Bash(xargs -I{} echo \"restart keys under postgres: {}\")",
+      "Bash(grep -nE \"^\\\\s+\\(FETCH_INTERVAL_MINUTES|FETCH_WORKER_CONCURRENCY|LOG_LEVEL\\): [^$]\" docker-compose.yml)",
+      "Bash(grep -n \"^  [a-z]*:$\\\\|logging: \\\\*logging\\\\|restart:\" docker-compose.yml)",
+      "Bash(docker volume *)",
+      "Bash(git check-ignore *)",
+      "Bash(grep -E \"^  [a-z-]+:$|restart:\")",
+      "Bash(xargs -I{} echo \" services with log rotation: {} / 5\")",
+      "Bash(env -u CRAWLED_DOCUMENT_TTL_DAYS docker compose --env-file /dev/null config)"
     ]
   }
 }
