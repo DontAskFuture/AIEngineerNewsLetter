@@ -63,7 +63,14 @@
       "Bash(git check-ignore *)",
       "Bash(grep -E \"^  [a-z-]+:$|restart:\")",
       "Bash(xargs -I{} echo \" services with log rotation: {} / 5\")",
-      "Bash(env -u CRAWLED_DOCUMENT_TTL_DAYS docker compose --env-file /dev/null config)"
+      "Bash(env -u CRAWLED_DOCUMENT_TTL_DAYS docker compose --env-file /dev/null config)",
+      "Bash(node --check scripts/server.mjs)",
+      "Bash(node scripts/server.mjs deploy)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(node scripts/server.mjs help)",
+      "Bash(node scripts/server.mjs db-restore)",
+      "Bash(node scripts/server.mjs db-dump --file var/backups/test.dump)",
+      "Bash(node scripts/check-agents.mjs)"
     ]
   }
 }

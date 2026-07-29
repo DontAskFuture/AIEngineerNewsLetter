@@ -41,6 +41,12 @@ Use the optional `cloudflared` Compose profile when you want a stable public DNS
 
 The web service still binds to `127.0.0.1:3000` for local browser access, while Cloudflare reaches it privately over the Docker network through `cloudflared`. Do not publish router/firewall inbound access to port `3000`; the only public entrypoint should be Cloudflare.
 
+## Deploying to a VM
+
+See [`docs/deployment.md`](docs/deployment.md) for the full Oracle Cloud VM
+runbook, including provisioning, first deploy, and pushing updates with
+`pnpm ops deploy`.
+
 ## Local development
 
 1. Copy `.env.example` to `.env`.
@@ -58,6 +64,8 @@ The web service still binds to `127.0.0.1:3000` for local browser access, while 
 - `corepack pnpm lint`
 - `corepack pnpm check:agents -- --staged`
 - `corepack pnpm fetch:once`
+- `pnpm ops deploy --host user@vm-ip` (see [`docs/deployment.md`](docs/deployment.md))
+- `pnpm ops db-dump` / `pnpm ops db-restore --host user@vm-ip --file <dump>` — carry existing local data to a fresh VM (see [`docs/deployment.md`](docs/deployment.md))
 
 ## Notes
 
