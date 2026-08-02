@@ -70,7 +70,10 @@
       "Bash(node scripts/server.mjs help)",
       "Bash(node scripts/server.mjs db-restore)",
       "Bash(node scripts/server.mjs db-dump --file var/backups/test.dump)",
-      "Bash(node scripts/check-agents.mjs)"
+      "Bash(node scripts/check-agents.mjs)",
+      "WebFetch(domain:openrouter.ai)",
+      "Bash(git add *)",
+      "Bash(node scripts/check-agents.mjs --staged)"
     ]
   }
 }

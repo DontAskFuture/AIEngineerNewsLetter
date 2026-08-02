@@ -975,6 +975,22 @@ export const defaultSources: SeedSource[] = [
     ],
   },
   {
+    slug: "the-pragmatic-engineer",
+    name: "The Pragmatic Engineer",
+    description: "Big tech and startup engineering practices, industry analysis, and AI engineering coverage from Gergely Orosz.",
+    category: "community_feed",
+    baseUrl: "https://newsletter.pragmaticengineer.com",
+    canonicalDomain: "newsletter.pragmaticengineer.com",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "rss",
+        url: "https://newsletter.pragmaticengineer.com/feed",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
     slug: "arxiv-cs-cl",
     name: "arXiv cs.CL",
     description: "Research feed for computation and language (NLP/LLM) papers from arXiv.",

@@ -36,7 +36,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Treat `packages/db/drizzle` and `packages/db/drizzle/meta` as generated artifacts. Generate migrations instead of hand-editing snapshots.
 - Shared code should be framework-light. Do not leak Next.js APIs into `packages/*`.
 - Shared LLM prompt templates live in `packages/shared` and use Handlebars for dynamic rendering across web and worker callers.
-- OpenRouter scoring uses the shared model candidates in `packages/shared/src/scoring-config.ts`; scoring/ranking should prefer Tencent HY3 Preview (`tencent/hy3-preview`) with DeepSeek V4 Flash (`deepseek/deepseek-v4-flash`) as fallback, while top-story summaries should prefer DeepSeek V4 Flash with HY3 Preview as fallback.
+- OpenRouter scoring uses the shared model candidates in `packages/shared/src/scoring-config.ts`; both scoring and top-story summaries use DeepSeek V4 Flash (`deepseek/deepseek-v4-flash-0731`) as the sole model, with `env.openRouterModel` (also defaulted to the same model) as the final explicit fallback per call. There is currently no cross-provider fallback model — if DeepSeek has an outage, scoring/summary calls have nothing else to fall back to.
 - Prefer additive schema changes. Existing data should keep working after a migration.
 - Long-running work (crawling, scoring) belongs in the worker, not the web app. The web app only enqueues.
 - Docker builds must exclude workspace `node_modules` directories so container-installed pnpm links are not overwritten by host symlinks.

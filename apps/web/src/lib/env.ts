@@ -28,7 +28,7 @@ export function loadWebEnv() {
 
     cachedEnv = {
       openRouterApiKey: process.env.OPENROUTER_API_KEY?.trim() || null,
-      openRouterModel: process.env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4-flash",
+      openRouterModel: process.env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4-flash-0731",
       appBaseUrl: process.env.APP_BASE_URL?.trim() || "http://localhost:3000",
       appTimeZone: process.env.APP_TIME_ZONE?.trim() || "America/Los_Angeles",
       feedShowWhyRelevant,

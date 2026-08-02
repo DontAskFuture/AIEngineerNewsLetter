@@ -1,12 +1,11 @@
-const deepseekV4FlashModel = "deepseek/deepseek-v4-flash";
-const hy3PreviewModel = "tencent/hy3-preview";
+const deepseekV4Flash0731Model = "deepseek/deepseek-v4-flash-0731";
 
 export const scoringConfig = {
   batchSize: 20,
   maxDocumentsPerRun: 20,
-  preferredModel: hy3PreviewModel,
-  scoringModelCandidates: [hy3PreviewModel, deepseekV4FlashModel],
-  summaryModelCandidates: [deepseekV4FlashModel, hy3PreviewModel],
+  preferredModel: deepseekV4Flash0731Model,
+  scoringModelCandidates: [deepseekV4Flash0731Model],
+  summaryModelCandidates: [deepseekV4Flash0731Model],
 } as const;
 
 export function selectScoringModelCandidates() {

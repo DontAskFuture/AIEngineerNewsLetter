@@ -5,7 +5,7 @@ This file applies to `apps/web/src/lib`.
 
 ## Architecture
 - `auth.ts` owns password hashing (scrypt), session cookies (`ai_intel_session`), the login-attempt throttle, allowlist/admin checks, and the `requireCurrentUser`/`requireAdmin` guards used by pages and server actions.
-- `env.ts` loads and memoizes process env into a typed `loadWebEnv()` snapshot: OpenRouter key/model, app base URL/timezone, `FEED_SHOW_WHY_RELEVANT`, allowed/admin emails, and session length.
+- `env.ts` loads and memoizes process env into a typed `loadWebEnv()` snapshot: OpenRouter key/model (default `deepseek/deepseek-v4-flash-0731`, matching the shared scoring config's sole model), app base URL/timezone, `FEED_SHOW_WHY_RELEVANT`, allowed/admin emails, and session length.
 - `crawler.ts` enqueues `fetch-source-endpoint` and `score-documents` jobs directly into `pgboss.job` and reads recent crawl job status/summary for the admin dashboard.
 - `dashboard.ts` builds the source registry, endpoint health, category breakdown, and recent fetch attempts shown on `/admin` and `/feed`.
 - `operations.ts` aggregates pg-boss queue summaries plus recent crawl/scoring/queue error logs for admin incident diagnosis; it is read-only and never executes worker logic.
