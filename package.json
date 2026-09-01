@@ -11,6 +11,7 @@
     "dev:worker": "corepack pnpm --filter worker dev",
     "lint": "corepack pnpm --filter web lint",
     "typecheck": "corepack pnpm -r typecheck",
+    "test": "corepack pnpm -r test",
     "ops": "node scripts/server.mjs",
     "check:agents": "node scripts/check-agents.mjs",
     "db:generate": "corepack pnpm --filter @ai-intel/db db:generate",

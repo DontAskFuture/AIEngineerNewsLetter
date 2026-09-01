@@ -1,8 +1,11 @@
 import {
+  ScoringModelPool,
+  decideRetry,
+  extractBodyError,
+  isFreeTierModel,
   renderRankDocumentsPrompt,
   renderScoreDocumentsPrompt,
   renderSummarizeTopStoriesPrompt,
-  selectScoringModelCandidates,
   selectSummaryModelCandidates,
   type TopStoriesSummaryCandidate,
 } from "@ai-intel/shared";
@@ -11,6 +14,9 @@ import { loadWebEnv } from "@/lib/env";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+// Free-pool endpoints can hang indefinitely, so every request is bounded and a
+// timeout is treated like any other model failure.
+const REQUEST_TIMEOUT_MS = 60_000;
 
 export interface InterestRankingCandidate {
   id: number;
@@ -50,12 +56,29 @@ function extractJson(rawText: string): string {
   throw new SyntaxError(`No JSON object found in LLM response: ${trimmed.slice(0, 200)}...`);
 }
 
-function isRetryableStatus(status: number): boolean {
-  return status === 429 || status >= 500;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Health state is per-process, so the pool is a module-level singleton: a model
+// that exhausted its quota on one batch must still be parked on the next.
+let scoringPool: ScoringModelPool | null = null;
+
+function getScoringPool(): ScoringModelPool {
+  const env = loadWebEnv();
+  scoringPool ??= new ScoringModelPool({
+    apiKey: env.openRouterApiKey,
+    onWarn: (message) => console.warn(`[openrouter] ${message}`),
+  });
+  return scoringPool;
+}
+
+/** Refreshed discovery plus health-filtered order, with the env model last. */
+async function resolveScoringCandidates(): Promise<{ models: string[]; pool: ScoringModelPool }> {
+  const env = loadWebEnv();
+  const pool = getScoringPool();
+  await pool.refresh();
+  return { models: [...pool.candidates(), env.openRouterModel], pool };
 }
 
 async function chatCompletion(
@@ -63,6 +86,7 @@ async function chatCompletion(
   userMessage: string,
   maxTokens: number,
   modelCandidates?: string[],
+  pool?: ScoringModelPool,
 ): Promise<{ content: string; model: string; responseId: string | null }> {
   const env = loadWebEnv();
 
@@ -81,6 +105,7 @@ async function chatCompletion(
   let lastError: Error | null = null;
 
   for (const model of models) {
+    const freeTier = isFreeTierModel(model);
     const body = JSON.stringify({
       model,
       temperature: 0.1,
@@ -105,9 +130,16 @@ async function chatCompletion(
           cache: "no-store",
           headers,
           body,
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Network error");
+        if (freeTier) {
+          // Timeouts and connection failures are transient, not entitlement problems.
+          pool?.recordFailure(model, 408);
+          console.warn(`[openrouter] ${model} network failure: ${lastError.message}`);
+          break;
+        }
         continue;
       }
 
@@ -119,31 +151,68 @@ async function chatCompletion(
             ? ((errorObj as Record<string, unknown>).message as string)
             : `OpenRouter request failed with HTTP ${response.status}`;
 
-        if (isRetryableStatus(response.status) && attempt < MAX_RETRIES) {
+        lastError = new Error(errorMessage);
+
+        const decision = decideRetry({
+          status: response.status,
+          attempt,
+          maxRetries: MAX_RETRIES,
+          isFreeTier: freeTier,
+        });
+
+        if (decision === "retry") {
           console.warn(`[openrouter] ${model} HTTP ${response.status}: ${errorMessage} (will retry)`);
-          lastError = new Error(errorMessage);
           continue;
         }
 
-        console.warn(`[openrouter] ${model} failed: ${errorMessage}`);
-        lastError = new Error(errorMessage);
+        pool?.recordFailure(model, response.status);
+        if (response.status === 429 && freeTier) {
+          console.log(`[openrouter] ${model} free-tier quota exhausted, parked and falling through`);
+        } else {
+          console.warn(`[openrouter] ${model} failed: ${errorMessage}`);
+        }
         break;
       }
 
       const payload = (await response.json()) as Record<string, unknown>;
 
-      const choices = payload.choices;
-      if (!Array.isArray(choices) || choices.length === 0) {
-        throw new Error("OpenRouter returned no choices");
+      // OpenRouter reports upstream provider failures as HTTP 200 with an
+      // `error` body, so this must be handled as a model failure (fall through
+      // to the next candidate) rather than thrown out of the candidate loop.
+      const bodyError = extractBodyError(payload);
+      if (bodyError) {
+        lastError = new Error(bodyError.message);
+
+        const decision = decideRetry({
+          status: bodyError.status,
+          attempt,
+          maxRetries: MAX_RETRIES,
+          isFreeTier: freeTier,
+        });
+
+        if (decision === "retry") {
+          console.warn(`[openrouter] ${model} upstream error: ${bodyError.message} (will retry)`);
+          continue;
+        }
+
+        pool?.recordFailure(model, bodyError.status);
+        console.warn(`[openrouter] ${model} unavailable: ${bodyError.message}`);
+        break;
       }
 
+      const choices = payload.choices as unknown[];
       const firstChoice = choices[0] as Record<string, unknown>;
       const message = firstChoice.message as Record<string, unknown> | undefined;
       const content = typeof message?.content === "string" ? message.content.trim() : null;
 
       if (!content) {
-        throw new Error("OpenRouter returned empty content");
+        lastError = new Error("OpenRouter returned empty content");
+        pool?.recordFailure(model, 502);
+        console.warn(`[openrouter] ${model} returned empty content`);
+        break;
       }
+
+      pool?.recordSuccess(model);
 
       return {
         content,
@@ -227,12 +296,9 @@ export async function rankDocumentsForInterest({
   candidates: InterestRankingCandidate[];
 }) {
   const prompt = renderRankDocumentsPrompt({ interestStatement, candidates });
-  const env = loadWebEnv();
 
-  const result = await chatCompletion(prompt.system, prompt.user, 3500, [
-    ...selectScoringModelCandidates(),
-    env.openRouterModel,
-  ]);
+  const { models, pool } = await resolveScoringCandidates();
+  const result = await chatCompletion(prompt.system, prompt.user, 3500, models, pool);
   const ranking = parseRankingResponse(result.content);
 
   return {
@@ -326,12 +392,9 @@ export async function scoreDocumentBatch({
   candidates: InterestRankingCandidate[];
 }): Promise<{ model: string; scores: BatchScoreResult[] }> {
   const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
-  const env = loadWebEnv();
 
-  const result = await chatCompletion(prompt.system, prompt.user, 4000, [
-    ...selectScoringModelCandidates(),
-    env.openRouterModel,
-  ]);
+  const { models, pool } = await resolveScoringCandidates();
+  const result = await chatCompletion(prompt.system, prompt.user, 4000, models, pool);
   const scores = parseBatchScoreResponse(result.content);
 
   return { model: result.model, scores };

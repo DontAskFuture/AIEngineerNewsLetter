@@ -1,9 +1,12 @@
 import { getDb, schema } from "@ai-intel/db";
 import { and, desc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
 import {
+  ScoringModelPool,
+  decideRetry,
+  extractBodyError,
+  isFreeTierModel,
   renderScoreDocumentsPrompt,
   scoringConfig,
-  selectScoringModelCandidates,
   type PromptCandidate,
   type ScoreDocumentsPayload,
 } from "@ai-intel/shared";
@@ -13,6 +16,9 @@ import { loadWorkerEnv } from "../env";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+// Free-pool endpoints can hang indefinitely, so every request is bounded and a
+// timeout is treated like any other model failure.
+const REQUEST_TIMEOUT_MS = 60_000;
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -85,6 +91,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Health state is per-process, so the pool is a module-level singleton: a model
+// that exhausted its quota on one batch must still be parked on the next.
+let scoringPool: ScoringModelPool | null = null;
+
+function getScoringPool(): ScoringModelPool {
+  const env = loadWorkerEnv();
+  scoringPool ??= new ScoringModelPool({
+    apiKey: env.OPENROUTER_API_KEY ?? null,
+    onWarn: (message) => logger.warn({ msg: message }, "OpenRouter model pool"),
+  });
+  return scoringPool;
+}
+
 async function callLlm(interestStatement: string, candidates: PromptCandidate[]): Promise<{ model: string; scores: ScoreResult[] }> {
   const env = loadWorkerEnv();
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
@@ -97,10 +116,17 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
     "X-Title": "AI Builder Intelligence",
   };
 
-  const models = Array.from(new Set([...selectScoringModelCandidates(), env.OPENROUTER_MODEL]));
+  const pool = getScoringPool();
+  await pool.refresh();
+
+  const models = Array.from(new Set([...pool.candidates(), env.OPENROUTER_MODEL]));
+  const parked = pool.health();
+  if (parked.length > 0) logger.debug({ parked }, "Skipping parked OpenRouter models");
+
   let lastError: Error | null = null;
 
   for (const model of models) {
+    const freeTier = isFreeTierModel(model);
     const body = JSON.stringify({
       model,
       temperature: 0.1,
@@ -120,9 +146,20 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
 
       let response: Response;
       try {
-        response = await fetch(OPENROUTER_CHAT_URL, { method: "POST", headers, body });
+        response = await fetch(OPENROUTER_CHAT_URL, {
+          method: "POST",
+          headers,
+          body,
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Network error");
+        if (freeTier) {
+          // Timeouts and connection failures are transient, not entitlement problems.
+          pool.recordFailure(model, 408);
+          logger.warn({ model, msg: lastError.message }, "Free-tier model network failure");
+          break;
+        }
         continue;
       }
 
@@ -133,25 +170,65 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
           ? ((errObj as Record<string, unknown>).message as string)
           : `HTTP ${response.status}`;
 
-        if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+        lastError = new Error(msg);
+
+        const decision = decideRetry({
+          status: response.status,
+          attempt,
+          maxRetries: MAX_RETRIES,
+          isFreeTier: freeTier,
+        });
+
+        if (decision === "retry") {
           logger.warn({ status: response.status, msg, model }, "Retryable OpenRouter error");
-          lastError = new Error(msg);
           continue;
         }
 
-        logger.warn({ status: response.status, msg, model }, "OpenRouter model failed");
-        lastError = new Error(msg);
+        pool.recordFailure(model, response.status);
+        if (response.status === 429 && freeTier) {
+          logger.info({ model }, "Free-tier quota exhausted, parked and falling through");
+        } else {
+          logger.warn({ status: response.status, msg, model }, "OpenRouter model failed");
+        }
         break;
       }
 
       const payload = (await response.json()) as Record<string, unknown>;
-      const choices = payload.choices;
-      if (!Array.isArray(choices) || choices.length === 0) throw new Error("No choices returned");
 
+      // OpenRouter reports upstream provider failures as HTTP 200 with an
+      // `error` body, so this must be handled as a model failure (fall through
+      // to the next candidate) rather than thrown out of the candidate loop.
+      const bodyError = extractBodyError(payload);
+      if (bodyError) {
+        lastError = new Error(bodyError.message);
+
+        const decision = decideRetry({
+          status: bodyError.status,
+          attempt,
+          maxRetries: MAX_RETRIES,
+          isFreeTier: freeTier,
+        });
+
+        if (decision === "retry") {
+          logger.warn({ status: bodyError.status, msg: bodyError.message, model }, "Retryable OpenRouter upstream error");
+          continue;
+        }
+
+        pool.recordFailure(model, bodyError.status);
+        logger.warn({ status: bodyError.status, msg: bodyError.message, model }, "OpenRouter model unavailable");
+        break;
+      }
+
+      const choices = payload.choices as unknown[];
       const firstChoice = choices[0] as Record<string, unknown>;
       const message = firstChoice.message as Record<string, unknown> | undefined;
       const content = typeof message?.content === "string" ? message.content.trim() : null;
-      if (!content) throw new Error("Empty content returned");
+      if (!content) {
+        lastError = new Error("Empty content returned");
+        pool.recordFailure(model, 502);
+        logger.warn({ model }, "OpenRouter returned empty content");
+        break;
+      }
 
       const parsed = JSON.parse(extractJson(content)) as unknown;
       const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
@@ -171,6 +248,7 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
         })
         .filter((e): e is ScoreResult => e !== null);
 
+      pool.recordSuccess(model);
       return { model: typeof payload.model === "string" ? payload.model : model, scores };
     }
   }

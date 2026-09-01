@@ -26,10 +26,11 @@ This file applies to `apps/worker/src/jobs`.
 - A listing page that links only to off-domain URLs cannot produce documents, because `extractArticleLinks` enforces same-origin. Prefer a feed, or drop the source, rather than adding a parser for it.
 - HTML listing sources return HTTP 200 even when they yield zero links, so status codes alone do not prove a source works. Verify new or re-pointed HTML endpoints by running `extractArticleLinks` against the live page and confirming a non-zero link count.
 - Scoring jobs create a `scoring_jobs` row at start and update it per batch with scored/failed counts.
-- Scoring jobs should read batch size, per-run document cap, preferred model, and ordered model candidates from `packages/shared/src/scoring-config.ts`.
+- Scoring jobs read batch size and per-run document cap from `packages/shared/src/scoring-config.ts`, but model candidates come from the module-level `ScoringModelPool` singleton (discovery + circuit breaker), with `OPENROUTER_MODEL` appended as the final fallback. Every call must report its outcome back through `pool.recordSuccess`/`pool.recordFailure`, or the breaker never learns and parked models are re-probed on every batch.
 - Scoring jobs may receive `documentIds` to restrict work to newly inserted documents; broad scoring should stay bounded by worker max-document and lookback env controls.
 - The shared LLM scoring prompt asks for a 1-100 relevance score plus a `whyRelevant` explanation per document.
-- Retry OpenRouter on 429 and 5xx with exponential backoff (up to 3 retries).
+- Retry OpenRouter on 429 and 5xx with exponential backoff (up to 3 retries), except that any failure from a free-tier (`:free`) candidate falls through to the next model immediately, with no backoff. That policy lives in `decideRetry`/`isFreeTierModel`/`extractBodyError` in `@ai-intel/shared`; call it rather than re-deriving status checks here.
+- Scoring requests must set a 60s `AbortSignal.timeout`, because a hung free-pool endpoint would otherwise stall the whole scoring job. A failed candidate must `break` to the next model, never `throw`, or the remaining pool and the paid backstop are skipped.
 - Newsletter jobs must check `newsletter_sends` before sending so worker restarts do not duplicate a user's daily email.
 - Newsletter jobs should ensure active users have a default first profile before selecting recipients, then prefer the active profile marked `is_default`.
 - Newsletter story selection ranks scored documents from the last 24 hours, caps stories per source domain and total count, and falls back to the most recently discovered unscored documents when no scored stories qualify.
