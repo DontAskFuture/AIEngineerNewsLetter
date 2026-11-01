@@ -11,7 +11,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - `docs` holds product and implementation notes that explain intent rather than runtime behavior.
 
 ## Core Runtime Flow
-1. Curated sources (currently ~90) are defined in `packages/shared/src/default-sources.ts`; the worker reseeds this registry on startup and deactivates sources/endpoints that drop out of the seed list, so retired sources stop being crawled without deleting history.
+1. Curated sources (currently 122) are defined in `packages/shared/src/default-sources.ts`; the worker reseeds this registry on startup and deactivates sources/endpoints that drop out of the seed list, so retired sources stop being crawled without deleting history. The web app lists those sources in a concise footer.
 2. The worker fetches endpoints and writes `fetch_jobs`, `fetch_attempts`, `raw_documents`, and `documents`.
 3. The worker scores documents against user interest profiles via OpenRouter, writing `document_scores` and tracking progress in `scoring_jobs`.
 4. The worker sends daily SendPulse newsletter emails using each active user's default active profile, falling back to the first active profile, then records successful sends in `newsletter_sends`.

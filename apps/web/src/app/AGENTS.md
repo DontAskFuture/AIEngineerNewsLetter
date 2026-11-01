@@ -5,7 +5,7 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 
 ## Architecture
 - This folder is the HTTP entry surface for the web app.
-- `layout.tsx` defines shared chrome and bootstraps the global light/dark theme state for the app shell.
+- `layout.tsx` defines shared chrome, bootstraps the global light/dark theme state for the app shell, and renders `source-list.tsx` as a concise footer of every seeded source, grouped by category and linked to each source homepage.
 - Route folders own page composition and route-local server actions.
 - `auth-actions.ts` owns top-level login and logout mutations; `login/` and `signup/` render the forms that call into it.
 - `signup/page.tsx` is the invite-gated account creation form; it has no dedicated AGENTS.md and is governed by this file plus `../lib/auth`. Its entrypoint is intentionally not linked from app chrome.
@@ -22,3 +22,4 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 - Move complex business logic into `../lib`.
 - Route protection should happen at page entry, not deep in child components.
 - Shared visual primitives such as theme-aware buttons, panels, and section separation should be driven from `globals.css` and reused consistently across routes.
+- The source footer should keep reading `defaultSources` from `@ai-intel/shared` so the public list matches the seed registry without a database round trip. Keep it to grouped names and homepage links.

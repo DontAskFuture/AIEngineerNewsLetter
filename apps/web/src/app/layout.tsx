@@ -5,6 +5,7 @@ import Link from "next/link";
 import Script from "next/script";
 import { logoutAction } from "@/app/auth-actions";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { SourceList } from "./source-list";
 import { ThemeToggle } from "./theme-toggle";
 import "./globals.css";
 
@@ -106,6 +107,7 @@ export default async function RootLayout({
             </header>
           </div>
           {children}
+          <SourceList />
         </div>
       </body>
     </html>

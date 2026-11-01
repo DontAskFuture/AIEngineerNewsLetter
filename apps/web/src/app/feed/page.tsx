@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
-import { getDashboardSnapshot } from "@/lib/dashboard";
 import {
   formatCategoryLabel,
   formatDateTime,
@@ -58,8 +57,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         ? "You need at least one active profile. Create another profile before deleting this one."
       : null;
 
-  const [snapshot, personalizedFeed, savedDocumentIds] = await Promise.all([
-    getDashboardSnapshot(),
+  const [personalizedFeed, savedDocumentIds] = await Promise.all([
     currentUser
       ? getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow, currentUser.id)
       : getPublicAiEngineerFeedSnapshot(timeWindow),
@@ -467,70 +465,6 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           showWhyRelevant={personalizedFeed.showWhyRelevant}
         />
       )}
-
-      <section className="glass-card rounded-[2rem] p-6 sm:p-8">
-        <details>
-          <summary className="cursor-pointer list-none">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-                  Source registry
-                </p>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-                  The shortlist above rides on top of the same live registry, crawl stats, and normalized
-                  documents from the worker pipeline.
-                </p>
-              </div>
-              <p className="text-sm text-[color:var(--muted)]">
-                {snapshot.overview.sourceCount} sources across {snapshot.overview.endpointCount} endpoints
-              </p>
-            </div>
-          </summary>
-
-          <div className="mt-6 grid gap-4">
-            {snapshot.sourceRegistry.map((source) => (
-              <article key={source.id} className="surface-panel rounded-[1.5rem] p-5 sm:p-6">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="display-font text-2xl font-semibold tracking-tight">{source.name}</h2>
-                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.18em]">
-                        {formatCategoryLabel(source.category)}
-                      </span>
-                    </div>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)] sm:text-base">
-                      {summarizeText(source.description, "This source was seeded and fetched successfully.")}
-                    </p>
-                  </div>
-                  <div className="grid gap-2 text-sm text-[color:var(--muted)] sm:text-right">
-                    <p>{source.documentCount} documents captured</p>
-                    <p>latest document {formatRelativeTime(source.latestDocumentAt)}</p>
-                    <p>trust tier {source.trustTier}</p>
-                  </div>
-                </div>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {source.endpoints.map((endpoint) => (
-                    <div key={endpoint.id} className="surface-panel-strong rounded-2xl p-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                        {endpoint.kind}
-                      </p>
-                      <p className="mt-2 break-all text-sm leading-6 text-[color:var(--muted)]">{endpoint.url}</p>
-                      <div className="mt-4 space-y-1 text-xs text-[color:var(--muted)]">
-                        <p>cadence every {endpoint.cadenceMinutes} minutes</p>
-                        <p>
-                          {endpoint.totalRuns} runs, {formatPercent(endpoint.successRate)} success
-                        </p>
-                        <p>latest fetch {formatRelativeTime(endpoint.latestFetchAt)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </details>
-      </section>
     </main>
   );
 }

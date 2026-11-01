@@ -133,7 +133,7 @@ a {
   max-width: 80rem;
   flex-direction: column;
   gap: 1.5rem;
-  padding: 1rem 1.5rem 4rem;
+  padding: 1rem 1.5rem 2rem;
 }
 
 .header-shell {
@@ -314,6 +314,6 @@ a {
 @media (min-width: 640px) {
   .page-shell {
     gap: 2rem;
-    padding: 1.25rem 2.5rem 4.5rem;
+    padding: 1.25rem 2.5rem 2.5rem;
   }
 }
