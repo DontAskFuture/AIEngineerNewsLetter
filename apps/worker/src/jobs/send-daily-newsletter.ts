@@ -3,7 +3,7 @@ import { getDb, schema } from "@ai-intel/db";
 import type { SendDailyNewsletterPayload } from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
 import { logger } from "../logger";
-import { sendTransactionalEmail } from "../services/sendpulse";
+import { sendTransactionalEmail } from "../services/smtp";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const MAX_CANDIDATE_DOCUMENTS = 200;

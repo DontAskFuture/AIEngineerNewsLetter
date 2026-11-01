@@ -6,7 +6,7 @@ This file applies to `apps/worker/src/services`.
 ## Architecture
 - Services hold worker-specific domain helpers that are broader than a single job step.
 - `source-registry.ts` owns source registry seeding and synchronization behavior.
-- `sendpulse.ts` owns transactional email delivery through the SendPulse REST API.
+- `smtp.ts` owns transactional email delivery through authenticated SMTP submission (Gmail on port 587 by default).
 
 ## Implementation Guidance
 - Keep services focused on domain operations rather than process control.

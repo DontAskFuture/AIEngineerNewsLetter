@@ -34,7 +34,7 @@ function getLocalDateHour(timeZone: string) {
 }
 
 function hasNewsletterConfig(env: ReturnType<typeof loadWorkerEnv>) {
-  return Boolean(env.SENDPULSE_CLIENT_ID && env.SENDPULSE_CLIENT_SECRET && env.SENDPULSE_FROM_EMAIL);
+  return Boolean(env.SMTP_USER && env.SMTP_PASSWORD && env.SMTP_FROM_EMAIL);
 }
 
 async function enqueueDueFetches(boss: PgBoss) {
@@ -113,7 +113,7 @@ async function runFetchJob(job: Job<FetchSourceEndpointPayload>, boss: PgBoss) {
 
 async function enqueueDueNewsletter(boss: PgBoss, env: ReturnType<typeof loadWorkerEnv>) {
   if (!hasNewsletterConfig(env)) {
-    logger.info("Daily newsletter is disabled because SendPulse env vars are not configured");
+    logger.info("Daily newsletter is disabled because SMTP env vars are not configured");
     return;
   }
 

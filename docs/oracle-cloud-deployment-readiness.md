@@ -31,7 +31,7 @@ Do not spend effort re-checking these.
 | Build-time DB dependency | **None** — every route is `force-dynamic`, so `next build` needs no `DATABASE_URL` | Build output: all 9 routes marked `ƒ` |
 | Secret hygiene | `.env` and `.secrets/` are untracked; only `.env.example` is committed | `git ls-files` |
 | Inbound network surface | **Zero ports required.** Cloudflare Tunnel is the only ingress; Postgres and web bind to `127.0.0.1` | `docker-compose.yml:18,73` |
-| Outbound email | SendPulse is REST-over-HTTPS, unaffected by OCI's default port-25 block | `apps/worker/src/services/sendpulse.ts` |
+| Outbound email | Authenticated SMTP submission on port 587, so OCI's default port-25 block does not apply | `apps/worker/src/services/smtp.ts` |
 | Tunnel token handling | Mounted from an ignored local file via Compose `secrets`, not interpolated into the command | `docker-compose.yml:82-84,129-130` |
 
 ---

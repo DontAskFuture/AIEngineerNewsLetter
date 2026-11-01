@@ -78,6 +78,9 @@ importers:
       jsdom:
         specifier: ^29.0.2
         version: 29.0.2
+      nodemailer:
+        specifier: ^10.3.1
+        version: 10.3.1
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -2437,6 +2440,10 @@ packages:
 
   node-releases@2.0.38:
     resolution: {integrity: sha512-3qT/88Y3FbH/Kx4szpQQ4HzUbVrHPKTLVpVocKiLfoYvw9XSGOX2FmD2d6DrXbVYyAQTF2HeF6My8jmzx7/CRw==}
+
+  nodemailer@10.3.1:
+    resolution: {integrity: sha512-uF0AFsJC07Y1vdW7p580DKAnh7rAO+4UPSSB3mDCPNDufoiaOebV6JmrzpxB14OjEEEiBsNdYoM2Y+fN8M7BBA==}
+    engines: {node: '>=20.0.0'}
 
   non-error@0.1.0:
     resolution: {integrity: sha512-TMB1uHiGsHRGv1uYclfhivcnf0/PdFp2pNqRxXjncaAsjYMoisaQJI+SSZCqRq+VliwRTC8tsMQfmrWjDMhkPQ==}
@@ -5169,6 +5176,8 @@ snapshots:
       semver: 6.3.1
 
   node-releases@2.0.38: {}
+
+  nodemailer@10.3.1: {}
 
   non-error@0.1.0: {}
 

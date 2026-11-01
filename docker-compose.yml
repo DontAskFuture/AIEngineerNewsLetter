@@ -111,10 +111,12 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash-0731}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       APP_TIME_ZONE: ${APP_TIME_ZONE:-America/Los_Angeles}
-      SENDPULSE_CLIENT_ID: ${SENDPULSE_CLIENT_ID:-}
-      SENDPULSE_CLIENT_SECRET: ${SENDPULSE_CLIENT_SECRET:-}
-      SENDPULSE_FROM_EMAIL: ${SENDPULSE_FROM_EMAIL:-}
-      SENDPULSE_FROM_NAME: ${SENDPULSE_FROM_NAME:-AI Builder Intelligence}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-AI Builder Intelligence}
       NODE_ENV: production
     volumes:
       - raw_data:/app/var/raw

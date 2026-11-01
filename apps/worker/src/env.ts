@@ -35,11 +35,12 @@ const envSchema = z.object({
   OPENROUTER_MODEL: z.string().default("deepseek/deepseek-v4-flash-0731"),
   APP_BASE_URL: z.string().default("http://localhost:3000"),
   APP_TIME_ZONE: z.string().default("America/Los_Angeles"),
-  SENDPULSE_API_BASE_URL: z.string().url().default("https://api.sendpulse.com"),
-  SENDPULSE_CLIENT_ID: optionalString,
-  SENDPULSE_CLIENT_SECRET: optionalString,
-  SENDPULSE_FROM_EMAIL: optionalEmail,
-  SENDPULSE_FROM_NAME: z.string().default("AI Builder Intelligence"),
+  SMTP_HOST: z.string().default("smtp.gmail.com"),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: optionalString,
+  SMTP_PASSWORD: optionalString,
+  SMTP_FROM_EMAIL: optionalEmail,
+  SMTP_FROM_NAME: z.string().default("AI Builder Intelligence"),
 });
 
 let cachedEnv: z.infer<typeof envSchema> | undefined;

@@ -14,3 +14,4 @@ This file applies to `docs` and its subdirectories unless a deeper file override
 - Do not treat this directory as a source of truth for current runtime behavior; prefer the code-adjacent `AGENTS.md` files for that.
 - Update the relevant doc here when product direction, scope, or roadmap phases materially change.
 - New planning documents belong here rather than scattered in the repo root.
+- Keep the deployment runbook's newsletter env vars aligned with the worker SMTP settings (`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`).

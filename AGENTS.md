@@ -14,7 +14,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 1. Curated sources (currently 122) are defined in `packages/shared/src/default-sources.ts`; the worker reseeds this registry on startup and deactivates sources/endpoints that drop out of the seed list, so retired sources stop being crawled without deleting history. The web app lists those sources in a concise footer.
 2. The worker fetches endpoints and writes `fetch_jobs`, `fetch_attempts`, `raw_documents`, and `documents`.
 3. The worker scores documents against user interest profiles via OpenRouter, writing `document_scores` and tracking progress in `scoring_jobs`.
-4. The worker sends daily SendPulse newsletter emails using each active user's default active profile, falling back to the first active profile, then records successful sends in `newsletter_sends`.
+4. The worker sends daily newsletter emails over SMTP using each active user's default active profile, falling back to the first active profile, then records successful sends in `newsletter_sends`.
 5. The web app reads normalized tables for dashboards and the personalized feed.
 6. Auth is handled in the web app with `auth_users`, `auth_sessions`, and an `HttpOnly` session cookie.
 7. Personalized ranking uses pre-computed `document_scores` joined with `documents` and `sources`, filtered by a time window (day/week/month/quarter/year).
@@ -26,7 +26,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - The worker's default fetch enqueue interval is 60 minutes, while endpoint-specific `cadenceMinutes` still controls per-endpoint singleton throttling.
 - Crawl jobs default to 5 local pg-boss fetch workers per worker process; scoring stays separately queued.
 - Scoring uses a singleton key per profile to prevent duplicate concurrent scoring.
-- Newsletter sends require SendPulse credentials in the worker environment and are deduped by user/date.
+- Newsletter sends require `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` in the worker environment and are deduped by user/date.
 - Crawled documents and raw payloads are pruned by the worker according to `CRAWLED_DOCUMENT_TTL_DAYS`, capped at 365 days, with cleanup batch/interval env controls.
 - Crawl-triggered scoring should pass newly inserted document IDs so profile scoring stays bounded to fresh work; broad scoring is additionally capped by scoring max/lookback env controls.
 

@@ -69,7 +69,7 @@ Edit `.env` and set at minimum:
 | `APP_BASE_URL` | `https://<your-tunnel-hostname>` once step 5 is set up. |
 | `CRAWLED_DOCUMENT_TTL_DAYS` | Keep at 30 unless `raw_data` is on a volume sized for more (see readiness doc §4.3). |
 | `OPENROUTER_API_KEY` | Required for scoring and briefings. |
-| `SENDPULSE_CLIENT_ID` / `SENDPULSE_CLIENT_SECRET` / `SENDPULSE_FROM_EMAIL` | Required for the daily newsletter send. |
+| `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM_EMAIL` | Required for the daily newsletter send. Defaults to Gmail submission on port 587. |
 
 ## 5. Set up the Cloudflare Tunnel
 
