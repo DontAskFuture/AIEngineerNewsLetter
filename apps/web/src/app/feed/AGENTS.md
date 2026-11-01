@@ -21,7 +21,8 @@ This file applies to `apps/web/src/app/feed`.
 - After read state is applied for signed-in users, stories marked read are removed from the top-10 shortlist and the next unread candidates backfill those slots.
 - Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s `AI Engineer` profile; profile management stays signed-in only.
 - The anonymous public-profile row should use a contact CTA to `mailto:michael@audivolt.ai` rather than a sign-in CTA.
-- Preserve clear visual separation between feed hero controls, profile editing, top stories, more stories, and source registry, and keep those surfaces theme-aware.
+- Preserve clear visual separation between feed hero controls, profile editing, top stories, and more stories, and keep those surfaces theme-aware.
+- The public source list lives in the root layout footer. Do not rebuild the old per-source crawl-stats registry on this page; operational source health stays on `/admin`.
 - Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.
 - Profile creation and update should preserve the user’s current feed window and make the selected profile obvious in the interest chip list.
 - Users can choose their default feed profile; the default is used only when no explicit `profile` URL param is present.

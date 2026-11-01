@@ -22,7 +22,7 @@ This file applies to `apps/worker/src/jobs`.
 - HTML listing pages should use bounded-concurrency article fetches through the shared fetch helper rather than ad hoc sequential `fetch()` calls.
 - HTML article extraction should preserve publication dates from common article/meta tags when available instead of relying only on discovery time.
 - Source-specific HTML extraction should use endpoint `parserKey` selectors where known and fall back to the generic same-path strategy only for simple listing pages.
-- Add a `parserKey` only when the generic same-path strategy fails, which happens when a listing page links to sibling sections (Epoch AI) or is served from the site root so the listing path is empty (LMArena).
+- Add a `parserKey` only when the generic same-path strategy fails, which happens when a listing page links to sibling sections (Epoch AI, Physical Intelligence's `/blog` and `/research`) or is served from the site root so the listing path is empty (LMArena).
 - A listing page that links only to off-domain URLs cannot produce documents, because `extractArticleLinks` enforces same-origin. Prefer a feed, or drop the source, rather than adding a parser for it.
 - HTML listing sources return HTTP 200 even when they yield zero links, so status codes alone do not prove a source works. Verify new or re-pointed HTML endpoints by running `extractArticleLinks` against the live page and confirming a non-zero link count.
 - Scoring jobs create a `scoring_jobs` row at start and update it per batch with scored/failed counts.

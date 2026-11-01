@@ -45,6 +45,13 @@ export const htmlParserConfigs: Record<string, HtmlParserConfig> = {
     selectors: ['a[href^="/blog/"]'],
     pathPattern: /^\/blog\/[^/]+\/?$/,
   },
+  // Physical Intelligence publishes model notes under /blog and papers under
+  // /research from the same listing, so the generic same-path strategy drops
+  // the research posts.
+  "physical-intelligence": {
+    selectors: ['a[href^="/blog/"]', 'a[href^="/research/"]'],
+    pathPattern: /^\/(blog|research)\/[^/]+\/?$/,
+  },
 };
 
 export function getHtmlParserConfig(parserKey: string | null): HtmlParserConfig | undefined {
