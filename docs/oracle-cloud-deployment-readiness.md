@@ -168,11 +168,11 @@ Defaults are `FETCH_WORKER_CONCURRENCY=5`, each fanning out to `HTML_ARTICLE_FET
 | Shape | Spec | Verdict |
 |---|---|---|
 | `VM.Standard.E2.1.Micro` | 1 OCPU / **1 GB** RAM, x86 | **Not viable.** The worker alone can exceed 1 GB during a crawl burst, and the 758 MB Next build would not complete alongside the OS. |
-| `VM.Standard.A1.Flex` | up to 4 OCPU / **24 GB** RAM, arm64 | **Comfortable.** Steady state across postgres + web + worker + cloudflared + OS is roughly 1–1.5 GB, peaking ~2 GB. Roughly 10× headroom. |
+| `VM.Standard.A1.Flex` | Always Free cap **2 OCPU / 12 GB**, arm64 | **Fits.** Steady state is roughly 1–1.5 GB, peaking ~2 GB. Use the full free allotment and no more. |
 
 Whole-stack estimate on A1: Postgres ~150–250 MB, web (`next start`) ~150–300 MB, worker 173 MB baseline with ~1 GB peaks, cloudflared ~30–50 MB, OS + Docker daemon ~300–500 MB.
 
-Even a reduced A1 slice (1 OCPU / 6 GB) is sufficient. CPU is not the constraint — crawling is mostly I/O bound and 4 OCPU is ample for 90 hourly sources.
+Even a reduced A1 slice (1 OCPU / 6 GB) is sufficient. CPU is not the constraint — crawling is mostly I/O bound and the free 2 OCPU allotment is ample for 90 hourly sources. Provision the full 2 OCPU / 12 GB anyway: it is the same $0, and it leaves room for the Next.js build.
 
 ### 7.4 Storage against the free allowance
 
@@ -183,7 +183,7 @@ Always Free includes **200 GB total block storage** (50 GB minimum boot volume).
 
 ### 7.5 Caveats
 
-- These are figures for **this workstation's** CPU and Node build; Ampere cores are slower per-core, so the build takes longer (memory is comparable, and 24 GB absorbs it either way).
+- These are figures for **this workstation's** CPU and Node build; Ampere cores are slower per-core, so the build takes longer (memory is comparable, and 12 GB absorbs it either way).
 - Ampere A1 Always Free capacity is frequently exhausted in popular regions ("Out of host capacity"). Securing the shape may take retries or a different region — plan for this before committing to a deploy window.
 - Oracle has changed Always Free terms over time. Verify current allocations against Oracle's documentation rather than treating the numbers here as contractual.
 
@@ -196,7 +196,7 @@ Always Free includes **200 GB total block storage** (50 GB minimum boot volume).
 Two constraints follow:
 
 - The Next.js build needs roughly 2 GB RAM. Add swap if the shape is small.
-- The 1 GB `E2.1.Micro` Always Free shape is **not viable** for this stack (see §5.2). The Ampere A1 Always Free allocation (up to 4 OCPU / 24 GB) is the right target.
+- The 1 GB `E2.1.Micro` Always Free shape is **not viable** for this stack (see §5.2). The Ampere A1 Always Free allocation is **2 OCPU / 12 GB** (Oracle's Always Free page as of 2026-11-02; earlier drafts of this doc said 4 OCPU / 24 GB). That is the right target. Do not allocate more.
 
 **Networking:** no OCI Security List or NSG ingress rules are needed beyond SSH. Cloudflare Tunnel dials outbound. Do not open port 3000.
 
@@ -220,5 +220,5 @@ Two constraints follow:
 
 ## 10. Open decisions
 
-- ~~**OCI shape and architecture.**~~ **Resolved 2026-07-25 by measurement (§7):** Ampere A1 (arm64) is required; the 1 GB `E2.1.Micro` is not viable. Remaining risk is A1 capacity availability, not fit.
+- ~~**OCI shape and architecture.**~~ **Resolved 2026-07-25 by measurement (§7), cap corrected 2026-11-02:** Ampere A1 (arm64) is required; the 1 GB `E2.1.Micro` is not viable. Always Free Ampere is 2 OCPU and 12 GB, which still fits the measured ~2 GB peak. Remaining risk is A1 capacity availability, not fit.
 - **Raw payload retention.** A 21-day TTL on the boot volume, or long retention on a dedicated Block Volume — these are the two coherent options; 365 days on the boot disk is not.

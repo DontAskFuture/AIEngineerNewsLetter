@@ -9,9 +9,12 @@ cannot hold the worker's crawl-time memory peaks.
 
 ## 1. Provision the VM
 
-1. In OCI, create a `VM.Standard.A1.Flex` instance (2+ OCPU / 12+ GB RAM is a
-   comfortable starting point; see §7 of the readiness doc for sizing).
-   Use the **Canonical Ubuntu 24.04 (aarch64)** image. Prefer it over Oracle
+1. In OCI, create a `VM.Standard.A1.Flex` instance at **exactly 2 OCPU and
+   12 GB RAM**. That is the entire Always Free Ampere allotment (1,500
+   OCPU-hours and 9,000 GB-hours per month). The measured stack peaks around
+   2 GB, so 12 GB fits. Allocating more than 2 OCPU or 12 GB leaves Always
+   Free and bills on a Pay As You Go account. Create it in the tenancy home
+   region. Use the **Canonical Ubuntu 24.04 (aarch64)** image. Prefer it over Oracle
    Linux here: it's RHEL-based and adds `firewalld`/SELinux friction with
    Docker that buys nothing for this stack, since Cloudflare Tunnel is the
    only ingress path. Ubuntu also matches the Docker install command in
