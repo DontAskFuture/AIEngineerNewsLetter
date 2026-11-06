@@ -1,4 +1,4 @@
-import { scoringConfig } from "@ai-intel/shared";
+import { extractDocumentPreview, formatWhyRelevant, scoringConfig } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
 import { desc, eq, notInArray, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
@@ -14,47 +14,6 @@ export type { ScoringJobState } from "@/lib/scoring-tracker";
 export { getScoringJobState } from "@/lib/scoring-tracker";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
-
-function stripHtml(value: string): string {
-  return value
-    .replace(/<\/(p|div|li|section|article|h[1-6])>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-}
-
-function extractPreview(summary: string | null, bodyText: string | null): string {
-  const bodyParagraphs = bodyText
-    ? stripHtml(bodyText)
-        .split(/\n\s*\n/)
-        .map((p) => p.trim())
-        .filter(Boolean)
-    : [];
-
-  if (bodyParagraphs.length > 0) {
-    return bodyParagraphs[0]!.slice(0, 300);
-  }
-
-  const summaryText = summary ? stripHtml(summary) : "";
-  return summaryText ? summaryText.slice(0, 300) : "";
-}
-
-function formatWhyRelevant(result: { whyRelevant: string; confidence: string | null; matchedSignals: string[] }) {
-  const metadata = [
-    result.confidence ? `Confidence: ${result.confidence}` : null,
-    result.matchedSignals.length > 0 ? `Signals: ${result.matchedSignals.join(", ")}` : null,
-  ].filter(Boolean);
-
-  return metadata.length > 0
-    ? `${result.whyRelevant}\n\n${metadata.join(" | ")}`
-    : result.whyRelevant;
-}
 
 export interface ScoringProgress {
   totalUnscored: number;
@@ -74,6 +33,7 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
   const [profile] = await db
     .select({
       id: schema.userProfiles.id,
+      displayName: schema.userProfiles.displayName,
       interestStatement: schema.userProfiles.interestStatement,
     })
     .from(schema.userProfiles)
@@ -126,7 +86,7 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
       const candidates: InterestRankingCandidate[] = batch.map((doc) => ({
         id: doc.id,
         title: doc.title,
-        previewParagraph: extractPreview(doc.summary, doc.bodyText),
+        previewParagraph: extractDocumentPreview(doc.summary, doc.bodyText),
         sourceName: doc.sourceName,
         sourceCategory: doc.sourceCategory,
         publishedAt: doc.sortTime,
@@ -134,13 +94,12 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
 
       try {
         const result = await scoreDocumentBatch({
+          profileName: profile.displayName,
           interestStatement: profile.interestStatement,
           candidates,
         });
 
-        const validScores = result.scores.filter((s) =>
-          batch.some((doc) => doc.id === s.documentId),
-        );
+        const validScores = result.scores;
 
         if (validScores.length > 0) {
           await db

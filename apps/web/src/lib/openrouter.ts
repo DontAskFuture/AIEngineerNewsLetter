@@ -3,10 +3,14 @@ import {
   decideRetry,
   extractBodyError,
   isFreeTierModel,
-  renderRankDocumentsPrompt,
+  parseScoreDocumentsResponse,
+  parseSummarizeTopStoriesResponse,
   renderScoreDocumentsPrompt,
   renderSummarizeTopStoriesPrompt,
   selectSummaryModelCandidates,
+  type ParsedDocumentScore,
+  type ParsedTopStoriesSummary,
+  type PromptCandidate,
   type TopStoriesSummaryCandidate,
 } from "@ai-intel/shared";
 import { loadWebEnv } from "@/lib/env";
@@ -18,43 +22,9 @@ const INITIAL_BACKOFF_MS = 1000;
 // timeout is treated like any other model failure.
 const REQUEST_TIMEOUT_MS = 60_000;
 
-export interface InterestRankingCandidate {
-  id: number;
-  title: string;
-  previewParagraph: string;
-  sourceName?: string | null;
-  sourceCategory?: string | null;
-  publishedAt?: string | Date | null;
-}
-
-export interface InterestRankingSelection {
-  documentId: number;
-  score: number;
-  confidence: "high" | "medium" | "low" | null;
-  matchedSignals: string[];
-  whyRelevant: string;
-}
-
-export interface InterestRankingResponse {
-  shortlistSummary: string;
-  selectedDocuments: InterestRankingSelection[];
-}
-
-export interface ProfileTopStoriesSummaryResponse {
-  summary: string;
-  takeaways: string[];
-  furtherStudy: string;
-}
-
-function extractJson(rawText: string): string {
-  const trimmed = rawText.trim();
-  if (trimmed.startsWith("{")) return trimmed;
-
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  if (match) return match[0];
-
-  throw new SyntaxError(`No JSON object found in LLM response: ${trimmed.slice(0, 200)}...`);
-}
+export type InterestRankingCandidate = PromptCandidate;
+export type BatchScoreResult = ParsedDocumentScore;
+export type ProfileTopStoriesSummaryResponse = ParsedTopStoriesSummary;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -81,13 +51,14 @@ async function resolveScoringCandidates(): Promise<{ models: string[]; pool: Sco
   return { models: [...pool.candidates(), env.openRouterModel], pool };
 }
 
-async function chatCompletion(
+async function chatCompletion<T>(
   systemPrompt: string,
   userMessage: string,
   maxTokens: number,
+  parse: (content: string) => T,
   modelCandidates?: string[],
   pool?: ScoringModelPool,
-): Promise<{ content: string; model: string; responseId: string | null }> {
+): Promise<{ parsed: T; model: string; responseId: string | null }> {
   const env = loadWebEnv();
 
   if (!env.openRouterApiKey) {
@@ -110,6 +81,7 @@ async function chatCompletion(
       model,
       temperature: 0.1,
       max_tokens: maxTokens,
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
@@ -212,10 +184,20 @@ async function chatCompletion(
         break;
       }
 
+      let parsed: T;
+      try {
+        parsed = parse(content);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Invalid JSON response");
+        pool?.recordFailure(model, 502);
+        console.warn(`[openrouter] ${model} returned invalid JSON contract: ${lastError.message}`);
+        break;
+      }
+
       pool?.recordSuccess(model);
 
       return {
-        content,
+        parsed,
         model: typeof payload.model === "string" ? payload.model : model,
         responseId: typeof payload.id === "string" ? payload.id : null,
       };
@@ -223,89 +205,6 @@ async function chatCompletion(
   }
 
   throw lastError ?? new Error("OpenRouter request failed after retries");
-}
-
-function parseRankingResponse(rawText: string) {
-  const parsed = JSON.parse(extractJson(rawText)) as unknown;
-  const parsedRecord = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-
-  const selectedDocuments = Array.isArray(parsedRecord?.selectedDocuments)
-    ? parsedRecord.selectedDocuments
-        .map((selection) => {
-          if (!selection || typeof selection !== "object") {
-            return null;
-          }
-
-          const record = selection as Record<string, unknown>;
-          const documentId = Number(record.documentId);
-          const score = Number(record.score);
-          const confidence = parseConfidence(record.confidence);
-          const matchedSignals = parseMatchedSignals(record.matchedSignals);
-          const whyRelevant = typeof record.whyRelevant === "string" ? record.whyRelevant.trim() : "";
-
-          if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) {
-            return null;
-          }
-
-          return {
-            documentId,
-            score: Math.max(1, Math.min(100, Math.round(score))),
-            confidence,
-            matchedSignals,
-            whyRelevant,
-          };
-        })
-        .filter((selection): selection is InterestRankingSelection => selection !== null)
-    : [];
-
-  return {
-    shortlistSummary:
-      typeof parsedRecord?.shortlistSummary === "string" && parsedRecord.shortlistSummary.trim().length > 0
-        ? parsedRecord.shortlistSummary.trim()
-        : "Selected the stories that best match the saved interest profile.",
-    selectedDocuments,
-  } satisfies InterestRankingResponse;
-}
-
-function parseTopStoriesSummaryResponse(rawText: string): ProfileTopStoriesSummaryResponse {
-  const parsed = JSON.parse(extractJson(rawText)) as unknown;
-  const parsedRecord = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-  const summary = typeof parsedRecord?.summary === "string" ? parsedRecord.summary.trim() : "";
-  const furtherStudy = typeof parsedRecord?.furtherStudy === "string" ? parsedRecord.furtherStudy.trim() : "";
-  const takeaways = Array.isArray(parsedRecord?.takeaways)
-    ? parsedRecord.takeaways
-        .map((takeaway) => (typeof takeaway === "string" ? takeaway.trim() : ""))
-        .filter(Boolean)
-        .slice(0, 4)
-    : [];
-
-  return {
-    summary: summary || "The current top stories are relevant to the selected profile, but no concise summary was returned.",
-    takeaways,
-    furtherStudy:
-      furtherStudy ||
-      "Use the top stories as a reading list: compare the recurring technologies, companies, and product decisions they mention, then follow the highest-signal topics into primary docs, technical posts, benchmarks, and market analysis.",
-  };
-}
-
-export async function rankDocumentsForInterest({
-  interestStatement,
-  candidates,
-}: {
-  interestStatement: string;
-  candidates: InterestRankingCandidate[];
-}) {
-  const prompt = renderRankDocumentsPrompt({ interestStatement, candidates });
-
-  const { models, pool } = await resolveScoringCandidates();
-  const result = await chatCompletion(prompt.system, prompt.user, 3500, models, pool);
-  const ranking = parseRankingResponse(result.content);
-
-  return {
-    model: result.model,
-    responseId: result.responseId,
-    ranking,
-  };
 }
 
 export async function summarizeTopStoriesForProfile({
@@ -319,83 +218,46 @@ export async function summarizeTopStoriesForProfile({
 }): Promise<{ model: string; responseId: string | null; summary: ProfileTopStoriesSummaryResponse }> {
   const prompt = renderSummarizeTopStoriesPrompt({ profileName, interestStatement, candidates });
   const env = loadWebEnv();
-  const result = await chatCompletion(prompt.system, prompt.user, 2000, [
-    ...selectSummaryModelCandidates(),
-    env.openRouterModel,
-  ]);
+  const result = await chatCompletion(
+    prompt.system,
+    prompt.user,
+    2000,
+    parseSummarizeTopStoriesResponse,
+    [...selectSummaryModelCandidates(), env.openRouterModel],
+  );
 
   return {
     model: result.model,
     responseId: result.responseId,
-    summary: parseTopStoriesSummaryResponse(result.content),
+    summary: result.parsed,
   };
 }
 
-export interface BatchScoreResult {
-  documentId: number;
-  score: number;
-  confidence: "high" | "medium" | "low" | null;
-  matchedSignals: string[];
-  whyRelevant: string;
-}
-
-function parseConfidence(value: unknown) {
-  return value === "high" || value === "medium" || value === "low" ? value : null;
-}
-
-function parseMatchedSignals(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((signal) => (typeof signal === "string" ? signal.trim() : ""))
-    .filter(Boolean)
-    .slice(0, 4);
-}
-
-function parseBatchScoreResponse(rawText: string): BatchScoreResult[] {
-  const parsed = JSON.parse(extractJson(rawText)) as unknown;
-  const parsedRecord = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-
-  const scores = Array.isArray(parsedRecord?.scores) ? parsedRecord.scores : [];
-
-  return scores
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return null;
-
-      const record = entry as Record<string, unknown>;
-      const documentId = Number(record.documentId);
-      const score = Number(record.score);
-      const confidence = parseConfidence(record.confidence);
-      const matchedSignals = parseMatchedSignals(record.matchedSignals);
-      const whyRelevant = typeof record.whyRelevant === "string" ? record.whyRelevant.trim() : "";
-
-      if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) return null;
-
-      return {
-        documentId,
-        score: Math.max(1, Math.min(100, Math.round(score))),
-        confidence,
-        matchedSignals,
-        whyRelevant,
-      };
-    })
-    .filter((entry): entry is BatchScoreResult => entry !== null);
-}
-
 export async function scoreDocumentBatch({
+  profileName,
   interestStatement,
   candidates,
 }: {
+  profileName?: string | null | undefined;
   interestStatement: string;
   candidates: InterestRankingCandidate[];
 }): Promise<{ model: string; scores: BatchScoreResult[] }> {
-  const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
+  const prompt = renderScoreDocumentsPrompt({
+    profileName: profileName ?? null,
+    interestStatement,
+    candidates,
+  });
+  const allowedIds = new Set(candidates.map((c) => c.id));
 
   const { models, pool } = await resolveScoringCandidates();
-  const result = await chatCompletion(prompt.system, prompt.user, 4000, models, pool);
-  const scores = parseBatchScoreResponse(result.content);
+  const result = await chatCompletion(
+    prompt.system,
+    prompt.user,
+    4000,
+    (content) => parseScoreDocumentsResponse(content, allowedIds),
+    models,
+    pool,
+  );
 
-  return { model: result.model, scores };
+  return { model: result.model, scores: result.parsed };
 }

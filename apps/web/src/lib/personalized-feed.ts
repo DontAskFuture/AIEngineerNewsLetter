@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SourceCategory } from "@ai-intel/shared";
+import { DEFAULT_FURTHER_STUDY_TEXT, extractDocumentPreview, type SourceCategory } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
 import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
@@ -13,7 +13,7 @@ const MAX_PER_SOURCE = 5;
 const MAX_FRESHNESS_BOOST = 20;
 const PUBLIC_FEED_OWNER_EMAIL = "lianglingfan@gmail.com";
 const PUBLIC_FEED_PROFILE_SLUG = "founding-analyst";
-const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v3";
+const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v4";
 const TOP_STORIES_SUMMARY_CACHE_TTL_HOURS = 24;
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
@@ -268,34 +268,11 @@ function selectDefaultProfile(profiles: FeedUserProfile[]) {
   return profiles.find((profile) => profile.isDefault);
 }
 
-function stripHtml(value: string) {
-  return value
-    .replace(/<\/(p|div|li|section|article|h[1-6])>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-}
-
 function extractFirstParagraph(summary: string | null, bodyText: string | null) {
-  const bodyParagraphs = bodyText
-    ? stripHtml(bodyText)
-        .split(/\n\s*\n/)
-        .map((paragraph) => paragraph.trim())
-        .filter(Boolean)
-    : [];
-
-  if (bodyParagraphs.length > 0) {
-    return bodyParagraphs[0]!.slice(0, 420);
-  }
-
-  const summaryText = summary ? stripHtml(summary) : "";
-  return summaryText ? summaryText.slice(0, 420) : "No first paragraph was extracted yet.";
+  return extractDocumentPreview(summary, bodyText, {
+    maxChars: 600,
+    fallback: "No first paragraph was extracted yet.",
+  });
 }
 
 
@@ -382,7 +359,7 @@ function parseTopStoriesSummaryCachePayload(
     furtherStudy:
       typeof record.furtherStudy === "string" && record.furtherStudy.trim()
         ? record.furtherStudy.trim()
-        : "Use the top stories as a reading list: compare the recurring technologies, companies, and product decisions they mention, then follow the highest-signal topics into primary docs, technical posts, benchmarks, and market analysis.",
+        : DEFAULT_FURTHER_STUDY_TEXT,
   };
 }
 

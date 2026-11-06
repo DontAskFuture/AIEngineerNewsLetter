@@ -4,9 +4,13 @@ import {
   ScoringModelPool,
   decideRetry,
   extractBodyError,
+  extractDocumentPreview,
+  formatWhyRelevant,
   isFreeTierModel,
+  parseScoreDocumentsResponse,
   renderScoreDocumentsPrompt,
   scoringConfig,
+  type ParsedDocumentScore,
   type PromptCandidate,
   type ScoreDocumentsPayload,
 } from "@ai-intel/shared";
@@ -21,71 +25,6 @@ const INITIAL_BACKOFF_MS = 1000;
 const REQUEST_TIMEOUT_MS = 60_000;
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-function stripHtml(value: string): string {
-  return value
-    .replace(/<\/(p|div|li|section|article|h[1-6])>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-}
-
-function extractPreview(summary: string | null, bodyText: string | null): string {
-  const bodyParagraphs = bodyText
-    ? stripHtml(bodyText).split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
-    : [];
-  if (bodyParagraphs.length > 0) return bodyParagraphs[0]!.slice(0, 300);
-  const summaryText = summary ? stripHtml(summary) : "";
-  return summaryText ? summaryText.slice(0, 300) : "";
-}
-
-interface ScoreResult {
-  documentId: number;
-  score: number;
-  confidence: "high" | "medium" | "low" | null;
-  matchedSignals: string[];
-  whyRelevant: string;
-}
-
-function parseConfidence(value: unknown) {
-  return value === "high" || value === "medium" || value === "low" ? value : null;
-}
-
-function parseMatchedSignals(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((signal) => (typeof signal === "string" ? signal.trim() : ""))
-    .filter(Boolean)
-    .slice(0, 4);
-}
-
-function formatWhyRelevant(result: ScoreResult) {
-  const metadata = [
-    result.confidence ? `Confidence: ${result.confidence}` : null,
-    result.matchedSignals.length > 0 ? `Signals: ${result.matchedSignals.join(", ")}` : null,
-  ].filter(Boolean);
-
-  return metadata.length > 0
-    ? `${result.whyRelevant}\n\n${metadata.join(" | ")}`
-    : result.whyRelevant;
-}
-
-function extractJson(rawText: string): string {
-  const trimmed = rawText.trim();
-  if (trimmed.startsWith("{")) return trimmed;
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  if (match) return match[0];
-  throw new SyntaxError(`No JSON object found in LLM response: ${trimmed.slice(0, 200)}...`);
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -104,11 +43,16 @@ function getScoringPool(): ScoringModelPool {
   return scoringPool;
 }
 
-async function callLlm(interestStatement: string, candidates: PromptCandidate[]): Promise<{ model: string; scores: ScoreResult[] }> {
+async function callLlm(
+  profileName: string | null,
+  interestStatement: string,
+  candidates: PromptCandidate[],
+): Promise<{ model: string; scores: ParsedDocumentScore[] }> {
   const env = loadWorkerEnv();
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
 
-  const prompt = renderScoreDocumentsPrompt({ interestStatement, candidates });
+  const prompt = renderScoreDocumentsPrompt({ profileName, interestStatement, candidates });
+  const allowedIds = new Set(candidates.map((c) => c.id));
   const headers = {
     Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
     "Content-Type": "application/json",
@@ -131,6 +75,7 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
       model,
       temperature: 0.1,
       max_tokens: 4000,
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: prompt.system },
         { role: "user", content: prompt.user },
@@ -230,23 +175,15 @@ async function callLlm(interestStatement: string, candidates: PromptCandidate[])
         break;
       }
 
-      const parsed = JSON.parse(extractJson(content)) as unknown;
-      const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-      const rawScores = Array.isArray(record?.scores) ? record.scores : [];
-
-      const scores: ScoreResult[] = rawScores
-        .map((entry) => {
-          if (!entry || typeof entry !== "object") return null;
-          const r = entry as Record<string, unknown>;
-          const documentId = Number(r.documentId);
-          const score = Number(r.score);
-          const confidence = parseConfidence(r.confidence);
-          const matchedSignals = parseMatchedSignals(r.matchedSignals);
-          const whyRelevant = typeof r.whyRelevant === "string" ? r.whyRelevant.trim() : "";
-          if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) return null;
-          return { documentId, score: Math.max(1, Math.min(100, Math.round(score))), confidence, matchedSignals, whyRelevant };
-        })
-        .filter((e): e is ScoreResult => e !== null);
+      let scores: ParsedDocumentScore[];
+      try {
+        scores = parseScoreDocumentsResponse(content, allowedIds);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Invalid scoring JSON response");
+        pool.recordFailure(model, 502);
+        logger.warn({ model, msg: lastError.message }, "OpenRouter returned invalid scoring JSON, falling through");
+        break;
+      }
 
       pool.recordSuccess(model);
       return { model: typeof payload.model === "string" ? payload.model : model, scores };
@@ -265,7 +202,11 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
   );
 
   const [profile] = await db
-    .select({ id: schema.userProfiles.id, interestStatement: schema.userProfiles.interestStatement })
+    .select({
+      id: schema.userProfiles.id,
+      displayName: schema.userProfiles.displayName,
+      interestStatement: schema.userProfiles.interestStatement,
+    })
     .from(schema.userProfiles)
     .where(eq(schema.userProfiles.id, profileId))
     .limit(1);
@@ -325,15 +266,15 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
       const candidates: PromptCandidate[] = batch.map((doc) => ({
         id: doc.id,
         title: doc.title,
-        previewParagraph: extractPreview(doc.summary, doc.bodyText),
+        previewParagraph: extractDocumentPreview(doc.summary, doc.bodyText),
         sourceName: doc.sourceName,
         sourceCategory: doc.sourceCategory,
         publishedAt: doc.sortTime,
       }));
 
       try {
-        const result = await callLlm(profile.interestStatement, candidates);
-        const validScores = result.scores.filter((s) => batch.some((doc) => doc.id === s.documentId));
+        const result = await callLlm(profile.displayName, profile.interestStatement, candidates);
+        const validScores = result.scores;
 
         if (validScores.length > 0) {
           await db
