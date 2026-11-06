@@ -15,6 +15,9 @@ import { isFreeTierModel } from "./openrouter-retry";
 /** A 20-document batch is a few thousand tokens; this is a generous floor. */
 export const DISCOVERY_MIN_CONTEXT = 32_768;
 
+/** A 20-document scoring response requires up to ~2000 output tokens. */
+export const DISCOVERY_MIN_COMPLETION_TOKENS = 2_048;
+
 /** Keeps worst-case fall-through latency bounded when the whole pool is cold. */
 export const DISCOVERY_DEFAULT_LIMIT = 6;
 
@@ -41,6 +44,18 @@ function readCandidate(entry: unknown): CandidateModel | null {
 
   const contextLength = typeof record.context_length === "number" ? record.context_length : 0;
   if (contextLength < DISCOVERY_MIN_CONTEXT) return null;
+
+  const topProvider =
+    record.top_provider && typeof record.top_provider === "object"
+      ? (record.top_provider as Record<string, unknown>)
+      : null;
+  const maxCompletionTokens =
+    typeof topProvider?.max_completion_tokens === "number"
+      ? topProvider.max_completion_tokens
+      : null;
+  if (maxCompletionTokens !== null && maxCompletionTokens > 0 && maxCompletionTokens < DISCOVERY_MIN_COMPLETION_TOKENS) {
+    return null;
+  }
 
   // The scoring prompt depends on the model honoring a JSON response contract.
   const supported = Array.isArray(record.supported_parameters) ? record.supported_parameters : [];

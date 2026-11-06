@@ -108,7 +108,7 @@ export function MoreStories({
                   <a
                     href={`/out/${document.id}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="display-font mt-1 block text-lg font-semibold tracking-tight"
                   >
                     {document.title}

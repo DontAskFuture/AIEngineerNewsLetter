@@ -61,7 +61,7 @@ export function ReadListDocuments({ stories, filter }: ReadListDocumentsProps) {
               <a
                 href={`/out/${story.id}`}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="display-font mt-2 block text-2xl font-semibold tracking-tight"
               >
                 {story.title}

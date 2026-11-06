@@ -1,6 +1,23 @@
 import type { NextConfig } from "next";
 
+const isHttpsBaseUrl = Boolean(process.env.APP_BASE_URL?.startsWith("https://"));
+
+const cspDirectives = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: https:",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  ...(isHttpsBaseUrl ? ["upgrade-insecure-requests"] : []),
+];
+
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   transpilePackages: ["@ai-intel/db", "@ai-intel/shared"],
   async headers() {
     return [
@@ -9,19 +26,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "frame-ancestors 'none'",
-              "img-src 'self' data: https:",
-              "script-src 'self' 'unsafe-inline'",
-              "style-src 'self' 'unsafe-inline'",
-              "font-src 'self'",
-              "connect-src 'self'",
-              "object-src 'none'",
-              "upgrade-insecure-requests",
-            ].join("; "),
+            value: cspDirectives.join("; "),
           },
           {
             key: "Referrer-Policy",
@@ -39,10 +44,14 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=(), payment=()",
           },
-          {
-            key: "Strict-Transport-Security",
-            value: "max-age=31536000; includeSubDomains",
-          },
+          ...(isHttpsBaseUrl
+            ? [
+                {
+                  key: "Strict-Transport-Security",
+                  value: "max-age=31536000; includeSubDomains",
+                },
+              ]
+            : []),
         ],
       },
     ];

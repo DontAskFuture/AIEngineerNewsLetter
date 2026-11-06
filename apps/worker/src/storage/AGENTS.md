@@ -9,6 +9,7 @@ This file applies to `apps/worker/src/storage`.
 
 ## Implementation Guidance
 - Keep the adapter boundary small and stable.
+- Validate `contentHash` (`64` hex chars) before constructing filesystem paths so storage keys cannot escape `RAW_STORAGE_DIR`.
 - Preserve enough metadata to support replay, diffing, and migration to object storage later.
 - Do not mix normalization logic into storage helpers.
 

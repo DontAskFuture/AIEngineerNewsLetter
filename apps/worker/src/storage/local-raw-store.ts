@@ -19,9 +19,13 @@ function extensionForMimeType(mimeType: string) {
 }
 
 export async function persistRawPayload(contentHash: string, mimeType: string, body: string) {
+  if (!/^[a-f0-9]{64}$/i.test(contentHash)) {
+    throw new Error("Invalid contentHash format");
+  }
+  const normalizedHash = contentHash.toLowerCase();
   const env = loadWorkerEnv();
-  const nestedDir = join(env.RAW_STORAGE_DIR, contentHash.slice(0, 2), contentHash.slice(2, 4));
-  const storageKey = join(nestedDir, `${contentHash}${extensionForMimeType(mimeType)}`);
+  const nestedDir = join(env.RAW_STORAGE_DIR, normalizedHash.slice(0, 2), normalizedHash.slice(2, 4));
+  const storageKey = join(nestedDir, `${normalizedHash}${extensionForMimeType(mimeType)}`);
 
   await mkdir(dirname(storageKey), { recursive: true });
   await writeFile(storageKey, body, "utf8");

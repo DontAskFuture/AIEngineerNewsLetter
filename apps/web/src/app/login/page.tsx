@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { getAllowedEmailLabel, getCurrentUser, getSafeRedirectPath } from "@/lib/auth";
+import { getCurrentUser, getSafeRedirectPath } from "@/lib/auth";
 import { loginAction } from "@/app/auth-actions";
 
 export const dynamic = "force-dynamic";
@@ -54,9 +53,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </h1>
           <div className="mt-6 space-y-4 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
             <p>
-              This workspace is currently closed to one approved email address. For now, only{" "}
-              <span className="font-medium text-[color:var(--ink)]">{getAllowedEmailLabel()}</span> can create an
-              account or sign back in.
+              This workspace is restricted to approved email addresses configured on the server.
             </p>
             <p>
               The first approved login will create the account in Postgres. Passwords are stored as salted
@@ -94,6 +91,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 id="email"
                 name="email"
                 type="email"
+                required
+                maxLength={254}
                 autoComplete="email"
                 defaultValue={email}
                 className="field-shell px-4 py-3 text-sm"
@@ -108,6 +107,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 id="password"
                 name="password"
                 type="password"
+                required
+                maxLength={256}
                 autoComplete="current-password"
                 className="field-shell px-4 py-3 text-sm"
               />

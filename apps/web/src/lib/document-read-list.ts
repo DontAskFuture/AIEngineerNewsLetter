@@ -1,36 +1,8 @@
-import type { SourceCategory } from "@ai-intel/shared";
+import { extractDocumentPreview, type SourceCategory } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { applyReadStateToDocuments } from "@/lib/read-tracking";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
-
-function stripHtml(value: string): string {
-  return value
-    .replace(/<\/(p|div|li|section|article|h[1-6])>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function extractPreview(summary: string | null, bodyText: string | null): string {
-  const bodyParagraphs = bodyText
-    ? stripHtml(bodyText)
-        .split(/\n\s*\n/)
-        .map((paragraph) => paragraph.trim())
-        .filter(Boolean)
-    : [];
-
-  if (bodyParagraphs.length > 0) {
-    return bodyParagraphs[0]!.slice(0, 300);
-  }
-
-  const summaryText = summary ? stripHtml(summary) : "";
-  return summaryText ? summaryText.slice(0, 300) : "";
-}
 
 export type ReadListFilter = "all" | "unread";
 
@@ -103,31 +75,40 @@ export async function getReadListSnapshot(
       title: schema.documents.title,
       canonicalUrl: schema.documents.canonicalUrl,
       summary: schema.documents.summary,
-      bodyText: schema.documents.bodyText,
+      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
       sourceName: schema.sources.name,
       sourceSlug: schema.sources.slug,
       category: schema.sources.category,
       sortTime: documentSortKey,
+      readAt: schema.documentReads.readAt,
     })
     .from(schema.userDocumentReadList)
     .innerJoin(schema.documents, eq(schema.documents.id, schema.userDocumentReadList.documentId))
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .leftJoin(
+      schema.documentReads,
+      and(
+        eq(schema.documentReads.documentId, schema.documents.id),
+        eq(schema.documentReads.userId, userId),
+      ),
+    )
     .where(eq(schema.userDocumentReadList.userId, userId))
     .orderBy(desc(schema.userDocumentReadList.createdAt));
 
-  const baseStories = savedRows.map((row) => ({
+  const storiesWithReadState: ReadListStory[] = savedRows.map((row) => ({
     id: row.id,
     title: row.title,
     canonicalUrl: row.canonicalUrl,
     sourceName: row.sourceName,
     sourceSlug: row.sourceSlug,
     category: row.category,
-    sortTime: row.sortTime,
+    sortTime: new Date(row.sortTime),
     savedAt: row.savedAt,
-    previewParagraph: extractPreview(row.summary, row.bodyText),
+    previewParagraph: extractDocumentPreview(row.summary, row.bodyText, { maxChars: 300 }),
+    isRead: row.readAt != null,
+    readAt: row.readAt ?? null,
   }));
 
-  const storiesWithReadState = await applyReadStateToDocuments(userId, baseStories);
   const unreadCount = storiesWithReadState.filter((story) => !story.isRead).length;
 
   const stories =

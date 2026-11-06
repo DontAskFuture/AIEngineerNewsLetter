@@ -26,7 +26,7 @@ This file applies to `apps/web/src/app/feed`.
 - Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.
 - Profile creation and update should preserve the user’s current feed window and make the selected profile obvious in the interest chip list.
 - Users can choose their default feed profile; the default is used only when no explicit `profile` URL param is present.
-- Profile creation and selected-profile editing live in one combined profile workspace rather than separate page sections.
+- Profile creation and selected-profile editing live in one combined profile workspace rather than separate page sections, enforcing client/server `maxLength` bounds (`80` for display names, `2000` for interest statements).
 - Profile-specific uncontrolled form fields and expandable story sections should be keyed by selected profile so browser state does not leak across profile switches.
 - Duplicate profile-name errors are surfaced through feed URL params so server actions can keep using redirects instead of client action state.
 - Profile deletes should be soft deletes (`is_active=false`) and redirect to a remaining profile; the UI should prevent deleting the last active profile with a clear error.

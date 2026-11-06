@@ -36,7 +36,7 @@ export function SourceList() {
                   <a
                     href={source.baseUrl}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     title={source.description}
                     className="underline-offset-2 hover:text-[color:var(--ink)] hover:underline"
                   >

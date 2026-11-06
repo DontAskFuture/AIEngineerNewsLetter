@@ -1,6 +1,11 @@
-import { extractDocumentPreview, formatWhyRelevant, scoringConfig } from "@ai-intel/shared";
+import {
+  deduplicateScoringCandidates,
+  extractDocumentPreview,
+  formatWhyRelevant,
+  scoringConfig,
+} from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { desc, eq, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, notInArray, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
 import type { InterestRankingCandidate } from "@/lib/openrouter";
 import { scoreDocumentBatch } from "@/lib/openrouter";
@@ -14,6 +19,8 @@ export type { ScoringJobState } from "@/lib/scoring-tracker";
 export { getScoringJobState } from "@/lib/scoring-tracker";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
+const DEFAULT_LOOKBACK_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface ScoringProgress {
   totalUnscored: number;
@@ -48,28 +55,40 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
     .select({ documentId: schema.documentScores.documentId })
     .from(schema.documentScores)
     .where(eq(schema.documentScores.profileId, profileId));
+  const cutoff = new Date(Date.now() - DEFAULT_LOOKBACK_DAYS * DAY_MS);
 
   const unscoredDocs = await db
     .select({
       id: schema.documents.id,
       title: schema.documents.title,
       summary: schema.documents.summary,
-      bodyText: schema.documents.bodyText,
+      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
       sourceName: schema.sources.name,
       sourceCategory: schema.sources.category,
       sortTime: documentSortKey,
     })
     .from(schema.documents)
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-    .where(notInArray(schema.documents.id, alreadyScoredIds))
+    .where(
+      and(
+        notInArray(schema.documents.id, alreadyScoredIds),
+        gt(documentSortKey, cutoff),
+      ),
+    )
     .orderBy(desc(documentSortKey), desc(schema.documents.id))
     .limit(scoringConfig.maxDocumentsPerRun);
+
+  const docsWithPreviews = unscoredDocs.map((doc) => ({
+    ...doc,
+    previewParagraph: extractDocumentPreview(doc.summary, doc.bodyText),
+  }));
+  const deduplicatedGroups = deduplicateScoringCandidates(docsWithPreviews);
 
   const progress: ScoringProgress = {
     totalUnscored: unscoredDocs.length,
     scored: 0,
     failed: 0,
-    batches: Math.ceil(unscoredDocs.length / scoringConfig.batchSize),
+    batches: Math.ceil(deduplicatedGroups.length / scoringConfig.batchSize),
   };
 
   if (unscoredDocs.length === 0) {
@@ -77,35 +96,64 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
   }
 
   const jobId = await startScoringJob(profileId, unscoredDocs.length, progress.batches);
+  let lastBatchError: string | null = null;
 
   try {
-    for (let i = 0; i < unscoredDocs.length; i += scoringConfig.batchSize) {
-      const batch = unscoredDocs.slice(i, i + scoringConfig.batchSize);
+    for (let i = 0; i < deduplicatedGroups.length; i += scoringConfig.batchSize) {
+      const batchGroups = deduplicatedGroups.slice(i, i + scoringConfig.batchSize);
       const batchNumber = Math.floor(i / scoringConfig.batchSize) + 1;
+      const batchDocumentCount = batchGroups.reduce(
+        (sum, group) => sum + group.duplicateIds.length,
+        0,
+      );
 
-      const candidates: InterestRankingCandidate[] = batch.map((doc) => ({
-        id: doc.id,
-        title: doc.title,
-        previewParagraph: extractDocumentPreview(doc.summary, doc.bodyText),
-        sourceName: doc.sourceName,
-        sourceCategory: doc.sourceCategory,
-        publishedAt: doc.sortTime,
-      }));
+      const duplicateTargetIdsByRepresentative = new Map<number, number[]>();
+      const uniqueCandidates: InterestRankingCandidate[] = batchGroups.map((group) => {
+        const doc = group.representative;
+        duplicateTargetIdsByRepresentative.set(doc.id, group.duplicateIds);
+        return {
+          id: doc.id,
+          title: doc.title,
+          previewParagraph: doc.previewParagraph,
+          sourceName: doc.sourceName,
+          sourceCategory: doc.sourceCategory,
+          publishedAt: doc.sortTime,
+        };
+      });
 
       try {
         const result = await scoreDocumentBatch({
           profileName: profile.displayName,
           interestStatement: profile.interestStatement,
-          candidates,
+          candidates: uniqueCandidates,
         });
 
-        const validScores = result.scores;
+        const expandedScores = result.scores.flatMap((s) => {
+          const targetIds = duplicateTargetIdsByRepresentative.get(s.documentId) ?? [s.documentId];
+          return targetIds.map((documentId) => ({
+            ...s,
+            documentId,
+          }));
+        });
 
-        if (validScores.length > 0) {
+        const [currentProfile] = await db
+          .select({ interestStatement: schema.userProfiles.interestStatement })
+          .from(schema.userProfiles)
+          .where(eq(schema.userProfiles.id, profileId))
+          .limit(1);
+
+        if (
+          !currentProfile ||
+          currentProfile.interestStatement.trim() !== profile.interestStatement.trim()
+        ) {
+          break;
+        }
+
+        if (expandedScores.length > 0) {
           await db
             .insert(schema.documentScores)
             .values(
-              validScores.map((s) => ({
+              expandedScores.map((s) => ({
                 documentId: s.documentId,
                 profileId,
                 score: s.score,
@@ -123,28 +171,33 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
               },
             });
 
-          progress.scored += validScores.length;
+          progress.scored += expandedScores.length;
         }
 
-        const missedCount = batch.length - validScores.length;
+        const missedCount = Math.max(0, batchDocumentCount - expandedScores.length);
         if (missedCount > 0) {
           progress.failed += missedCount;
         }
 
-        await updateScoringBatch(jobId, batchNumber, validScores.length, missedCount);
+        await updateScoringBatch(jobId, batchNumber, expandedScores.length, missedCount);
 
         console.log(
-          `[scoring] Batch ${batchNumber}/${progress.batches}: scored ${validScores.length}/${batch.length} docs`,
+          `[scoring] Batch ${batchNumber}/${progress.batches}: scored ${expandedScores.length}/${batchDocumentCount} docs`,
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
+        lastBatchError = message;
         console.error(`[scoring] Batch ${batchNumber} failed:`, message);
-        progress.failed += batch.length;
-        await updateScoringBatch(jobId, batchNumber, 0, batch.length);
+        progress.failed += batchDocumentCount;
+        await updateScoringBatch(jobId, batchNumber, 0, batchDocumentCount);
       }
     }
 
-    await completeScoringJob(jobId);
+    if (progress.scored === 0 && progress.failed > 0) {
+      await failScoringJob(jobId, lastBatchError ?? "All scoring batches failed");
+    } else {
+      await completeScoringJob(jobId);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     await failScoringJob(jobId, message);
@@ -157,14 +210,13 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
 export async function getScoringStats(profileId: number) {
   const db = getDb();
 
-  const [totalResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.documents);
-
-  const [scoredResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.documentScores)
-    .where(eq(schema.documentScores.profileId, profileId));
+  const [[totalResult], [scoredResult]] = await Promise.all([
+    db.select({ count: sql<number>`count(*)::int` }).from(schema.documents),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.documentScores)
+      .where(eq(schema.documentScores.profileId, profileId)),
+  ]);
 
   const totalDocs = totalResult?.count ?? 0;
   const scoredDocs = scoredResult?.count ?? 0;
@@ -187,8 +239,12 @@ export interface SourceScoringStatus {
   maxScore: number | null;
 }
 
-export async function getScoringStatsBySource(profileId: number): Promise<SourceScoringStatus[]> {
+export async function getScoringStatsBySource(profileId?: number | null): Promise<SourceScoringStatus[]> {
   const db = getDb();
+  const profileCondition =
+    typeof profileId === "number"
+      ? sql`${profileId}`
+      : sql`(SELECT id FROM user_profiles WHERE is_active = true ORDER BY id ASC LIMIT 1)`;
 
   const rows = await db.execute(sql`
     SELECT
@@ -203,7 +259,7 @@ export async function getScoringStatsBySource(profileId: number): Promise<Source
     FROM sources s
     INNER JOIN documents d ON d.source_id = s.id
     LEFT JOIN document_scores ds
-      ON ds.document_id = d.id AND ds.profile_id = ${profileId}
+      ON ds.document_id = d.id AND ds.profile_id = ${profileCondition}
     WHERE s.is_active = true
     GROUP BY s.id, s.name
     ORDER BY s.name

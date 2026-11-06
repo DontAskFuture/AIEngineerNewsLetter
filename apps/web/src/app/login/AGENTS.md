@@ -11,7 +11,7 @@ This file applies to `apps/web/src/app/login`.
 - Keep login presentation here.
 - Signed-in visitors who land on login should redirect to a safe `next` path when provided, otherwise `/feed?window=week`.
 - Login accepts `?next=/read-list?...` so middleware-blocked read-list visits return after sign-in.
-- Keep brute-force feedback generic and route lockout behavior through `../../lib/auth`.
+- Keep brute-force feedback generic, avoid rendering raw `AUTH_ALLOWED_EMAILS` on the unauthenticated login page, enforce `required`/`maxLength` on email and password inputs, and route lockout behavior through `../../lib/auth`.
 - Authentication rules, hashing, sessions, and allowlist behavior belong in `../../lib/auth`.
 - Do not add database logic directly to the page.
 - Hide signup links while signup is invite-gated.

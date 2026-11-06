@@ -18,7 +18,12 @@ function getTextField(formData: FormData, fieldName: string) {
   return typeof value === "string" ? value : "";
 }
 
-function buildAuthRedirect(path: string, email: string, errorCode?: string) {
+function buildAuthRedirect(
+  path: string,
+  email: string,
+  errorCode?: string,
+  nextPath?: string | null,
+) {
   const searchParams = new URLSearchParams();
 
   if (email) {
@@ -27,6 +32,10 @@ function buildAuthRedirect(path: string, email: string, errorCode?: string) {
 
   if (errorCode) {
     searchParams.set("error", errorCode);
+  }
+
+  if (nextPath) {
+    searchParams.set("next", nextPath);
   }
 
   const query = searchParams.toString();
@@ -42,6 +51,7 @@ async function getClientIpAddress() {
 export async function loginAction(formData: FormData) {
   const email = getTextField(formData, "email").trim().toLowerCase();
   const password = getTextField(formData, "password");
+  const nextPath = getSafeRedirectPath(getTextField(formData, "next"));
   const ipAddress = await getClientIpAddress();
 
   try {
@@ -49,27 +59,35 @@ export async function loginAction(formData: FormData) {
     await signInWithPassword(email, password);
     await recordLoginAttempt(email, ipAddress, true);
   } catch (error) {
-    await recordLoginAttempt(email, ipAddress, false);
-
-    if (error instanceof AuthError) {
-      redirect(buildAuthRedirect("/login", email, error.code));
+    if (!(error instanceof AuthError && error.code === "too_many_attempts")) {
+      await recordLoginAttempt(email, ipAddress, false);
     }
 
-    redirect(buildAuthRedirect("/login", email, "unknown"));
+    if (error instanceof AuthError) {
+      redirect(buildAuthRedirect("/login", email, error.code, nextPath));
+    }
+
+    redirect(buildAuthRedirect("/login", email, "unknown", nextPath));
   }
 
   revalidatePath("/", "layout");
-  const nextPath = getSafeRedirectPath(getTextField(formData, "next"));
   redirect(nextPath ?? "/feed?window=week");
 }
 
 export async function signupAction(formData: FormData) {
   const email = getTextField(formData, "email").trim().toLowerCase();
   const password = getTextField(formData, "password");
+  const ipAddress = await getClientIpAddress();
 
   try {
+    await assertLoginAttemptAllowed(email, ipAddress);
     await signUpWithPassword(email, password);
+    await recordLoginAttempt(email, ipAddress, true);
   } catch (error) {
+    if (!(error instanceof AuthError && error.code === "too_many_attempts")) {
+      await recordLoginAttempt(email, ipAddress, false);
+    }
+
     if (error instanceof AuthError) {
       redirect(buildAuthRedirect("/signup", email, error.code));
     }

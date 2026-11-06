@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "seed:sources": "tsx src/seed-sources.ts",
     "fetch:once": "tsx src/fetch-once.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

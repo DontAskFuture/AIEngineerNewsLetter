@@ -14,8 +14,8 @@ This file applies to `apps/worker` and its subdirectories unless a deeper file o
 
 ## Implementation Guidance
 - Favor deterministic behavior, retry safety, and append-only storage patterns.
-- Keep job orchestration in the job file; extract pure, dependency-light parsing helpers (for example listing-page link extraction) into their own module so they can be verified without a database.
-- Scoring jobs must be idempotent. Use upserts for `document_scores` and update `scoring_jobs` per batch.
+- Keep job orchestration in the job file; extract pure, dependency-light parsing helpers (for example listing-page link extraction) into their own module so they can be verified without a database via `pnpm --filter worker test`.
+- Scoring jobs must be idempotent. Use upserts for `document_scores`, re-verify the profile's interest statement before persisting batch results, and update `scoring_jobs` per batch.
 - OpenRouter calls use exponential backoff with retries on 429 and 5xx errors.
 - `OPENROUTER_API_KEY` has no default and scoring throws without it; `OPENROUTER_MODEL` and `APP_BASE_URL` fall back to working defaults.
 - Newsletter delivery requires `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL`; without them the worker logs and skips newsletter scheduling entirely. `SMTP_HOST` defaults to `smtp.gmail.com` and `SMTP_PORT` defaults to 587.

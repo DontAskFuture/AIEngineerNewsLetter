@@ -57,6 +57,13 @@ class FetchUnsupportedContentTypeError extends Error {
   }
 }
 
+class FetchBlockedUrlError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FetchBlockedUrlError";
+  }
+}
+
 function hashValue(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -113,9 +120,12 @@ function isUnsafeIpAddress(address: string) {
     return (
       normalized === "::1" ||
       normalized === "::" ||
+      normalized.startsWith("::ffff:") ||
+      normalized.startsWith("64:ff9b:") ||
       normalized.startsWith("fc") ||
       normalized.startsWith("fd") ||
-      normalized.startsWith("fe80:")
+      /^fe[89ab][0-9a-f]:/.test(normalized) ||
+      normalized.startsWith("ff")
     );
   }
 
@@ -124,11 +134,19 @@ function isUnsafeIpAddress(address: string) {
 
 function validateSourceUrl(url: URL, allowedDomain: string) {
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error(`Blocked unsupported source URL protocol: ${url.protocol}`);
+    throw new FetchBlockedUrlError(`Blocked unsupported source URL protocol: ${url.protocol}`);
+  }
+
+  if (url.username || url.password) {
+    throw new FetchBlockedUrlError("Blocked source URL containing embedded credentials");
+  }
+
+  if (url.port !== "" && url.port !== "80" && url.port !== "443") {
+    throw new FetchBlockedUrlError(`Blocked source URL using non-standard port: ${url.port}`);
   }
 
   if (!isAllowedHost(url.hostname, allowedDomain)) {
-    throw new Error(`Blocked source URL outside allowed domain ${allowedDomain}: ${url.hostname}`);
+    throw new FetchBlockedUrlError(`Blocked source URL outside allowed domain ${allowedDomain}: ${url.hostname}`);
   }
 }
 
@@ -137,7 +155,7 @@ async function validateSourceEgress(url: URL, allowedDomain: string) {
 
   const addresses = await lookup(url.hostname, { all: true, verbatim: false });
   if (addresses.length === 0 || addresses.some((entry) => isUnsafeIpAddress(entry.address))) {
-    throw new Error(`Blocked source URL resolving to an internal or unsafe address: ${url.hostname}`);
+    throw new FetchBlockedUrlError(`Blocked source URL resolving to an internal or unsafe address: ${url.hostname}`);
   }
 }
 
@@ -155,7 +173,11 @@ function getRetryDelayMs(attempt: number, response?: Response) {
 }
 
 function isNonRetryableFetchError(error: unknown) {
-  return error instanceof FetchBodyTooLargeError || error instanceof FetchUnsupportedContentTypeError;
+  return (
+    error instanceof FetchBodyTooLargeError ||
+    error instanceof FetchUnsupportedContentTypeError ||
+    error instanceof FetchBlockedUrlError
+  );
 }
 
 function isExpectedContentType(contentTypeHeader: string | null, expectedContent: ExpectedContent) {
@@ -235,6 +257,7 @@ async function fetchText(url: string, options: FetchTextOptions) {
     try {
       let currentUrl = new URL(url);
       await validateSourceEgress(currentUrl, options.allowedDomain);
+      const visitedUrls = new Set<string>([currentUrl.toString()]);
 
       let response: Response | null = null;
       for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
@@ -251,16 +274,22 @@ async function fetchText(url: string, options: FetchTextOptions) {
           break;
         }
 
+        await response.body?.cancel().catch(() => undefined);
+
         const location = response.headers.get("location");
         if (!location) {
           throw new FetchHttpError(response.status);
         }
 
         if (redirectCount === MAX_REDIRECTS) {
-          throw new Error(`Too many redirects while fetching ${url}`);
+          throw new FetchBlockedUrlError(`Too many redirects while fetching ${url}`);
         }
 
         currentUrl = new URL(location, currentUrl);
+        if (visitedUrls.has(currentUrl.toString())) {
+          throw new FetchBlockedUrlError(`Redirect loop detected while fetching ${url}`);
+        }
+        visitedUrls.add(currentUrl.toString());
         await validateSourceEgress(currentUrl, options.allowedDomain);
       }
 
@@ -285,7 +314,7 @@ async function fetchText(url: string, options: FetchTextOptions) {
 
       const body = await readBoundedText(response, options.maxBytes ?? MAX_ENDPOINT_RESPONSE_BYTES);
 
-      return { response, body };
+      return { response, body, finalUrl: currentUrl.toString() };
     } catch (error) {
       lastError = error;
 
@@ -571,13 +600,21 @@ async function upsertFeedDocuments(
       return [];
     }
 
-    const canonicalUrl = canonicalizeUrl(item.link ?? buildFallbackUrl(baseUrl, title, item.guid ?? null));
+    const rawLink = item.link?.trim() || null;
+    let resolvedLink: string | null = null;
+    let canonicalUrl: string;
+    try {
+      resolvedLink = rawLink ? new URL(rawLink, baseUrl).toString() : null;
+      canonicalUrl = canonicalizeUrl(resolvedLink ?? buildFallbackUrl(baseUrl, title, item.guid ?? null));
+    } catch {
+      return [];
+    }
     const { summary, bodyText } = extractFeedItemText(item);
     const sourcePublishedAt = toDate(item.isoDate ?? item.pubDate);
     const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
 
     return [{
-      articleUrl: item.link?.trim() || null,
+      articleUrl: resolvedLink,
       canonicalUrl,
       title,
       externalId: item.guid ?? null,

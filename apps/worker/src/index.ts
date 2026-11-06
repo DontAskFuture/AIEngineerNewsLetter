@@ -193,6 +193,7 @@ async function main() {
   );
 
   await enqueueDueFetches(boss);
+  await enqueueScoringForActiveProfiles(boss, "startup");
   await enqueueDueNewsletter(boss, env);
   await runCrawledDocumentCleanup();
 

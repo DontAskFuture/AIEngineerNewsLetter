@@ -1,6 +1,11 @@
-import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
-import type { SendDailyNewsletterPayload } from "@ai-intel/shared";
+import {
+  computeAdjustedStoryScore,
+  normalizeStoryTitle,
+  parseWhyRelevantMetadata,
+  type SendDailyNewsletterPayload,
+} from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
 import { logger } from "../logger";
 import { sendTransactionalEmail } from "../services/smtp";
@@ -9,6 +14,7 @@ const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}
 const MAX_CANDIDATE_DOCUMENTS = 200;
 const MAX_NEWSLETTER_STORIES = 10;
 const MAX_PER_SOURCE = 5;
+const MIN_NEWSLETTER_SCORE = 40;
 const defaultNewsletterProfile = {
   slug: "founding-analyst",
   displayName: "Founding analyst",
@@ -52,11 +58,29 @@ function formatDate(value: Date, timeZone: string) {
   }).format(value);
 }
 
+function sanitizeStoryUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.toString();
+    }
+  } catch {
+    // Fall through to safe placeholder
+  }
+  return "#";
+}
+
 function selectTopStories(stories: NewsletterStory[]) {
   const sourceCounts = new Map<string, number>();
+  const seenTitles = new Set<string>();
   const selected: NewsletterStory[] = [];
 
   for (const story of stories) {
+    const normalizedTitle = normalizeStoryTitle(story.title);
+    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
+      continue;
+    }
+
     const count = sourceCounts.get(story.sourceGroupKey) ?? 0;
 
     if (count >= MAX_PER_SOURCE) {
@@ -65,13 +89,16 @@ function selectTopStories(stories: NewsletterStory[]) {
 
     selected.push(story);
     sourceCounts.set(story.sourceGroupKey, count + 1);
+    if (normalizedTitle) {
+      seenTitles.add(normalizedTitle);
+    }
 
     if (selected.length >= MAX_NEWSLETTER_STORIES) {
       break;
     }
   }
 
-  return selected.sort((left, right) => right.sortTime.getTime() - left.sortTime.getTime());
+  return selected;
 }
 
 async function getRecipients() {
@@ -151,6 +178,7 @@ async function hasNewsletterBeenSent(userId: number, newsletterDate: string) {
 
 async function getRankedStories(profileId: number, cutoff: Date) {
   const db = getDb();
+  const now = Date.now();
   const rows = await db
     .select({
       id: schema.documents.id,
@@ -158,6 +186,7 @@ async function getRankedStories(profileId: number, cutoff: Date) {
       canonicalUrl: schema.documents.canonicalUrl,
       sourceName: schema.sources.name,
       sourceGroupKey: schema.sources.canonicalDomain,
+      trustTier: schema.sources.trustTier,
       sortTime: documentSortKey,
       score: schema.documentScores.score,
       whyRelevant: schema.documentScores.whyRelevant,
@@ -165,11 +194,50 @@ async function getRankedStories(profileId: number, cutoff: Date) {
     .from(schema.documentScores)
     .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-    .where(and(eq(schema.documentScores.profileId, profileId), gt(documentSortKey, cutoff)))
+    .where(
+      and(
+        eq(schema.documentScores.profileId, profileId),
+        gte(schema.documentScores.score, MIN_NEWSLETTER_SCORE),
+        gt(documentSortKey, cutoff),
+      ),
+    )
     .orderBy(desc(schema.documentScores.score), desc(documentSortKey))
     .limit(MAX_CANDIDATE_DOCUMENTS);
 
-  return selectTopStories(rows.map((row) => ({ ...row, sortTime: new Date(row.sortTime) })));
+  const scoredCandidates = rows
+    .map((row) => {
+      const sortTime = new Date(row.sortTime);
+      const parsedMeta = parseWhyRelevantMetadata(row.whyRelevant);
+      const adjustedScore = computeAdjustedStoryScore({
+        score: row.score,
+        sortTime,
+        cutoff,
+        now,
+        freshnessBoostMax: 12,
+        trustTier: row.trustTier,
+        confidence: parsedMeta.confidence,
+        minQualifyingScore: MIN_NEWSLETTER_SCORE,
+      });
+
+      return {
+        id: row.id,
+        title: row.title,
+        canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
+        sourceName: row.sourceName,
+        sourceGroupKey: row.sourceGroupKey,
+        sortTime,
+        score: row.score,
+        adjustedScore: adjustedScore ?? row.score,
+        whyRelevant: parsedMeta.whyRelevant || null,
+      };
+    })
+    .sort((a, b) => {
+      const scoreDiff = (b.adjustedScore ?? 0) - (a.adjustedScore ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return b.sortTime.getTime() - a.sortTime.getTime();
+    });
+
+  return selectTopStories(scoredCandidates);
 }
 
 async function getLatestFallbackStories(cutoff: Date) {
@@ -187,14 +255,17 @@ async function getLatestFallbackStories(cutoff: Date) {
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
     .where(gt(documentSortKey, cutoff))
     .orderBy(desc(documentSortKey))
-    .limit(MAX_NEWSLETTER_STORIES);
+    .limit(MAX_CANDIDATE_DOCUMENTS);
 
-  return rows.map((row) => ({
-    ...row,
-    sortTime: new Date(row.sortTime),
-    score: null,
-    whyRelevant: null,
-  }));
+  return selectTopStories(
+    rows.map((row) => ({
+      ...row,
+      canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
+      sortTime: new Date(row.sortTime),
+      score: null,
+      whyRelevant: null,
+    })),
+  );
 }
 
 function buildNewsletterHtml(recipient: NewsletterRecipient, stories: NewsletterStory[], newsletterDate: string) {
@@ -297,6 +368,9 @@ async function recordNewsletterSend(
 }
 
 export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewsletterPayload) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newsletterDate)) {
+    throw new Error(`Invalid newsletterDate format: ${newsletterDate}`);
+  }
   const env = loadWorkerEnv();
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const recipients = await getRecipients();

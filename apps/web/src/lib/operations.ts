@@ -1,7 +1,11 @@
 import { getDb, schema } from "@ai-intel/db";
 import { desc, eq, or, sql } from "drizzle-orm";
 
-const OBSERVED_QUEUE_NAMES = ["fetch-source-endpoint", "score-documents"] as const;
+const OBSERVED_QUEUE_NAMES = [
+  "fetch-source-endpoint",
+  "score-documents",
+  "send-daily-newsletter",
+] as const;
 
 export interface QueueJobSummary {
   name: string;
@@ -48,11 +52,33 @@ export interface QueueErrorLog {
   output: string | null;
 }
 
+export interface NewsletterSendLog {
+  id: number;
+  profileName: string | null;
+  recipientEmail: string;
+  newsletterDate: string;
+  storyCount: number;
+  sentAt: Date;
+}
+
+export interface SystemHygieneStats {
+  expiredSessionsCount: number;
+  expiredRankingCacheCount: number;
+  failedLoginAttempts24hCount: number;
+}
+
 export interface OperationsSnapshot {
   queueSummaries: QueueJobSummary[];
   crawlErrors: CrawlErrorLog[];
   scoringErrors: ScoringErrorLog[];
   queueErrors: QueueErrorLog[];
+  newsletterSummary: {
+    totalSent: number;
+    sentLast7Days: number;
+    latestSentAt: Date | null;
+  };
+  recentNewsletterSends: NewsletterSendLog[];
+  systemHygiene: SystemHygieneStats;
 }
 
 function emptyQueueSummary(name: string): QueueJobSummary {
@@ -82,7 +108,15 @@ function summarizeOutput(value: unknown): string | null {
 export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
   const db = getDb();
 
-  const [queueRows, crawlErrors, scoringErrors, queueErrorRows] = await Promise.all([
+  const [
+    queueRows,
+    crawlErrors,
+    scoringErrors,
+    queueErrorRows,
+    newsletterSummaryRows,
+    recentNewsletterSends,
+    hygieneRows,
+  ] = await Promise.all([
     db.execute<{
       name: string;
       state: string;
@@ -97,7 +131,7 @@ export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
             max(created_on) AS latest_created_at,
             max(completed_on) AS latest_completed_at
           FROM pgboss.job
-          WHERE name IN ('fetch-source-endpoint', 'score-documents')
+          WHERE name IN ('fetch-source-endpoint', 'score-documents', 'send-daily-newsletter')
             AND created_on > now() - interval '24 hours'
           GROUP BY name, state
           ORDER BY name, state`,
@@ -157,10 +191,44 @@ export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
             completed_on,
             output
           FROM pgboss.job
-          WHERE name IN ('fetch-source-endpoint', 'score-documents')
+          WHERE name IN ('fetch-source-endpoint', 'score-documents', 'send-daily-newsletter')
             AND (state = 'failed' OR output IS NOT NULL)
           ORDER BY created_on DESC
           LIMIT 20`,
+    ),
+    db.execute<{
+      total_sent: number;
+      sent_last_7d: number;
+      latest_sent_at: Date | null;
+    }>(
+      sql`SELECT
+            count(*)::int AS total_sent,
+            count(*) filter (where sent_at > now() - interval '7 days')::int AS sent_last_7d,
+            max(sent_at) AS latest_sent_at
+          FROM newsletter_sends`,
+    ),
+    db
+      .select({
+        id: schema.newsletterSends.id,
+        profileName: schema.userProfiles.displayName,
+        recipientEmail: schema.newsletterSends.recipientEmail,
+        newsletterDate: schema.newsletterSends.newsletterDate,
+        storyCount: schema.newsletterSends.storyCount,
+        sentAt: schema.newsletterSends.sentAt,
+      })
+      .from(schema.newsletterSends)
+      .leftJoin(schema.userProfiles, eq(schema.userProfiles.id, schema.newsletterSends.profileId))
+      .orderBy(desc(schema.newsletterSends.sentAt))
+      .limit(10),
+    db.execute<{
+      expired_sessions: number;
+      expired_ranking_cache: number;
+      failed_logins_24h: number;
+    }>(
+      sql`SELECT
+            (SELECT count(*)::int FROM auth_sessions WHERE expires_at <= now()) AS expired_sessions,
+            (SELECT count(*)::int FROM ranking_cache WHERE expires_at <= now()) AS expired_ranking_cache,
+            (SELECT count(*)::int FROM auth_login_attempts WHERE succeeded = false AND attempted_at > now() - interval '24 hours') AS failed_logins_24h`,
     ),
   ]);
 
@@ -189,6 +257,9 @@ export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
     summariesByName.set(row.name, summary);
   }
 
+  const newsletterRow = newsletterSummaryRows.rows[0];
+  const hygieneRow = hygieneRows.rows[0];
+
   return {
     queueSummaries: Array.from(summariesByName.values()),
     crawlErrors,
@@ -203,5 +274,27 @@ export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
       completedOn: row.completed_on ? new Date(row.completed_on) : null,
       output: summarizeOutput(row.output),
     })),
+    newsletterSummary: {
+      totalSent: Number(newsletterRow?.total_sent ?? 0),
+      sentLast7Days: Number(newsletterRow?.sent_last_7d ?? 0),
+      latestSentAt: newsletterRow?.latest_sent_at ? new Date(newsletterRow.latest_sent_at) : null,
+    },
+    recentNewsletterSends,
+    systemHygiene: {
+      expiredSessionsCount: Number(hygieneRow?.expired_sessions ?? 0),
+      expiredRankingCacheCount: Number(hygieneRow?.expired_ranking_cache ?? 0),
+      failedLoginAttempts24hCount: Number(hygieneRow?.failed_logins_24h ?? 0),
+    },
   };
+}
+
+export async function checkDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number }> {
+  const startedAt = Date.now();
+  try {
+    const db = getDb();
+    await db.execute(sql`SELECT 1`);
+    return { ok: true, latencyMs: Date.now() - startedAt };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - startedAt };
+  }
 }

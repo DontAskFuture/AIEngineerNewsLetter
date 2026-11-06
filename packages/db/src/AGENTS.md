@@ -13,7 +13,7 @@ This file applies to `packages/db/src`.
 - `user_profiles.is_default` stores the user's preferred default feed profile and is constrained so each user has at most one active default.
 - `newsletter_sends` records successful daily newsletter delivery per user/date to prevent duplicate emails.
 - `ranking_cache` stores a cached top-stories summary JSON blob per `(profile_id, candidates_hash)` with an `expires_at` TTL; it is read and written by the web app's personalized feed code.
-- `client.ts` owns pool and Drizzle client creation via `getPool`/`getDb`, and exposes `closePool` for teardown.
+- `client.ts` owns pool and Drizzle client creation via `getPool`/`getDb` (with bounded connection/idle timeouts, TCP keepAlive, an idle-client error listener, and `globalThis` reuse in development), and exposes `closePool` for teardown.
 - `index.ts` re-exports `client.ts` and the whole `schema.ts` module as `schema`.
 - `schema.ts` includes supporting indexes for feed sort order, profile-scoped score lookup, fetch history, and raw/document retention cleanup.
 

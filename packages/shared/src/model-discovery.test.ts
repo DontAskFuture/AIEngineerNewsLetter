@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DISCOVERY_MIN_CONTEXT, selectDiscoverableFreeModels } from "./model-discovery";
+import {
+  DISCOVERY_MIN_COMPLETION_TOKENS,
+  DISCOVERY_MIN_CONTEXT,
+  selectDiscoverableFreeModels,
+} from "./model-discovery";
 
 function model(overrides: Record<string, unknown> = {}) {
   return {
@@ -28,6 +32,19 @@ describe("selectDiscoverableFreeModels", () => {
   it("excludes models whose context cannot hold a scoring batch", () => {
     const tiny = model({ context_length: DISCOVERY_MIN_CONTEXT - 1 });
     assert.deepEqual(selectDiscoverableFreeModels([tiny]), []);
+  });
+
+  it("excludes models whose max_completion_tokens cannot hold a scoring batch response", () => {
+    const capped = model({
+      top_provider: { max_completion_tokens: DISCOVERY_MIN_COMPLETION_TOKENS - 1 },
+    });
+    const sufficient = model({
+      id: "vendor/uncapped:free",
+      top_provider: { max_completion_tokens: DISCOVERY_MIN_COMPLETION_TOKENS },
+    });
+    assert.deepEqual(selectDiscoverableFreeModels([capped, sufficient]), [
+      "vendor/uncapped:free",
+    ]);
   });
 
   it("excludes already-known models so the verified pool is not duplicated", () => {

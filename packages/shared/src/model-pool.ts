@@ -54,16 +54,18 @@ export class ScoringModelPool {
   }
 
   /** Verified free models, then discovered free models, then the paid backstop. */
-  #ordered(): string[] {
+  #ordered(fallbackModel?: string | null): string[] {
     const verified = [...scoringConfig.scoringModelCandidates];
     const backstop = verified.filter((model) => !isFreeTierModel(model));
     const verifiedFree = verified.filter((model) => isFreeTierModel(model));
+    const extraFallback =
+      fallbackModel && fallbackModel.trim().length > 0 ? [fallbackModel.trim()] : [];
 
-    return [...new Set([...verifiedFree, ...this.#discovered, ...backstop])];
+    return [...new Set([...verifiedFree, ...this.#discovered, ...backstop, ...extraFallback])];
   }
 
-  candidates(now: number = Date.now()): string[] {
-    return this.#health.selectAvailable(this.#ordered(), now);
+  candidates(now: number = Date.now(), fallbackModel?: string | null): string[] {
+    return this.#health.selectAvailable(this.#ordered(fallbackModel), now);
   }
 
   recordSuccess(model: string, now: number = Date.now()): void {

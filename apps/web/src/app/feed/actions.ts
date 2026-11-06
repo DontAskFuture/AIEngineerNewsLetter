@@ -9,6 +9,7 @@ import {
   DuplicateProfileNameError,
   isValidTimeWindow,
   LastProfileDeleteError,
+  ProfileLimitExceededError,
   setDefaultUserProfile,
   updateUserProfile,
 } from "@/lib/personalized-feed";
@@ -53,6 +54,11 @@ export async function createUserProfileAction(formData: FormData) {
       redirect(buildFeedRedirect(error.profileSlug, timeWindow, "duplicate_profile_name"));
     }
 
+    if (error instanceof ProfileLimitExceededError) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(null, timeWindow, "profile_limit_exceeded"));
+    }
+
     throw error;
   }
 
@@ -87,6 +93,16 @@ export async function updateUserProfileAction(formData: FormData) {
       redirect(buildFeedRedirect(error.profileSlug, timeWindow, "duplicate_profile_name"));
     }
 
+    if (error instanceof ProfileLimitExceededError) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(null, timeWindow, "profile_limit_exceeded"));
+    }
+
+    if (error instanceof Error && error.message.includes("was not found")) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(null, timeWindow));
+    }
+
     throw error;
   }
 
@@ -117,6 +133,11 @@ export async function deleteUserProfileAction(formData: FormData) {
     if (error instanceof LastProfileDeleteError) {
       revalidatePath("/feed");
       redirect(buildFeedRedirect(error.profileSlug, timeWindow, "last_profile_delete"));
+    }
+
+    if (error instanceof Error && error.message.includes("was not found")) {
+      revalidatePath("/feed");
+      redirect(buildFeedRedirect(null, timeWindow));
     }
 
     throw error;

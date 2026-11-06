@@ -1,8 +1,12 @@
 import Handlebars from "handlebars";
 
-const MAX_CANDIDATE_TEXT_CHARS = 2000;
-const DEFAULT_PREVIEW_MAX_CHARS = 600;
+const DEFAULT_PREVIEW_MAX_CHARS = 380;
+const MAX_CANDIDATE_PREVIEW_CHARS = 400;
+const MAX_SUMMARY_PREVIEW_CHARS = 320;
 const MIN_SUBSTANTIVE_PARAGRAPH_CHARS = 60;
+
+export const MAX_PROFILE_NAME_LENGTH = 80;
+export const MAX_INTEREST_STATEMENT_LENGTH = 2000;
 
 export type ScoreConfidence = "high" | "medium" | "low";
 
@@ -125,28 +129,169 @@ export function extractDocumentPreview(
   return fallback;
 }
 
+export interface ParsedWhyRelevantMetadata {
+  whyRelevant: string;
+  confidence: ScoreConfidence | null;
+  matchedSignals: string[];
+}
+
 export function formatWhyRelevant(result: {
   whyRelevant: string;
   confidence: ScoreConfidence | string | null;
   matchedSignals: string[];
 }): string {
+  if (result.matchedSignals.length === 0) {
+    return result.whyRelevant;
+  }
+
   const metadata = [
     result.confidence ? `Confidence: ${result.confidence}` : null,
-    result.matchedSignals.length > 0 ? `Signals: ${result.matchedSignals.join(", ")}` : null,
+    `Signals: ${result.matchedSignals.join(", ")}`,
   ].filter(Boolean);
 
-  return metadata.length > 0
-    ? `${result.whyRelevant}\n\n${metadata.join(" | ")}`
-    : result.whyRelevant;
+  return `${result.whyRelevant}\n\n${metadata.join(" | ")}`;
 }
 
-export function stripWhyRelevantMetadata(whyRelevant: string | null | undefined): string {
-  if (!whyRelevant) return "";
-  return whyRelevant
+export function parseWhyRelevantMetadata(
+  rawWhyRelevant: string | null | undefined,
+): ParsedWhyRelevantMetadata {
+  if (!rawWhyRelevant) {
+    return {
+      whyRelevant: "",
+      confidence: null,
+      matchedSignals: [],
+    };
+  }
+
+  let confidence: ScoreConfidence | null = null;
+  let matchedSignals: string[] = [];
+
+  const footerMatch = rawWhyRelevant.match(
+    /\n\n(?:Confidence:\s*(high|medium|low))?(?:\s*\|\s*)?(?:Signals:\s*([^\n]+))?$/i,
+  );
+  if (footerMatch && (footerMatch[1] || footerMatch[2])) {
+    const rawConfidence = footerMatch[1]?.toLowerCase();
+    if (rawConfidence === "high" || rawConfidence === "medium" || rawConfidence === "low") {
+      confidence = rawConfidence;
+    }
+    if (footerMatch[2]) {
+      matchedSignals = footerMatch[2]
+        .split(",")
+        .map((signal) => signal.trim())
+        .filter(Boolean);
+    }
+  }
+
+  const whyRelevant = rawWhyRelevant
     .replace(/\n\nConfidence:\s*(?:high|medium|low)(?:\s*\|\s*Signals:.*)?$/i, "")
     .replace(/\n\nSignals:.*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  return {
+    whyRelevant,
+    confidence,
+    matchedSignals,
+  };
+}
+
+export function stripWhyRelevantMetadata(whyRelevant: string | null | undefined): string {
+  return parseWhyRelevantMetadata(whyRelevant).whyRelevant;
+}
+
+export function normalizeStoryTitle(title: string | null | undefined): string {
+  if (!title) return "";
+  return title
+    .toLowerCase()
+    .replace(/^(?:\[(?:r|d|p|n|paper|project|release|blog)\]\s*|show hn:\s*|ask hn:\s*|tell hn:\s*|launch hn:\s*)+/gi, "")
+    .replace(/['’`]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export interface DeduplicatedScoringGroup<T extends { id: number; title: string }> {
+  representative: T;
+  duplicateIds: number[];
+}
+
+export function deduplicateScoringCandidates<
+  T extends {
+    id: number;
+    title: string;
+    summary?: string | null | undefined;
+    bodyText?: string | null | undefined;
+    previewParagraph?: string | null | undefined;
+  },
+>(docs: readonly T[]): DeduplicatedScoringGroup<T>[] {
+  const groups = new Map<string, DeduplicatedScoringGroup<T>>();
+
+  for (const doc of docs) {
+    const rawPreview =
+      doc.previewParagraph ??
+      extractDocumentPreview(doc.summary, doc.bodyText);
+    const normalizedTitle = normalizeStoryTitle(doc.title);
+    const normalizedPreview = rawPreview.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 120);
+    const key = normalizedTitle
+      ? `${normalizedTitle}::${normalizedPreview}`
+      : `id:${doc.id}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.duplicateIds.push(doc.id);
+    } else {
+      groups.set(key, {
+        representative: doc,
+        duplicateIds: [doc.id],
+      });
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
+export function computeAdjustedStoryScore({
+  score,
+  sortTime,
+  cutoff,
+  now = Date.now(),
+  freshnessBoostMax = 10,
+  trustTier = null,
+  confidence = null,
+  minQualifyingScore = 40,
+}: {
+  score: number | null | undefined;
+  sortTime: Date | string;
+  cutoff: Date | string;
+  now?: number | undefined;
+  freshnessBoostMax?: number | undefined;
+  trustTier?: number | null | undefined;
+  confidence?: ScoreConfidence | null | undefined;
+  minQualifyingScore?: number | undefined;
+}): number | null {
+  if (score === null || score === undefined || !Number.isFinite(score)) {
+    return null;
+  }
+
+  if (score < minQualifyingScore) {
+    return score;
+  }
+
+  const sortMs = typeof sortTime === "string" ? new Date(sortTime).getTime() : sortTime.getTime();
+  const cutoffMs = typeof cutoff === "string" ? new Date(cutoff).getTime() : cutoff.getTime();
+  const windowSpanMs = Math.max(now - cutoffMs, 3_600_000);
+  const ageRatio = Math.max(0, Math.min(1, (now - sortMs) / windowSpanMs));
+  const freshnessBoost = Math.round((1 - ageRatio) * freshnessBoostMax);
+  const tierBoost =
+    typeof trustTier === "number"
+      ? trustTier <= 1
+        ? 2
+        : trustTier >= 3
+          ? -2
+          : 0
+      : 0;
+  const confidenceDelta =
+    confidence === "high" ? 2 : confidence === "low" ? -4 : 0;
+
+  return Math.max(1, Math.min(100, score + freshnessBoost + tierBoost + confidenceDelta));
 }
 
 function sanitizeUntrustedField(value: string): string {
@@ -155,11 +300,47 @@ function sanitizeUntrustedField(value: string): string {
     .trim();
 }
 
+function formatPromptDate(value: string | Date | null | undefined): string {
+  if (!value) return "Unknown";
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? "Unknown" : value.toISOString().slice(0, 10);
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return "Unknown";
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime())
+    ? sanitizeUntrustedField(trimmed)
+    : parsed.toISOString().slice(0, 10);
+}
+
+function cleanPromptExcerpt(rawPreview: string, title: string, maxChars: number): string {
+  const sanitizedTitle = sanitizeUntrustedField(title).replace(/\s+/g, " ").trim();
+  let preview = sanitizeUntrustedField(rawPreview).replace(/\s+/g, " ").trim();
+
+  if (
+    sanitizedTitle.length >= 12 &&
+    preview.toLowerCase().startsWith(sanitizedTitle.toLowerCase())
+  ) {
+    const remainder = preview
+      .slice(sanitizedTitle.length)
+      .replace(/^[\s:—–\-·|.,;]+/, "")
+      .trim();
+    if (remainder.length > 0) {
+      preview = remainder;
+    }
+  }
+
+  return truncateToLimit(preview || "None", maxChars);
+}
+
 const candidateTemplate = compilePrompt<{ candidate: PromptCandidate }>(`
 <document id="{{candidate.id}}">
 Title: {{candidate.title}}
 Source: {{candidate.sourceName}} ({{candidate.sourceCategory}})
-Published/discovered: {{candidate.publishedAt}}
+Date: {{candidate.publishedAt}}
 Excerpt: {{candidate.previewParagraph}}
 </document>
 `);
@@ -168,7 +349,6 @@ const candidateListTemplate = compilePrompt<{ entries: string[] }>(`
 <documents>
 {{#each entries}}
 {{this}}{{#unless @last}}
-
 {{/unless}}
 {{/each}}
 </documents>
@@ -176,16 +356,12 @@ const candidateListTemplate = compilePrompt<{ entries: string[] }>(`
 
 function renderCandidateList(candidates: PromptCandidate[]): string {
   const entries = candidates.map((candidate) => {
-    const rawPreview = candidate.previewParagraph || "No first paragraph was available.";
-    const publishedAt =
-      candidate.publishedAt instanceof Date
-        ? candidate.publishedAt.toISOString()
-        : candidate.publishedAt || "Unknown";
-
-    const maxPreviewChars = Math.max(200, MAX_CANDIDATE_TEXT_CHARS - 300);
-    const previewParagraph = truncateToLimit(
-      sanitizeUntrustedField(rawPreview),
-      maxPreviewChars,
+    const rawPreview = candidate.previewParagraph || "None";
+    const publishedAt = formatPromptDate(candidate.publishedAt);
+    const previewParagraph = cleanPromptExcerpt(
+      rawPreview,
+      candidate.title,
+      MAX_CANDIDATE_PREVIEW_CHARS,
     );
 
     return candidateTemplate({
@@ -195,7 +371,7 @@ function renderCandidateList(candidates: PromptCandidate[]): string {
         previewParagraph,
         sourceName: sanitizeUntrustedField(candidate.sourceName || "Unknown"),
         sourceCategory: sanitizeUntrustedField(candidate.sourceCategory || "Unknown"),
-        publishedAt: sanitizeUntrustedField(String(publishedAt)),
+        publishedAt,
       },
     }).trim();
   });
@@ -223,15 +399,14 @@ Scoring rubric:
 - 90-100 (Direct, actionable match): Directly addresses a target tool, company, workflow, technical bottleneck, pricing shift, or operational constraint named in <user_profile> with concrete specifics (benchmarks, architecture details, code/repo releases, pricing numbers, or postmortems).
 - 70-89 (Strong thematic match): Clearly relevant and useful to the profile's domain or workflows, but less directly actionable or missing deep technical/operational specifics.
 - 40-69 (Adjacent or partial match): General AI/software news with only an indirect, high-level, or tangential link to <user_profile>.
-- 1-39 (Off-topic or low-signal): Generic funding/hiring news, vague product launches, opinion pieces, consumer tech, or no concrete supplied-text link to <user_profile>.
+- 1-39 (Off-topic or low-signal): Generic funding/hiring news, vague product launches, opinion pieces, broad AI commentary, consumer tech, or no concrete supplied-text link to <user_profile>.
 
-Penalize generic funding announcements, vague product launches, hiring news, opinion posts, and broad AI commentary unless the supplied text shows a concrete link to <user_profile>.
 Do not invent document IDs and do not include any IDs that are not present in <documents>.
 
 For each document, evaluate evidence before assigning the score:
-1. If the document is relevant (score >= 40), set 'matchedSignals' to 1-4 short phrases copied or paraphrased from <user_profile> and the document text, and write a 1-2 sentence 'whyRelevant' explanation grounded strictly in the supplied text.
-2. If the document is off-topic or generic (score 1-39), set 'matchedSignals' to [] and write 1 short sentence in 'whyRelevant' stating why it does not match <user_profile> instead of forcing a speculative connection.
-3. Set 'confidence' to "high" (detailed excerpt with clear evidence), "medium" (brief or partial excerpt), or "low" (title-only or "No first paragraph was available."). When 'confidence' is "low", cap 'score' at <= 65 unless the title names an exact tool or release from <user_profile>.
+1. If score >= 40, set 'matchedSignals' to 1-4 short phrases from <user_profile> and the document text, and write a 1-2 sentence 'whyRelevant' explanation grounded strictly in the supplied text.
+2. If score 1-39, set 'matchedSignals' to [] and write a 2-6 word phrase in 'whyRelevant' (e.g., "Generic funding news", "Consumer hardware, off-topic").
+3. Set 'confidence' to "high" (detailed excerpt with clear evidence), "medium" (brief or partial excerpt), or "low" (title-only or "None"). When 'confidence' is "low", cap 'score' at <= 65 unless the title names an exact tool or release from <user_profile>.
 
 You MUST respond with ONLY a valid JSON object, no markdown fences or extra text before or after.
 Use this exact JSON shape and key order:
@@ -255,17 +430,17 @@ interface RenderedTopStoryCandidate
   extends Omit<TopStoriesSummaryCandidate, "publishedAt" | "score" | "whyRelevant"> {
   publishedAt: string;
   score: string;
-  whyRelevant: string;
+  whyRelevant: string | null;
 }
 
 const topStoryTemplate = compilePrompt<{ candidate: RenderedTopStoryCandidate }>(`
 <story rank="{{candidate.rank}}" id="{{candidate.id}}">
 Title: {{candidate.title}}
 Source: {{candidate.sourceName}} ({{candidate.sourceCategory}})
-Published/discovered: {{candidate.publishedAt}}
+Date: {{candidate.publishedAt}}
 Profile match score: {{candidate.score}}
-Excerpt: {{candidate.previewParagraph}}
-Ranking note: {{candidate.whyRelevant}}
+Excerpt: {{candidate.previewParagraph}}{{#if candidate.whyRelevant}}
+Ranking note: {{candidate.whyRelevant}}{{/if}}
 </story>
 `);
 
@@ -273,34 +448,34 @@ const topStoriesListTemplate = compilePrompt<{ storyCount: number; entries: stri
 <top_stories count="{{storyCount}}">
 {{#each entries}}
 {{this}}{{#unless @last}}
-
 {{/unless}}
 {{/each}}
 </top_stories>
 `);
 
 function renderTopStoriesList(candidates: TopStoriesSummaryCandidate[]): string {
-  const maxPreviewChars = Math.max(200, MAX_CANDIDATE_TEXT_CHARS - 400);
   const entries = candidates.map((candidate) => {
-    const rawPreview = candidate.previewParagraph || "No first paragraph was available.";
-    const publishedAt =
-      candidate.publishedAt instanceof Date
-        ? candidate.publishedAt.toISOString()
-        : candidate.publishedAt || "Unknown";
+    const rawPreview = candidate.previewParagraph || "None";
+    const publishedAt = formatPromptDate(candidate.publishedAt);
     const score = Number.isFinite(candidate.score) ? String(candidate.score) : "Unscored fallback";
-    const cleanWhyRelevant =
-      stripWhyRelevantMetadata(candidate.whyRelevant) || "No ranking note was available.";
+    const cleanWhyRelevant = stripWhyRelevantMetadata(candidate.whyRelevant);
 
     return topStoryTemplate({
       candidate: {
         ...candidate,
         title: truncateToLimit(sanitizeUntrustedField(candidate.title), 240),
-        previewParagraph: truncateToLimit(sanitizeUntrustedField(rawPreview), maxPreviewChars),
+        previewParagraph: cleanPromptExcerpt(
+          rawPreview,
+          candidate.title,
+          MAX_SUMMARY_PREVIEW_CHARS,
+        ),
         sourceName: sanitizeUntrustedField(candidate.sourceName || "Unknown"),
         sourceCategory: sanitizeUntrustedField(candidate.sourceCategory || "Unknown"),
-        publishedAt: sanitizeUntrustedField(String(publishedAt)),
+        publishedAt,
         score,
-        whyRelevant: truncateToLimit(sanitizeUntrustedField(cleanWhyRelevant), 360),
+        whyRelevant: cleanWhyRelevant
+          ? truncateToLimit(sanitizeUntrustedField(cleanWhyRelevant), 280)
+          : null,
       },
     }).trim();
   });
@@ -353,12 +528,17 @@ export function renderScoreDocumentsPrompt({
   interestStatement: string;
   candidates: PromptCandidate[];
 }): RenderedPrompt {
-  const cleanName = profileName ? sanitizeUntrustedField(profileName) : null;
+  const cleanName = profileName
+    ? truncateToLimit(sanitizeUntrustedField(profileName), MAX_PROFILE_NAME_LENGTH)
+    : null;
   return {
     system: scoreDocumentsSystemTemplate({ candidateCount: candidates.length }).trim(),
     user: scoreDocumentsUserTemplate({
       profileName: cleanName || null,
-      interestStatement: sanitizeUntrustedField(interestStatement),
+      interestStatement: truncateToLimit(
+        sanitizeUntrustedField(interestStatement),
+        MAX_INTEREST_STATEMENT_LENGTH,
+      ),
       candidateList: renderCandidateList(candidates),
     }).trim(),
   };
@@ -376,8 +556,11 @@ export function renderSummarizeTopStoriesPrompt({
   return {
     system: summarizeTopStoriesSystemTemplate({ storyCount: candidates.length }).trim(),
     user: summarizeTopStoriesUserTemplate({
-      profileName: sanitizeUntrustedField(profileName),
-      interestStatement: sanitizeUntrustedField(interestStatement),
+      profileName: truncateToLimit(sanitizeUntrustedField(profileName), MAX_PROFILE_NAME_LENGTH),
+      interestStatement: truncateToLimit(
+        sanitizeUntrustedField(interestStatement),
+        MAX_INTEREST_STATEMENT_LENGTH,
+      ),
       storiesList: renderTopStoriesList(candidates),
     }).trim(),
   };
@@ -439,9 +622,16 @@ export function parseScoreDocumentsResponse(
     const score = Number(item.score);
     const confidence = parseConfidence(item.confidence);
     const matchedSignals = parseMatchedSignals(item.matchedSignals);
-    const whyRelevant = typeof item.whyRelevant === "string" ? item.whyRelevant.trim() : "";
+    const rawWhyRelevant = typeof item.whyRelevant === "string" ? item.whyRelevant.trim() : "";
 
-    if (!Number.isInteger(documentId) || !Number.isFinite(score) || !whyRelevant) {
+    if (!Number.isInteger(documentId) || !Number.isFinite(score)) {
+      continue;
+    }
+
+    const clampedScore = Math.max(1, Math.min(100, Math.round(score)));
+    const whyRelevant =
+      rawWhyRelevant || (clampedScore < 40 ? "Off-topic for this profile." : "");
+    if (!whyRelevant) {
       continue;
     }
 
@@ -456,7 +646,7 @@ export function parseScoreDocumentsResponse(
 
     scores.push({
       documentId,
-      score: Math.max(1, Math.min(100, Math.round(score))),
+      score: clampedScore,
       confidence,
       matchedSignals,
       whyRelevant,

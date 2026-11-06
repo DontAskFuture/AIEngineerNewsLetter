@@ -181,7 +181,7 @@ function queueJobLogs(limit) {
       completed_on,
       left(coalesce(output::text, ''), 220) AS output
     FROM pgboss.job
-    WHERE name IN ('fetch-source-endpoint', 'score-documents')
+    WHERE name IN ('fetch-source-endpoint', 'score-documents', 'send-daily-newsletter')
     ORDER BY created_on DESC
     LIMIT ${limit};
   `);

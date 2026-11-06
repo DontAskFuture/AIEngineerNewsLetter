@@ -48,7 +48,7 @@ async function resolveScoringCandidates(): Promise<{ models: string[]; pool: Sco
   const env = loadWebEnv();
   const pool = getScoringPool();
   await pool.refresh();
-  return { models: [...pool.candidates(), env.openRouterModel], pool };
+  return { models: pool.candidates(Date.now(), env.openRouterModel), pool };
 }
 
 async function chatCompletion<T>(
@@ -221,7 +221,7 @@ export async function summarizeTopStoriesForProfile({
   const result = await chatCompletion(
     prompt.system,
     prompt.user,
-    2000,
+    800,
     parseSummarizeTopStoriesResponse,
     [...selectSummaryModelCandidates(), env.openRouterModel],
   );
@@ -248,12 +248,13 @@ export async function scoreDocumentBatch({
     candidates,
   });
   const allowedIds = new Set(candidates.map((c) => c.id));
+  const maxTokens = Math.min(2400, Math.max(400, candidates.length * 100));
 
   const { models, pool } = await resolveScoringCandidates();
   const result = await chatCompletion(
     prompt.system,
     prompt.user,
-    4000,
+    maxTokens,
     (content) => parseScoreDocumentsResponse(content, allowedIds),
     models,
     pool,

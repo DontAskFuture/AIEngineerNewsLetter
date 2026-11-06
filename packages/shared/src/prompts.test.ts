@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_FURTHER_STUDY_TEXT,
+  computeAdjustedStoryScore,
+  deduplicateScoringCandidates,
   extractDocumentPreview,
   formatWhyRelevant,
+  normalizeStoryTitle,
   parseScoreDocumentsResponse,
   parseSummarizeTopStoriesResponse,
+  parseWhyRelevantMetadata,
   renderScoreDocumentsPrompt,
   renderSummarizeTopStoriesPrompt,
   stripWhyRelevantMetadata,
@@ -51,11 +55,93 @@ describe("formatWhyRelevant and stripWhyRelevantMetadata", () => {
       "Directly benchmarks vLLM latency on H100s.\n\nConfidence: high | Signals: vLLM, inference latency",
     );
     assert.equal(stripWhyRelevantMetadata(formatted), "Directly benchmarks vLLM latency on H100s.");
+    assert.deepEqual(parseWhyRelevantMetadata(formatted), {
+      whyRelevant: "Directly benchmarks vLLM latency on H100s.",
+      confidence: "high",
+      matchedSignals: ["vLLM", "inference latency"],
+    });
+  });
+
+  it("omits confidence/signals footer when matchedSignals is empty for off-topic items", () => {
+    const formatted = formatWhyRelevant({
+      whyRelevant: "Generic funding news.",
+      confidence: "high",
+      matchedSignals: [],
+    });
+
+    assert.equal(formatted, "Generic funding news.");
+    assert.deepEqual(parseWhyRelevantMetadata(formatted), {
+      whyRelevant: "Generic funding news.",
+      confidence: null,
+      matchedSignals: [],
+    });
+  });
+});
+
+describe("normalizeStoryTitle, deduplicateScoringCandidates, and computeAdjustedStoryScore", () => {
+  it("normalizes syndicated story prefixes and punctuation", () => {
+    assert.equal(
+      normalizeStoryTitle("[R] Show HN: FlashAttention-3 — Fast FP8 Kernels!"),
+      "flashattention 3 fast fp8 kernels",
+    );
+    assert.equal(
+      normalizeStoryTitle("FlashAttention 3: Fast FP8 Kernels"),
+      "flashattention 3 fast fp8 kernels",
+    );
+  });
+
+  it("deduplicates cross-batch candidates with identical normalized title and preview", () => {
+    const groups = deduplicateScoringCandidates([
+      { id: 1, title: "Show HN: vLLM 0.8 Released", previewParagraph: "Fast inference engine." },
+      { id: 2, title: "vLLM 0.8: Released!", previewParagraph: "Fast inference engine." },
+      { id: 3, title: "Different story", previewParagraph: "Other content." },
+    ]);
+
+    assert.equal(groups.length, 2);
+    assert.deepEqual(groups[0]?.duplicateIds, [1, 2]);
+    assert.deepEqual(groups[1]?.duplicateIds, [3]);
+  });
+
+  it("adjusts qualifying scores by freshness, source tier, and confidence without boosting <40 scores", () => {
+    const now = new Date("2026-11-06T12:00:00Z").getTime();
+    const cutoff = new Date("2026-10-30T12:00:00Z");
+
+    const highConf = computeAdjustedStoryScore({
+      score: 80,
+      sortTime: new Date("2026-11-06T11:00:00Z"),
+      cutoff,
+      now,
+      freshnessBoostMax: 10,
+      trustTier: 1,
+      confidence: "high",
+    });
+    const lowConf = computeAdjustedStoryScore({
+      score: 80,
+      sortTime: new Date("2026-11-06T11:00:00Z"),
+      cutoff,
+      now,
+      freshnessBoostMax: 10,
+      trustTier: 3,
+      confidence: "low",
+    });
+    const offTopic = computeAdjustedStoryScore({
+      score: 25,
+      sortTime: new Date("2026-11-06T11:00:00Z"),
+      cutoff,
+      now,
+      freshnessBoostMax: 10,
+      trustTier: 1,
+      confidence: "high",
+    });
+
+    assert.equal(highConf, 94);
+    assert.equal(lowConf, 84);
+    assert.equal(offTopic, 25);
   });
 });
 
 describe("renderScoreDocumentsPrompt", () => {
-  it("renders XML delimiters, optional profile name, and reasoning-first JSON schema", () => {
+  it("renders XML delimiters, YYYY-MM-DD dates, deduplicated leading titles, and reasoning-first JSON schema", () => {
     const prompt = renderScoreDocumentsPrompt({
       profileName: "Infra scout",
       interestStatement: "Watch GPU inference engines and token pricing.",
@@ -63,7 +149,8 @@ describe("renderScoreDocumentsPrompt", () => {
         {
           id: 42,
           title: "FlashAttention-3 kernel release",
-          previewParagraph: "New Hopper kernels increase FP8 utilization.",
+          previewParagraph:
+            "FlashAttention-3 kernel release — New Hopper kernels increase FP8 utilization.",
           sourceName: "GitHub",
           sourceCategory: "github",
           publishedAt: new Date("2026-11-05T00:00:00.000Z"),
@@ -79,6 +166,8 @@ describe("renderScoreDocumentsPrompt", () => {
     assert.ok(prompt.user.includes("<documents>"));
     assert.ok(prompt.user.includes('<document id="42">'));
     assert.ok(prompt.user.includes("Source: GitHub (github)"));
+    assert.ok(prompt.user.includes("Date: 2026-11-05"));
+    assert.ok(prompt.user.includes("Excerpt: New Hopper kernels increase FP8 utilization."));
   });
 
   it("neutralizes untrusted closing XML tags inside candidate fields", () => {

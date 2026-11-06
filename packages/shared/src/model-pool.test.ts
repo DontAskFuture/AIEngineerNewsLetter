@@ -75,14 +75,15 @@ describe("ScoringModelPool", () => {
     assert.deepEqual(pool.candidates(), [...scoringConfig.scoringModelCandidates]);
   });
 
-  it("drops a parked free model from the candidate order", () => {
+  it("drops a parked free model from the candidate order, including when passed as fallbackModel", () => {
     const pool = new ScoringModelPool({ fetchImpl: stubFetch(modelsPayload([])) });
     const first = scoringConfig.scoringModelCandidates[0];
 
     pool.recordFailure(first, 429, 0);
 
     assert.ok(!pool.candidates(1).includes(first));
-    assert.equal(pool.candidates(1).at(-1), PAID);
+    assert.ok(!pool.candidates(1, first).includes(first));
+    assert.equal(pool.candidates(1, PAID).at(-1), PAID);
   });
 
   it("restores a parked model once its cooldown lapses", () => {

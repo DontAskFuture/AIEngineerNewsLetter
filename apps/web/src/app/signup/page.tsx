@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getAllowedEmailLabel, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { signupAction } from "@/app/auth-actions";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,9 @@ const errorMessages: Record<string, string> = {
   missing_fields: "Enter both your email and password.",
   email_not_allowed: "This email is not on the allowlist yet.",
   password_too_short: "Use a password with at least 8 characters.",
+  invalid_credentials: "Use a valid email and password.",
   email_already_exists: "An account with this email already exists.",
+  too_many_attempts: "Too many attempts. Try again in a few minutes.",
   unknown: "We could not create your account. Please try again.",
 };
 
@@ -49,9 +51,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
           </h1>
           <div className="mt-6 space-y-4 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
             <p>
-              This workspace is currently closed to approved email addresses. Only{" "}
-              <span className="font-medium text-[color:var(--ink)]">{getAllowedEmailLabel()}</span> can create
-              an account.
+              This workspace is currently closed to approved email addresses configured on the server.
             </p>
             <p>
               Passwords are stored as salted hashes rather than plain text.
@@ -87,6 +87,8 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
                 id="email"
                 name="email"
                 type="email"
+                required
+                maxLength={254}
                 autoComplete="email"
                 defaultValue={email}
                 className="field-shell px-4 py-3 text-sm"
@@ -101,6 +103,9 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
                 id="password"
                 name="password"
                 type="password"
+                required
+                minLength={8}
+                maxLength={256}
                 autoComplete="new-password"
                 className="field-shell px-4 py-3 text-sm"
               />

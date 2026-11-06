@@ -7,7 +7,7 @@ This file applies to `apps/web` and its subdirectories unless a deeper file over
 - This is a Next.js App Router application.
 - It is server-first: pages fetch live data from Postgres and server actions mutate state.
 - Authentication and session checks happen on the server before protected pages render.
-- Public deployments define baseline security headers in `next.config.ts`.
+- Public deployments define baseline security headers (emitting `upgrade-insecure-requests` and `Strict-Transport-Security` only when `APP_BASE_URL` uses `https://`) and disable `X-Powered-By` (`poweredByHeader: false`) in `next.config.ts`.
 
 ## Implementation Guidance
 - Put route files under `src/app` and reusable server logic under `src/lib`.

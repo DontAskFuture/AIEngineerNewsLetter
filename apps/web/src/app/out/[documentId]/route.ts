@@ -11,25 +11,40 @@ interface OutboundDocumentRouteProps {
 }
 
 export async function GET(request: Request, { params }: OutboundDocumentRouteProps) {
-  const currentUser = await getCurrentUser();
   const { documentId } = await params;
   const parsedDocumentId = Number(documentId);
 
-  if (!Number.isInteger(parsedDocumentId)) {
+  if (!Number.isInteger(parsedDocumentId) || parsedDocumentId <= 0) {
     return NextResponse.redirect(new URL("/feed?window=week", request.url));
   }
 
   const db = getDb();
-  const [document] = await db
-    .select({
-      id: schema.documents.id,
-      canonicalUrl: schema.documents.canonicalUrl,
-    })
-    .from(schema.documents)
-    .where(eq(schema.documents.id, parsedDocumentId))
-    .limit(1);
+  const [currentUser, [document]] = await Promise.all([
+    getCurrentUser(),
+    db
+      .select({
+        id: schema.documents.id,
+        canonicalUrl: schema.documents.canonicalUrl,
+      })
+      .from(schema.documents)
+      .where(eq(schema.documents.id, parsedDocumentId))
+      .limit(1),
+  ]);
 
   if (!document) {
+    return NextResponse.redirect(new URL("/feed?window=week", request.url));
+  }
+
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(document.canonicalUrl);
+    if (
+      (targetUrl.protocol !== "https:" && targetUrl.protocol !== "http:") ||
+      Boolean(targetUrl.username || targetUrl.password)
+    ) {
+      return NextResponse.redirect(new URL("/feed?window=week", request.url));
+    }
+  } catch {
     return NextResponse.redirect(new URL("/feed?window=week", request.url));
   }
 
@@ -45,5 +60,10 @@ export async function GET(request: Request, { params }: OutboundDocumentRoutePro
     }
   }
 
-  return NextResponse.redirect(document.canonicalUrl);
+  return NextResponse.redirect(targetUrl, {
+    headers: {
+      "Referrer-Policy": "no-referrer",
+      "Cache-Control": "no-store",
+    },
+  });
 }

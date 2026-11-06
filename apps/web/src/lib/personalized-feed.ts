@@ -1,22 +1,41 @@
 import { createHash } from "node:crypto";
-import { DEFAULT_FURTHER_STUDY_TEXT, extractDocumentPreview, type SourceCategory } from "@ai-intel/shared";
+import {
+  DEFAULT_FURTHER_STUDY_TEXT,
+  MAX_INTEREST_STATEMENT_LENGTH,
+  MAX_PROFILE_NAME_LENGTH,
+  computeAdjustedStoryScore,
+  extractDocumentPreview,
+  normalizeStoryTitle,
+  parseWhyRelevantMetadata,
+  type SourceCategory,
+} from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, ne, sql } from "drizzle-orm";
+import { enqueueProfileScoring } from "@/lib/crawler";
 import { loadWebEnv } from "@/lib/env";
 import { summarizeTopStoriesForProfile } from "@/lib/openrouter";
-import { applyReadStateToDocuments } from "@/lib/read-tracking";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const MAX_CANDIDATE_DOCUMENTS = 200;
 const MAX_SELECTED_DOCUMENTS = 10;
 const MAX_PER_SOURCE = 5;
-const MAX_FRESHNESS_BOOST = 20;
+const MIN_TOP_STORY_SCORE = 40;
+const MAX_ACTIVE_PROFILES_PER_USER = 10;
 const PUBLIC_FEED_OWNER_EMAIL = "lianglingfan@gmail.com";
 const PUBLIC_FEED_PROFILE_SLUG = "founding-analyst";
+const PUBLIC_FEED_CACHE_TTL_MS = 30_000;
 const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v4";
 const TOP_STORIES_SUMMARY_CACHE_TTL_HOURS = 24;
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
+
+const FRESHNESS_BOOST_BY_WINDOW: Record<TimeWindow, number> = {
+  day: 12,
+  week: 10,
+  month: 6,
+  quarter: 4,
+  year: 2,
+};
 
 const TIME_WINDOW_LABELS: Record<TimeWindow, string> = {
   day: "Last 24 hours",
@@ -72,6 +91,13 @@ export class LastProfileDeleteError extends Error {
   }
 }
 
+export class ProfileLimitExceededError extends Error {
+  constructor() {
+    super(`A user may have at most ${MAX_ACTIVE_PROFILES_PER_USER} active profiles.`);
+    this.name = "ProfileLimitExceededError";
+  }
+}
+
 function selectTopDocuments(
   primaryDocs: PersonalizedFeedDocument[],
   fallbackDocs: PersonalizedFeedDocument[],
@@ -80,10 +106,16 @@ function selectTopDocuments(
 ) {
   const selected: PersonalizedFeedDocument[] = [];
   const seenIds = new Set<number>();
+  const seenTitles = new Set<string>();
   const sourceCounts = new Map<string, number>();
 
   for (const doc of [...primaryDocs, ...fallbackDocs]) {
     if (seenIds.has(doc.id)) {
+      continue;
+    }
+
+    const normalizedTitle = normalizeStoryTitle(doc.title);
+    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
       continue;
     }
 
@@ -96,6 +128,9 @@ function selectTopDocuments(
 
     selected.push(doc);
     seenIds.add(doc.id);
+    if (normalizedTitle) {
+      seenTitles.add(normalizedTitle);
+    }
     sourceCounts.set(sourceKey, count + 1);
 
     if (selected.length >= limit) {
@@ -110,18 +145,51 @@ function promoteUnreadTopStories(
   topDocuments: PersonalizedFeedDocument[],
   remainingDocuments: PersonalizedFeedDocument[],
   limit: number,
+  maxPerSource: number,
 ) {
-  const pool = [...topDocuments, ...remainingDocuments];
+  const initialTopIds = new Set(topDocuments.map((document) => document.id));
+  const qualifyingRemaining = remainingDocuments.filter(
+    (doc) => doc.matchScore !== null && doc.matchScore >= MIN_TOP_STORY_SCORE,
+  );
+  const otherRemaining = remainingDocuments.filter(
+    (doc) => doc.matchScore === null || doc.matchScore < MIN_TOP_STORY_SCORE,
+  );
+  const priorityPool = [...topDocuments, ...qualifyingRemaining, ...otherRemaining];
+  const displayPool = [...topDocuments, ...remainingDocuments];
   const seenIds = new Set<number>();
+  const seenTitles = new Set<string>();
+  const sourceCounts = new Map<string, number>();
   const unreadTop: PersonalizedFeedDocument[] = [];
 
-  for (const document of pool) {
+  for (const document of priorityPool) {
     if (document.isRead || seenIds.has(document.id)) {
+      continue;
+    }
+
+    if (
+      !initialTopIds.has(document.id) &&
+      document.matchScore !== null &&
+      document.matchScore < MIN_TOP_STORY_SCORE
+    ) {
+      continue;
+    }
+
+    const normalizedTitle = normalizeStoryTitle(document.title);
+    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
+      continue;
+    }
+
+    const sourceCount = sourceCounts.get(document.sourceGroupKey) ?? 0;
+    if (sourceCount >= maxPerSource) {
       continue;
     }
 
     unreadTop.push(document);
     seenIds.add(document.id);
+    if (normalizedTitle) {
+      seenTitles.add(normalizedTitle);
+    }
+    sourceCounts.set(document.sourceGroupKey, sourceCount + 1);
 
     if (unreadTop.length >= limit) {
       break;
@@ -132,7 +200,7 @@ function promoteUnreadTopStories(
   const dedupedRemaining: PersonalizedFeedDocument[] = [];
   const remainingSeen = new Set<number>();
 
-  for (const document of pool) {
+  for (const document of displayPool) {
     if (topIds.has(document.id) || remainingSeen.has(document.id)) {
       continue;
     }
@@ -145,13 +213,6 @@ function promoteUnreadTopStories(
     topDocuments: unreadTop,
     remainingDocuments: dedupedRemaining,
   };
-}
-
-function getFreshnessAdjustedScore(score: number, sortTime: Date, cutoff: Date, now: Date) {
-  const windowMs = Math.max(now.getTime() - cutoff.getTime(), 1);
-  const ageMs = Math.max(now.getTime() - sortTime.getTime(), 0);
-  const freshnessRatio = Math.max(0, 1 - ageMs / windowMs);
-  return score + freshnessRatio * MAX_FRESHNESS_BOOST;
 }
 
 function compareBySortTimeDescThenIdDesc(
@@ -236,6 +297,7 @@ interface CandidateDocumentRow {
   sourcePublishedAt: Date | null;
   discoveredAt: Date;
   sortTime: Date;
+  readAt?: Date | null;
 }
 
 interface TopStoriesSummaryCachePayload {
@@ -257,7 +319,11 @@ function slugifyDisplayName(value: string) {
 }
 
 function normalizeProfileDisplayName(value: string, fallback: string) {
-  return value.trim().replace(/\s+/g, " ") || fallback;
+  return value.trim().replace(/\s+/g, " ").slice(0, MAX_PROFILE_NAME_LENGTH) || fallback;
+}
+
+function normalizeInterestStatement(value: string) {
+  return value.trim().slice(0, MAX_INTEREST_STATEMENT_LENGTH);
 }
 
 function normalizedProfileNameSql(value: string) {
@@ -295,6 +361,7 @@ function normalizeProfileRow(row: {
 }
 
 function mapCandidateRow(row: CandidateDocumentRow) {
+  const readAt = row.readAt ? (row.readAt instanceof Date ? row.readAt : new Date(row.readAt)) : null;
   return {
     id: row.id,
     title: row.title,
@@ -312,14 +379,18 @@ function mapCandidateRow(row: CandidateDocumentRow) {
     llmRank: null,
     matchScore: null,
     whyRelevant: null,
-    isRead: false,
-    readAt: null,
+    isRead: Boolean(readAt),
+    readAt,
   } satisfies PersonalizedFeedDocument;
 }
 
-function buildTopStoriesSummaryCacheKey(timeWindow: TimeWindow, documents: PersonalizedFeedDocument[]) {
+function buildTopStoriesSummaryCacheKey(
+  timeWindow: TimeWindow,
+  interestStatement: string,
+  documents: PersonalizedFeedDocument[],
+) {
   const storyIds = documents.slice(0, MAX_SELECTED_DOCUMENTS).map((document) => document.id);
-  const cacheInput = `${TOP_STORIES_SUMMARY_CACHE_PREFIX}:${timeWindow}:${storyIds.join(",")}`;
+  const cacheInput = `${TOP_STORIES_SUMMARY_CACHE_PREFIX}:${timeWindow}:${interestStatement.trim()}:${storyIds.join(",")}`;
   return createHash("sha256").update(cacheInput).digest("hex");
 }
 
@@ -432,41 +503,56 @@ async function saveTopStoriesSummary({
     timeWindow,
   };
 
-  await db
-    .insert(schema.rankingCache)
-    .values({
-      profileId,
-      candidatesHash: cacheKey,
-      model: summary.model,
-      rankingJson: payload,
-      createdAt: now,
-      expiresAt,
-    })
-    .onConflictDoUpdate({
-      target: [schema.rankingCache.profileId, schema.rankingCache.candidatesHash],
-      set: {
-        model: sql`excluded.model`,
-        rankingJson: sql`excluded.ranking_json`,
+  await Promise.all([
+    db
+      .insert(schema.rankingCache)
+      .values({
+        profileId,
+        candidatesHash: cacheKey,
+        model: summary.model,
+        rankingJson: payload,
         createdAt: now,
         expiresAt,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: [schema.rankingCache.profileId, schema.rankingCache.candidatesHash],
+        set: {
+          model: sql`excluded.model`,
+          rankingJson: sql`excluded.ranking_json`,
+          createdAt: now,
+          expiresAt,
+        },
+      }),
+    db
+      .delete(schema.rankingCache)
+      .where(
+        and(
+          eq(schema.rankingCache.profileId, profileId),
+          lt(schema.rankingCache.expiresAt, now),
+        ),
+      ),
+  ]);
 }
 
 async function summarizeTopDocumentsForProfile(
   profile: FeedUserProfile,
   documents: PersonalizedFeedDocument[],
   timeWindow: TimeWindow,
-  options: { forceRefresh?: boolean } = {},
+  options: { forceRefresh?: boolean; allowGenerate?: boolean } = {},
 ): Promise<ProfileTopStoriesSummary | null> {
   const env = loadWebEnv();
+  const allowGenerate = options.allowGenerate ?? true;
 
   if (!profile.interestStatement.trim() || documents.length === 0) {
     return null;
   }
 
   const storyIds = documents.slice(0, MAX_SELECTED_DOCUMENTS).map((document) => document.id);
-  const cacheKey = buildTopStoriesSummaryCacheKey(timeWindow, documents);
+  const cacheKey = buildTopStoriesSummaryCacheKey(
+    timeWindow,
+    profile.interestStatement,
+    documents,
+  );
 
   if (!options.forceRefresh) {
     const cachedSummary = await getCachedTopStoriesSummary({
@@ -481,7 +567,7 @@ async function summarizeTopDocumentsForProfile(
     }
   }
 
-  if (!env.openRouterApiKey) {
+  if (!allowGenerate || !env.openRouterApiKey) {
     return null;
   }
 
@@ -526,13 +612,13 @@ async function summarizeTopDocumentsForProfile(
   }
 }
 
-async function getCandidateDocuments(cutoff: Date) {
+async function getCandidateDocuments(cutoff: Date, readStateUserId: number | null) {
   const db = getDb();
-  const selectShape = {
+  const baseSelect = {
     id: schema.documents.id,
     title: schema.documents.title,
     summary: schema.documents.summary,
-    bodyText: schema.documents.bodyText,
+    bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
     canonicalUrl: schema.documents.canonicalUrl,
     sourceId: schema.sources.id,
     sourceName: schema.sources.name,
@@ -544,8 +630,30 @@ async function getCandidateDocuments(cutoff: Date) {
     sortTime: documentSortKey,
   };
 
+  if (readStateUserId) {
+    const rows = await db
+      .select({
+        ...baseSelect,
+        readAt: schema.documentReads.readAt,
+      })
+      .from(schema.documents)
+      .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+      .leftJoin(
+        schema.documentReads,
+        and(
+          eq(schema.documentReads.documentId, schema.documents.id),
+          eq(schema.documentReads.userId, readStateUserId),
+        ),
+      )
+      .where(gt(documentSortKey, cutoff))
+      .orderBy(desc(documentSortKey), desc(schema.documents.id))
+      .limit(MAX_CANDIDATE_DOCUMENTS);
+
+    return rows.map((row) => mapCandidateRow(row));
+  }
+
   const rows = await db
-    .select(selectShape)
+    .select(baseSelect)
     .from(schema.documents)
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
     .where(gt(documentSortKey, cutoff))
@@ -603,11 +711,9 @@ async function ensureDefaultUserProfile(userId: number) {
     .where(eq(schema.userProfiles.id, firstActiveProfile.id));
 }
 
-async function getProfiles(userId: number) {
-  await ensureDefaultUserProfile(userId);
-
+async function queryActiveProfiles(userId: number) {
   const db = getDb();
-  const rows = await db
+  return db
     .select({
       id: schema.userProfiles.id,
       slug: schema.userProfiles.slug,
@@ -619,6 +725,15 @@ async function getProfiles(userId: number) {
     .from(schema.userProfiles)
     .where(and(eq(schema.userProfiles.userId, userId), eq(schema.userProfiles.isActive, true)))
     .orderBy(desc(schema.userProfiles.updatedAt), asc(schema.userProfiles.displayName));
+}
+
+async function getProfiles(userId: number) {
+  let rows = await queryActiveProfiles(userId);
+
+  if (rows.length === 0 || !rows.some((row) => row.isDefault)) {
+    await ensureDefaultUserProfile(userId);
+    rows = await queryActiveProfiles(userId);
+  }
 
   return rows.map((row) => normalizeProfileRow(row));
 }
@@ -704,7 +819,13 @@ export async function createUserProfile({
   await ensureDefaultUserProfile(userId);
 
   const db = getDb();
+  const activeProfiles = await queryActiveProfiles(userId);
+  if (activeProfiles.length >= MAX_ACTIVE_PROFILES_PER_USER) {
+    throw new ProfileLimitExceededError();
+  }
+
   const normalizedDisplayName = normalizeProfileDisplayName(displayName, "New analyst");
+  const normalizedInterest = normalizeInterestStatement(interestStatement);
   const duplicateProfile = await findProfileByDisplayName(userId, normalizedDisplayName);
 
   if (duplicateProfile) {
@@ -731,7 +852,7 @@ export async function createUserProfile({
         userId,
         slug,
         displayName: normalizedDisplayName,
-        interestStatement: interestStatement.trim(),
+        interestStatement: normalizedInterest,
       })
       .returning({
         id: schema.userProfiles.id,
@@ -753,6 +874,10 @@ export async function createUserProfile({
     throw new Error("Failed to create user profile");
   }
 
+  if (normalizedInterest) {
+    await enqueueProfileScoring(createdProfile.id);
+  }
+
   return normalizeProfileRow(createdProfile);
 }
 
@@ -771,9 +896,16 @@ export async function updateUserProfile({
   const [existingProfile] = await db
     .select({
       slug: schema.userProfiles.slug,
+      interestStatement: schema.userProfiles.interestStatement,
     })
     .from(schema.userProfiles)
-    .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)))
+    .where(
+      and(
+        eq(schema.userProfiles.id, profileId),
+        eq(schema.userProfiles.userId, userId),
+        eq(schema.userProfiles.isActive, true),
+      ),
+    )
     .limit(1);
 
   if (!existingProfile) {
@@ -781,6 +913,8 @@ export async function updateUserProfile({
   }
 
   const normalizedDisplayName = normalizeProfileDisplayName(displayName, "Untitled analyst");
+  const normalizedInterest = normalizeInterestStatement(interestStatement);
+  const interestChanged = existingProfile.interestStatement.trim() !== normalizedInterest;
   const duplicateProfile = await findProfileByDisplayName(userId, normalizedDisplayName, profileId);
 
   if (duplicateProfile) {
@@ -803,10 +937,16 @@ export async function updateUserProfile({
       .update(schema.userProfiles)
       .set({
         displayName: normalizedDisplayName,
-        interestStatement: interestStatement.trim(),
+        interestStatement: normalizedInterest,
         updatedAt: new Date(),
       })
-      .where(and(eq(schema.userProfiles.id, profileId), eq(schema.userProfiles.userId, userId)))
+      .where(
+        and(
+          eq(schema.userProfiles.id, profileId),
+          eq(schema.userProfiles.userId, userId),
+          eq(schema.userProfiles.isActive, true),
+        ),
+      )
       .returning({
         id: schema.userProfiles.id,
         slug: schema.userProfiles.slug,
@@ -825,6 +965,17 @@ export async function updateUserProfile({
 
   if (!updatedProfile) {
     throw new Error(`User profile ${profileId} was not found`);
+  }
+
+  if (interestChanged) {
+    await Promise.all([
+      db.delete(schema.documentScores).where(eq(schema.documentScores.profileId, profileId)),
+      db.delete(schema.rankingCache).where(eq(schema.rankingCache.profileId, profileId)),
+    ]);
+
+    if (normalizedInterest) {
+      await enqueueProfileScoring(profileId);
+    }
   }
 
   return normalizeProfileRow(updatedProfile);
@@ -964,6 +1115,105 @@ export async function setDefaultUserProfile({
   });
 }
 
+function buildSelectedProfileIdSubquery(ownerUserId: number, profileSlug?: string | null) {
+  const db = getDb();
+  if (profileSlug) {
+    return db
+      .select({ id: schema.userProfiles.id })
+      .from(schema.userProfiles)
+      .where(
+        and(
+          eq(schema.userProfiles.userId, ownerUserId),
+          eq(schema.userProfiles.isActive, true),
+          eq(schema.userProfiles.slug, profileSlug),
+        ),
+      )
+      .limit(1);
+  }
+
+  return db
+    .select({ id: schema.userProfiles.id })
+    .from(schema.userProfiles)
+    .where(and(eq(schema.userProfiles.userId, ownerUserId), eq(schema.userProfiles.isActive, true)))
+    .orderBy(
+      desc(schema.userProfiles.isDefault),
+      desc(schema.userProfiles.updatedAt),
+      asc(schema.userProfiles.displayName),
+    )
+    .limit(1);
+}
+
+async function queryScoredDocumentsForProfile({
+  profileIdFilter,
+  cutoff,
+  readStateUserId,
+}: {
+  profileIdFilter: number | ReturnType<typeof buildSelectedProfileIdSubquery>;
+  cutoff: Date;
+  readStateUserId: number | null;
+}) {
+  const db = getDb();
+  const baseSelect = {
+    id: schema.documents.id,
+    title: schema.documents.title,
+    summary: schema.documents.summary,
+    bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
+    canonicalUrl: schema.documents.canonicalUrl,
+    sourceId: schema.sources.id,
+    sourceName: schema.sources.name,
+    sourceSlug: schema.sources.slug,
+    canonicalDomain: schema.sources.canonicalDomain,
+    category: schema.sources.category,
+    trustTier: schema.sources.trustTier,
+    sourcePublishedAt: schema.documents.sourcePublishedAt,
+    discoveredAt: schema.documents.discoveredAt,
+    sortTime: documentSortKey,
+    score: schema.documentScores.score,
+    whyRelevant: schema.documentScores.whyRelevant,
+    model: schema.documentScores.model,
+  };
+
+  if (readStateUserId) {
+    return db
+      .select({
+        ...baseSelect,
+        readAt: schema.documentReads.readAt,
+      })
+      .from(schema.documentScores)
+      .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
+      .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+      .leftJoin(
+        schema.documentReads,
+        and(
+          eq(schema.documentReads.documentId, schema.documents.id),
+          eq(schema.documentReads.userId, readStateUserId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.documentScores.profileId, profileIdFilter),
+          gt(documentSortKey, cutoff),
+        ),
+      )
+      .orderBy(desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
+      .limit(MAX_CANDIDATE_DOCUMENTS);
+  }
+
+  return db
+    .select(baseSelect)
+    .from(schema.documentScores)
+    .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .where(
+      and(
+        eq(schema.documentScores.profileId, profileIdFilter),
+        gt(documentSortKey, cutoff),
+      ),
+    )
+    .orderBy(desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
+    .limit(MAX_CANDIDATE_DOCUMENTS);
+}
+
 async function buildPersonalizedFeedSnapshot({
   profileSlug,
   timeWindow,
@@ -978,9 +1228,23 @@ async function buildPersonalizedFeedSnapshot({
   forceSummaryRefresh?: boolean;
 }): Promise<PersonalizedFeedSnapshot> {
   const showWhyRelevant = loadWebEnv().feedShowWhyRelevant;
-  const profiles = await getProfiles(ownerUserId);
+  const cutoff = getTimeWindowCutoff(timeWindow);
+  const windowLabel = TIME_WINDOW_LABELS[timeWindow];
+  const profileSubquery = buildSelectedProfileIdSubquery(ownerUserId, profileSlug);
+  const [profiles, candidateDocuments, initialScoredRows] = await Promise.all([
+    getProfiles(ownerUserId),
+    getCandidateDocuments(cutoff, readStateUserId),
+    queryScoredDocumentsForProfile({
+      profileIdFilter: profileSubquery,
+      cutoff,
+      readStateUserId,
+    }),
+  ]);
+  const matchedBySlug = profileSlug
+    ? profiles.find((profile) => profile.slug === profileSlug) ?? null
+    : null;
   const selectedProfile =
-    profiles.find((profile) => profile.slug === profileSlug) ??
+    matchedBySlug ??
     (profileSlug ? null : selectDefaultProfile(profiles)) ??
     profiles[0];
 
@@ -988,9 +1252,6 @@ async function buildPersonalizedFeedSnapshot({
     throw new Error("Expected at least one active user profile");
   }
 
-  const cutoff = getTimeWindowCutoff(timeWindow);
-  const windowLabel = TIME_WINDOW_LABELS[timeWindow];
-  const candidateDocuments = await getCandidateDocuments(cutoff);
   const defaultShortlist = selectTopDocuments(candidateDocuments, [], MAX_SELECTED_DOCUMENTS, MAX_PER_SOURCE);
 
   function buildRemainingDocuments(excludeIds: Set<number>) {
@@ -1017,7 +1278,10 @@ async function buildPersonalizedFeedSnapshot({
     };
   }
 
-  async function withReadState(topDocuments: PersonalizedFeedDocument[], remainingDocuments: PersonalizedFeedDocument[]) {
+  function withReadState(
+    topDocuments: PersonalizedFeedDocument[],
+    remainingDocuments: PersonalizedFeedDocument[],
+  ) {
     if (!readStateUserId) {
       return {
         topDocuments,
@@ -1025,21 +1289,17 @@ async function buildPersonalizedFeedSnapshot({
       };
     }
 
-    const [readTopDocuments, readRemainingDocuments] = await Promise.all([
-      applyReadStateToDocuments(readStateUserId, topDocuments),
-      applyReadStateToDocuments(readStateUserId, remainingDocuments),
-    ]);
-
     return promoteUnreadTopStories(
-      readTopDocuments,
-      readRemainingDocuments,
+      topDocuments,
+      remainingDocuments,
       MAX_SELECTED_DOCUMENTS,
+      MAX_PER_SOURCE,
     );
   }
 
   if (!selectedProfile.interestStatement.trim()) {
     const topIds = new Set(defaultShortlist.map((d) => d.id));
-    const documentsWithReadState = await withReadState(defaultShortlist, buildRemainingDocuments(topIds));
+    const documentsWithReadState = withReadState(defaultShortlist, buildRemainingDocuments(topIds));
     return {
       profiles,
       selectedProfile,
@@ -1057,50 +1317,39 @@ async function buildPersonalizedFeedSnapshot({
     };
   }
 
-  // Try pre-computed scores — fetch top scored documents directly from DB
-  const db = getDb();
-  const scoredRows = await db
-    .select({
-      id: schema.documents.id,
-      title: schema.documents.title,
-      summary: schema.documents.summary,
-      bodyText: schema.documents.bodyText,
-      canonicalUrl: schema.documents.canonicalUrl,
-      sourceId: schema.sources.id,
-      sourceName: schema.sources.name,
-      sourceSlug: schema.sources.slug,
-      canonicalDomain: schema.sources.canonicalDomain,
-      category: schema.sources.category,
-      sourcePublishedAt: schema.documents.sourcePublishedAt,
-      discoveredAt: schema.documents.discoveredAt,
-      sortTime: documentSortKey,
-      score: schema.documentScores.score,
-      whyRelevant: schema.documentScores.whyRelevant,
-      model: schema.documentScores.model,
-    })
-    .from(schema.documentScores)
-    .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
-    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-    .where(
-      and(
-        eq(schema.documentScores.profileId, selectedProfile.id),
-        gt(documentSortKey, cutoff),
-      ),
-    )
-    .orderBy(desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
-    .limit(MAX_CANDIDATE_DOCUMENTS);
+  const scoredRows =
+    profileSlug && !matchedBySlug
+      ? await queryScoredDocumentsForProfile({
+          profileIdFilter: selectedProfile.id,
+          cutoff,
+          readStateUserId,
+        })
+      : initialScoredRows;
 
   if (scoredRows.length > 0) {
+    const nowMs = Date.now();
     const rankedScoredRows = scoredRows
-      .map((row) => ({
-        row,
-        adjustedScore: getFreshnessAdjustedScore(
-          row.score,
-          row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime),
-          cutoff,
-          new Date(),
-        ),
-      }))
+      .map((row) => {
+        const sortTime = row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime);
+        const parsedMeta = parseWhyRelevantMetadata(row.whyRelevant);
+        const adjustedScore =
+          computeAdjustedStoryScore({
+            score: row.score,
+            sortTime,
+            cutoff,
+            now: nowMs,
+            freshnessBoostMax: FRESHNESS_BOOST_BY_WINDOW[timeWindow],
+            trustTier: row.trustTier,
+            confidence: parsedMeta.confidence,
+            minQualifyingScore: MIN_TOP_STORY_SCORE,
+          }) ?? row.score;
+
+        return {
+          row,
+          cleanWhyRelevant: parsedMeta.whyRelevant || null,
+          adjustedScore,
+        };
+      })
       .sort((a, b) => {
         if (b.adjustedScore !== a.adjustedScore) {
           return b.adjustedScore - a.adjustedScore;
@@ -1109,31 +1358,42 @@ async function buildPersonalizedFeedSnapshot({
         return compareBySortTimeDescThenIdDesc(a.row, b.row);
       });
 
-    const scoredDocs: PersonalizedFeedDocument[] = rankedScoredRows.map(({ row }, index) => ({
-      ...mapCandidateRow(row),
-      llmRank: index + 1,
-      matchScore: row.score,
-      whyRelevant: row.whyRelevant,
-    }));
+    const scoredDocs: PersonalizedFeedDocument[] = rankedScoredRows.map(
+      ({ row, cleanWhyRelevant }, index) => ({
+        ...mapCandidateRow(row),
+        llmRank: index + 1,
+        matchScore: row.score,
+        whyRelevant: cleanWhyRelevant,
+      }),
+    );
 
     const scoredIds = new Set(scoredDocs.map((d) => d.id));
     const unscoredCandidates = candidateDocuments.filter((d) => !scoredIds.has(d.id));
+    const qualifyingScoredDocs = scoredDocs.filter(
+      (d) => (d.matchScore ?? 0) >= MIN_TOP_STORY_SCORE,
+    );
 
-    const topDocuments = selectTopDocuments(scoredDocs, unscoredCandidates, MAX_SELECTED_DOCUMENTS, MAX_PER_SOURCE);
+    const topDocuments = selectTopDocuments(
+      qualifyingScoredDocs,
+      unscoredCandidates,
+      MAX_SELECTED_DOCUMENTS,
+      MAX_PER_SOURCE,
+    );
     const topIds = new Set(topDocuments.map((d) => d.id));
     const remaining = [
       ...scoredDocs.filter((d) => !topIds.has(d.id)),
-      ...unscoredCandidates,
+      ...unscoredCandidates.filter((d) => !topIds.has(d.id)),
     ];
 
     const firstModel = rankedScoredRows[0]?.row.model ?? null;
-    const documentsWithReadState = await withReadState(topDocuments, remaining);
+    const documentsWithReadState = withReadState(topDocuments, remaining);
     const topStoriesSummary = await summarizeTopDocumentsForProfile(
       selectedProfile,
-      documentsWithReadState.topDocuments,
+      topDocuments,
       timeWindow,
       {
         forceRefresh: forceSummaryRefresh,
+        allowGenerate: true,
       },
     );
 
@@ -1156,13 +1416,14 @@ async function buildPersonalizedFeedSnapshot({
 
   const topIds = new Set(defaultShortlist.map((d) => d.id));
   const remainingDocuments = buildRemainingDocuments(topIds);
-  const documentsWithReadState = await withReadState(defaultShortlist, remainingDocuments);
+  const documentsWithReadState = withReadState(defaultShortlist, remainingDocuments);
   const topStoriesSummary = await summarizeTopDocumentsForProfile(
     selectedProfile,
-    documentsWithReadState.topDocuments,
+    defaultShortlist,
     timeWindow,
     {
       forceRefresh: forceSummaryRefresh,
+      allowGenerate: forceSummaryRefresh,
     },
   );
   return {
@@ -1237,22 +1498,64 @@ export async function forceTopStoriesSummaryForProfile(profileId: number, timeWi
   };
 }
 
-export async function getPublicAiEngineerFeedSnapshot(timeWindow: TimeWindow = "week"): Promise<PersonalizedFeedSnapshot> {
-  const db = getDb();
-  const [publicOwner] = await db
-    .select({ id: schema.authUsers.id })
-    .from(schema.authUsers)
-    .where(and(eq(schema.authUsers.email, PUBLIC_FEED_OWNER_EMAIL), eq(schema.authUsers.isActive, true)))
-    .limit(1);
+let cachedPublicFeedOwnerId: number | null = null;
+const publicFeedCache = new Map<
+  TimeWindow,
+  { expiresAt: number; snapshot: PersonalizedFeedSnapshot }
+>();
+const publicFeedInFlight = new Map<TimeWindow, Promise<PersonalizedFeedSnapshot>>();
 
-  if (!publicOwner) {
-    throw new Error(`Public feed owner ${PUBLIC_FEED_OWNER_EMAIL} was not found`);
+export async function getPublicAiEngineerFeedSnapshot(timeWindow: TimeWindow = "week"): Promise<PersonalizedFeedSnapshot> {
+  const now = Date.now();
+  const cached = publicFeedCache.get(timeWindow);
+  if (cached && cached.expiresAt > now) {
+    return cached.snapshot;
   }
 
-  return buildPersonalizedFeedSnapshot({
-    profileSlug: PUBLIC_FEED_PROFILE_SLUG,
-    timeWindow,
-    ownerUserId: publicOwner.id,
-    readStateUserId: null,
-  });
+  const inFlight = publicFeedInFlight.get(timeWindow);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const loadPromise = (async () => {
+    try {
+      if (!cachedPublicFeedOwnerId) {
+        const db = getDb();
+        const [publicOwner] = await db
+          .select({ id: schema.authUsers.id })
+          .from(schema.authUsers)
+          .where(
+            and(
+              eq(schema.authUsers.email, PUBLIC_FEED_OWNER_EMAIL),
+              eq(schema.authUsers.isActive, true),
+            ),
+          )
+          .limit(1);
+
+        if (!publicOwner) {
+          throw new Error(`Public feed owner ${PUBLIC_FEED_OWNER_EMAIL} was not found`);
+        }
+        cachedPublicFeedOwnerId = publicOwner.id;
+      }
+
+      const snapshot = await buildPersonalizedFeedSnapshot({
+        profileSlug: PUBLIC_FEED_PROFILE_SLUG,
+        timeWindow,
+        ownerUserId: cachedPublicFeedOwnerId,
+        readStateUserId: null,
+      });
+
+      publicFeedCache.set(timeWindow, {
+        expiresAt: Date.now() + PUBLIC_FEED_CACHE_TTL_MS,
+        snapshot,
+      });
+
+      return snapshot;
+    } finally {
+      publicFeedInFlight.delete(timeWindow);
+    }
+  })();
+
+  publicFeedInFlight.set(timeWindow, loadPromise);
+  return loadPromise;
 }

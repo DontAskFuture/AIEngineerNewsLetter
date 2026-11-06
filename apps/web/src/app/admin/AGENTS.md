@@ -7,9 +7,9 @@ This file applies to `apps/web/src/app/admin`.
 - This route is the pipeline operations view.
 - Access is restricted by `ADMIN_EMAILS`; production should keep that set to `lianglingfan@gmail.com`.
 - It reads dashboard metrics, endpoint health, recent fetch attempts, scoring stats (per-source and aggregate), and scoring job history from live Postgres tables.
-- It surfaces pg-boss queue state plus recent crawl, scoring, and queue error logs for incident diagnosis.
+- It surfaces pg-boss queue state (`Crawl`, `Scoring`, `Newsletter`) plus recent crawl, scoring, and queue error logs for incident diagnosis, querying active profiles, dashboard metrics, crawl statuses, and operations snapshots in parallel.
 - Admin actions enqueue crawl and scoring jobs into pg-boss via server actions. The worker processes them.
-- The force-summary admin action is the exception: it runs a short OpenRouter call in the web app to refresh the cached weekly top-10 profile briefing.
+- The force-summary admin action is the exception: it validates a positive integer `profileId` and runs a short OpenRouter call in the web app to refresh the cached weekly top-10 profile briefing.
 - `scoring-progress.tsx` polls `/api/scoring-status` to show live progress and job history.
 - `action-button.tsx` provides `ActionButton` for server-action-triggered operations with toast feedback; it also exports `StreamingActionButton` for fetch-and-stream endpoints, but no admin control currently renders it.
 

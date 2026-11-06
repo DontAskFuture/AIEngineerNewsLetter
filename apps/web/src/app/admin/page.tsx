@@ -11,7 +11,7 @@ import {
   formatRelativeTime,
 } from "@/lib/formatters";
 import { getOperationsSnapshot } from "@/lib/operations";
-import { getScoringStats, getScoringStatsBySource } from "@/lib/scoring";
+import { getScoringStatsBySource } from "@/lib/scoring";
 import { getDb, schema } from "@ai-intel/db";
 import { scoringConfig } from "@ai-intel/shared";
 import { eq, asc } from "drizzle-orm";
@@ -28,6 +28,7 @@ function formatScore(value: number | null) {
 function formatQueueName(name: string) {
   if (name === "fetch-source-endpoint") return "Crawl";
   if (name === "score-documents") return "Scoring";
+  if (name === "send-daily-newsletter") return "Newsletter";
   return name;
 }
 
@@ -40,25 +41,35 @@ export default async function AdminPage() {
   const env = loadWebEnv();
 
   const db = getDb();
-  const activeProfiles = await db
-    .select({
-      id: schema.userProfiles.id,
-      displayName: schema.userProfiles.displayName,
-      slug: schema.userProfiles.slug,
-      updatedAt: schema.userProfiles.updatedAt,
-    })
-    .from(schema.userProfiles)
-    .where(eq(schema.userProfiles.isActive, true))
-    .orderBy(asc(schema.userProfiles.id));
+  const [activeProfiles, snapshot, crawlStatus, operationsSnapshot, rawSourceScoringStats] =
+    await Promise.all([
+      db
+        .select({
+          id: schema.userProfiles.id,
+          displayName: schema.userProfiles.displayName,
+          slug: schema.userProfiles.slug,
+          updatedAt: schema.userProfiles.updatedAt,
+        })
+        .from(schema.userProfiles)
+        .where(eq(schema.userProfiles.isActive, true))
+        .orderBy(asc(schema.userProfiles.id)),
+      getDashboardSnapshot(),
+      getCrawlJobStatuses(),
+      getOperationsSnapshot(),
+      getScoringStatsBySource(),
+    ]);
   const firstProfileId = activeProfiles[0]?.id ?? null;
-
-  const [snapshot, crawlStatus, scoringStats, sourceScoringStats, operationsSnapshot] = await Promise.all([
-    getDashboardSnapshot(),
-    getCrawlJobStatuses(),
-    firstProfileId ? getScoringStats(firstProfileId) : Promise.resolve(null),
-    firstProfileId ? getScoringStatsBySource(firstProfileId) : Promise.resolve([]),
-    getOperationsSnapshot(),
-  ]);
+  const sourceScoringStats = firstProfileId ? rawSourceScoringStats : [];
+  const scoringStats = firstProfileId
+    ? sourceScoringStats.reduce(
+        (acc, source) => ({
+          totalDocuments: acc.totalDocuments + source.totalDocuments,
+          scoredDocuments: acc.scoredDocuments + source.scoredDocuments,
+          unscoredDocuments: acc.unscoredDocuments + source.unscoredDocuments,
+        }),
+        { totalDocuments: 0, scoredDocuments: 0, unscoredDocuments: 0 },
+      )
+    : null;
 
   const adminCards = [
     {
@@ -271,6 +282,42 @@ export default async function AdminPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          <div className="surface-panel rounded-2xl px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              Newsletters sent (7d / total)
+            </p>
+            <p className="display-font mt-2 text-2xl font-semibold">
+              {operationsSnapshot.newsletterSummary.sentLast7Days} / {operationsSnapshot.newsletterSummary.totalSent}
+            </p>
+            <p className="mt-1 text-xs text-[color:var(--muted)]">
+              Latest: {formatRelativeTime(operationsSnapshot.newsletterSummary.latestSentAt)}
+            </p>
+          </div>
+          <div className="surface-panel rounded-2xl px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              Failed logins (24h)
+            </p>
+            <p className="display-font mt-2 text-2xl font-semibold">
+              {operationsSnapshot.systemHygiene.failedLoginAttempts24hCount}
+            </p>
+            <p className="mt-1 text-xs text-[color:var(--muted)]">
+              Expired sessions awaiting prune: {operationsSnapshot.systemHygiene.expiredSessionsCount}
+            </p>
+          </div>
+          <div className="surface-panel rounded-2xl px-4 py-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              Expired summary cache rows
+            </p>
+            <p className="display-font mt-2 text-2xl font-semibold">
+              {operationsSnapshot.systemHygiene.expiredRankingCacheCount}
+            </p>
+            <p className="mt-1 text-xs text-[color:var(--muted)]">
+              Pruned automatically by worker cleanup
+            </p>
           </div>
         </div>
       </section>

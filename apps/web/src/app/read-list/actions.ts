@@ -7,6 +7,7 @@ import {
   addDocumentToReadList,
   removeDocumentFromReadList,
 } from "@/lib/document-read-list";
+import { isValidTimeWindow } from "@/lib/personalized-feed";
 import { markDocumentRead } from "@/lib/read-tracking";
 
 function getTextField(formData: FormData, fieldName: string) {
@@ -17,8 +18,9 @@ function getTextField(formData: FormData, fieldName: string) {
 function resolveRedirect(formData: FormData) {
   const returnTo = getTextField(formData, "returnTo");
   const filter = getTextField(formData, "filter") || "all";
-  const timeWindow = getTextField(formData, "timeWindow") || "week";
-  const profile = getTextField(formData, "profile") || null;
+  const rawTimeWindow = getTextField(formData, "timeWindow");
+  const timeWindow = isValidTimeWindow(rawTimeWindow) ? rawTimeWindow : "week";
+  const profile = getTextField(formData, "profile").trim().slice(0, 64) || null;
 
   if (returnTo === "feed") {
     const params = new URLSearchParams();
@@ -48,7 +50,11 @@ export async function addDocumentToReadListAction(formData: FormData) {
     redirect(resolveRedirect(formData));
   }
 
-  await addDocumentToReadList(currentUser.id, documentId);
+  try {
+    await addDocumentToReadList(currentUser.id, documentId);
+  } catch (error) {
+    console.warn("Could not add document to read list", { documentId, userId: currentUser.id, error });
+  }
   revalidatePath("/read-list");
   revalidatePath("/feed");
   redirect(resolveRedirect(formData));
@@ -76,7 +82,11 @@ export async function markDocumentReadAction(formData: FormData) {
     redirect(resolveRedirect(formData));
   }
 
-  await markDocumentRead(currentUser.id, documentId);
+  try {
+    await markDocumentRead(currentUser.id, documentId);
+  } catch (error) {
+    console.warn("Could not mark document as read", { documentId, userId: currentUser.id, error });
+  }
   revalidatePath("/read-list");
   revalidatePath("/feed");
   redirect(resolveRedirect(formData));

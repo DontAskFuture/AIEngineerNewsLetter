@@ -13,5 +13,5 @@ This file applies to `apps/web/src/app/read-list`.
 ## Implementation Guidance
 - The page and server actions both require a signed-in user; anonymous visitors never see read-list UI or mutations.
 - Filter is URL-driven (`filter=all|unread`) without a time window; saved stories stay listed until removed.
-- Prefer server-rendered forms for add/remove/mark-read mutations; use `revalidatePath` on `/read-list` and `/feed`.
+- Prefer server-rendered forms for add/remove/mark-read mutations; validate `timeWindow` on return redirects, tolerate stale/pruned document IDs gracefully, and use `revalidatePath` on `/read-list` and `/feed`.
 - Feed story cards add/remove individual documents via shared read-list server actions.

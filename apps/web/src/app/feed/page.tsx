@@ -55,7 +55,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
       ? "That profile name is already used on your account. Choose a unique name for each profile."
       : errorCode === "last_profile_delete"
         ? "You need at least one active profile. Create another profile before deleting this one."
-      : null;
+        : errorCode === "profile_limit_exceeded"
+          ? "You have reached the maximum of 10 active profiles. Delete an existing profile before creating a new one."
+          : null;
 
   const [personalizedFeed, savedDocumentIds] = await Promise.all([
     currentUser
@@ -191,6 +193,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <input
                     id="displayName"
                     name="displayName"
+                    maxLength={80}
                     defaultValue={personalizedFeed.selectedProfile.displayName}
                     className="field-shell px-4 py-3 text-sm"
                   />
@@ -203,6 +206,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <textarea
                     id="interestStatement"
                     name="interestStatement"
+                    maxLength={2000}
                     defaultValue={personalizedFeed.selectedProfile.interestStatement}
                     rows={7}
                     className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
@@ -267,6 +271,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <input
                     id="newDisplayName"
                     name="displayName"
+                    maxLength={80}
                     placeholder="Example: Infra scout"
                     className="field-shell px-4 py-3 text-sm"
                   />
@@ -278,6 +283,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <textarea
                     id="newInterestStatement"
                     name="interestStatement"
+                    maxLength={2000}
                     rows={7}
                     placeholder="Example: Watch inference serving, GPU utilization, model routing, and pricing or latency shifts that create infra bottlenecks."
                     className="field-shell rounded-[1.5rem] px-4 py-3 text-sm leading-7"
@@ -401,7 +407,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <a
                     href={`/out/${document.id}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="display-font mt-2 block text-2xl font-semibold tracking-tight"
                   >
                     {document.title}

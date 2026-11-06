@@ -3,6 +3,14 @@ const trackingKeys = new Set(["fbclid", "gclid", "mc_cid", "mc_eid", "ref", "ref
 export function canonicalizeUrl(value: string) {
   const url = new URL(value);
 
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`Unsupported URL protocol: ${url.protocol}`);
+  }
+
+  if (url.username || url.password) {
+    throw new Error("URLs with embedded credentials are not allowed");
+  }
+
   url.hash = "";
 
   for (const key of Array.from(url.searchParams.keys())) {

@@ -11,6 +11,10 @@ interface SendEmailInput {
   text: string;
 }
 
+function sanitizeHeaderField(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").trim();
+}
+
 export async function sendTransactionalEmail({ to, subject, html, text }: SendEmailInput) {
   const env = loadWorkerEnv();
 
@@ -28,13 +32,18 @@ export async function sendTransactionalEmail({ to, subject, html, text }: SendEm
     },
   });
 
+  const cleanRecipientEmail = sanitizeHeaderField(to.email);
+  const cleanRecipientName = to.name ? sanitizeHeaderField(to.name) : "";
+
   const info = await transporter.sendMail({
     from: {
-      name: env.SMTP_FROM_NAME,
-      address: env.SMTP_FROM_EMAIL,
+      name: sanitizeHeaderField(env.SMTP_FROM_NAME),
+      address: sanitizeHeaderField(env.SMTP_FROM_EMAIL),
     },
-    to: to.name ? { name: to.name, address: to.email } : to.email,
-    subject,
+    to: cleanRecipientName
+      ? { name: cleanRecipientName, address: cleanRecipientEmail }
+      : cleanRecipientEmail,
+    subject: sanitizeHeaderField(subject),
     html,
     text,
   });

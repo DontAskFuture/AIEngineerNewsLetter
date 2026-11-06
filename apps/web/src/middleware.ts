@@ -17,5 +17,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/read-list", "/read-list/:path*"],
+  matcher: ["/read-list", "/read-list/:path*", "/admin", "/admin/:path*"],
 };

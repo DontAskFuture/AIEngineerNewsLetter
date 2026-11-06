@@ -1,19 +1,32 @@
 import { getDb, schema } from "@ai-intel/db";
 import { eq, asc } from "drizzle-orm";
-import { requireAdmin } from "@/lib/auth";
+import { getAuthenticatedAdmin } from "@/lib/auth";
 import { scoreUnscoredDocuments } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
 
-export async function POST() {
-  try {
-    await requireAdmin();
-  } catch {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+export async function POST(request: Request) {
+  const secFetchSite = request.headers.get("sec-fetch-site");
+  if (secFetchSite === "cross-site") {
+    return new Response(
+      JSON.stringify({ error: "Forbidden cross-site request" }),
+      {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  const { user, isAuthorized } = await getAuthenticatedAdmin();
+  if (!user || !isAuthorized) {
+    return new Response(
+      JSON.stringify({ error: !user ? "Unauthorized" : "Forbidden" }),
+      {
+        status: !user ? 401 : 403,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   const db = getDb();

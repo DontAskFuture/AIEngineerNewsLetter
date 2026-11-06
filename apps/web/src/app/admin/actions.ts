@@ -38,7 +38,12 @@ export async function forceTopStoriesSummaryAction(profileId: number) {
     redirect("/login");
   }
 
-  await forceTopStoriesSummaryForProfile(profileId, "week");
+  const parsedProfileId = Number(profileId);
+  if (!Number.isInteger(parsedProfileId) || parsedProfileId <= 0) {
+    return;
+  }
+
+  await forceTopStoriesSummaryForProfile(parsedProfileId, "week");
 
   revalidatePath("/admin");
   revalidatePath("/feed");

@@ -5,7 +5,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 
 ## Architecture
 - `app` is the App Router surface: layouts, pages, and server actions.
-- `middleware.ts` gates `/read-list` behind the session cookie and sends anonymous users to login with a `next` return path.
+- `middleware.ts` gates `/read-list` and `/admin` behind the session cookie and sends anonymous users to login with a `next` return path.
 - `lib` is the server-side application layer for auth, dashboards, formatting, env loading, personalized ranking, document scoring, scoring progress, OpenRouter integration, operations visibility, read tracking, per-user source read lists, and job enqueueing. See `lib/AGENTS.md` for the module-by-module breakdown.
 
 ## Implementation Guidance
@@ -32,4 +32,5 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Web OpenRouter calls should select ordered model candidates from shared scoring config and keep env model overrides as explicit final fallbacks.
 - Web OpenRouter env defaults may remain a DeepSeek fallback while primary scoring and summary candidates come from shared scoring config.
 - Personalized feed time windows should filter candidate documents in SQL/application code before any OpenRouter prompt is rendered.
-- Public auth actions should call the shared login-attempt throttle before password verification and record the outcome for auditability.
+- Public auth actions (`loginAction` and `signupAction`) should call the shared login-attempt throttle before password verification, record the outcome for auditability, preserve `nextPath` across login error redirects, and never render raw `AUTH_ALLOWED_EMAILS` on unauthenticated pages.
+- External links (`target="_blank"`) should include `rel="noopener noreferrer"`, and `/out/[documentId]` redirects should validate `http(s):` URLs without embedded credentials and emit `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.

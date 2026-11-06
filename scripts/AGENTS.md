@@ -6,7 +6,7 @@ This file applies to `scripts`.
 ## Architecture
 - This folder contains repository-level automation and policy scripts.
 - Scripts here should be lightweight, deterministic, and runnable in local and CI contexts.
-- `server.mjs` is the local operations CLI for Docker Compose lifecycle, service logs, crawl/scoring job visibility, and remote deploys.
+- `server.mjs` is the local operations CLI for Docker Compose lifecycle, service logs, crawl/scoring/newsletter queue job visibility, and remote deploys.
 
 ## Implementation Guidance
 - Prefer Node built-ins for repo policy checks so scripts run without install-time coupling.

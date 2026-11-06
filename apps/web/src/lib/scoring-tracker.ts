@@ -49,7 +49,10 @@ export async function getScoringJobState(): Promise<ScoringJobState> {
   const [row] = await db
     .select()
     .from(schema.scoringJobs)
-    .orderBy(desc(schema.scoringJobs.startedAt))
+    .orderBy(
+      sql`CASE WHEN ${schema.scoringJobs.status} = 'running' THEN 0 ELSE 1 END`,
+      desc(schema.scoringJobs.startedAt),
+    )
     .limit(1);
 
   if (!row) return idleState;

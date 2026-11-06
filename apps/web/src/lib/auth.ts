@@ -1,15 +1,23 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cache } from "react";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import { loadWebEnv } from "@/lib/env";
 
 const SESSION_COOKIE_NAME = "ai_intel_session";
 const PASSWORD_HASH_BYTES = 64;
 const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 256;
+const EMAIL_MAX_LENGTH = 254;
 const LOGIN_ATTEMPT_WINDOW_MINUTES = 15;
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const MAX_FAILED_LOGIN_ATTEMPTS_PER_EMAIL = 15;
+const MAX_FAILED_LOGIN_ATTEMPTS_PER_IP = 20;
+const SESSION_LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
+const DUMMY_PASSWORD_SALT = "0123456789abcdef0123456789abcdef";
+const DUMMY_PASSWORD_HASH = scryptSync("dummy-constant-time-password", DUMMY_PASSWORD_SALT, PASSWORD_HASH_BYTES);
 
 export interface AuthenticatedUser {
   id: number;
@@ -42,6 +50,29 @@ function hashPassword(password: string, salt: string) {
   return scryptSync(password, salt, PASSWORD_HASH_BYTES).toString("hex");
 }
 
+function verifyPasswordConstantTime(
+  password: string,
+  salt: string | null | undefined,
+  expectedHashHex: string | null | undefined,
+): boolean {
+  const effectiveSalt = salt || DUMMY_PASSWORD_SALT;
+  const providedHash = scryptSync(
+    password.slice(0, PASSWORD_MAX_LENGTH),
+    effectiveSalt,
+    PASSWORD_HASH_BYTES,
+  );
+  const expectedHash = expectedHashHex
+    ? Buffer.from(expectedHashHex, "hex")
+    : DUMMY_PASSWORD_HASH;
+
+  if (expectedHash.length !== providedHash.length) {
+    timingSafeEqual(DUMMY_PASSWORD_HASH, providedHash);
+    return false;
+  }
+
+  return Boolean(expectedHashHex) && timingSafeEqual(expectedHash, providedHash);
+}
+
 function hashSessionToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -52,18 +83,27 @@ function getSessionDurationMs() {
   return normalizedDays * 24 * 60 * 60 * 1000;
 }
 
-function shouldUseSecureCookies() {
+async function shouldUseSecureCookies() {
   const baseUrl = loadWebEnv().appBaseUrl;
-  return Boolean(baseUrl && baseUrl.startsWith("https://"));
+  if (baseUrl && baseUrl.startsWith("https://")) {
+    return true;
+  }
+  try {
+    const headerStore = await headers();
+    const forwardedProto = headerStore.get("x-forwarded-proto");
+    return forwardedProto?.split(",")[0]?.trim().toLowerCase() === "https";
+  } catch {
+    return false;
+  }
 }
 
 async function setSessionCookie(sessionToken: string, expiresAt: Date) {
-  const cookieStore = await cookies();
+  const [cookieStore, secure] = await Promise.all([cookies(), shouldUseSecureCookies()]);
 
   cookieStore.set(SESSION_COOKIE_NAME, sessionToken, {
     httpOnly: true,
     sameSite: "lax",
-    secure: shouldUseSecureCookies(),
+    secure,
     path: "/",
     expires: expiresAt,
   });
@@ -78,27 +118,34 @@ export function getAllowedEmailLabel() {
 }
 
 export async function assertLoginAttemptAllowed(email: string, ipAddress: string) {
-  const normalizedEmail = normalizeEmail(email);
+  const normalizedEmail = normalizeEmail(email).slice(0, EMAIL_MAX_LENGTH);
+  const normalizedIp = ipAddress.slice(0, 128);
 
-  if (!normalizedEmail) {
+  if (!normalizedEmail && !normalizedIp) {
     return;
   }
 
   const db = getDb();
   const attemptedAfter = new Date(Date.now() - LOGIN_ATTEMPT_WINDOW_MINUTES * 60 * 1000);
-  const [row] = await db
-    .select({ failedCount: count() })
+  const [counts] = await db
+    .select({
+      emailIpFailedCount: sql<number>`count(*) filter (where ${schema.authLoginAttempts.email} = ${normalizedEmail} and ${schema.authLoginAttempts.ipAddress} = ${normalizedIp})::int`,
+      emailFailedCount: sql<number>`count(*) filter (where ${schema.authLoginAttempts.email} = ${normalizedEmail})::int`,
+      ipFailedCount: sql<number>`count(*) filter (where ${schema.authLoginAttempts.ipAddress} = ${normalizedIp})::int`,
+    })
     .from(schema.authLoginAttempts)
     .where(
       and(
-        eq(schema.authLoginAttempts.email, normalizedEmail),
-        eq(schema.authLoginAttempts.ipAddress, ipAddress),
         eq(schema.authLoginAttempts.succeeded, false),
         gt(schema.authLoginAttempts.attemptedAt, attemptedAfter),
       ),
     );
 
-  if ((row?.failedCount ?? 0) >= MAX_FAILED_LOGIN_ATTEMPTS) {
+  if (
+    (counts?.emailIpFailedCount ?? 0) >= MAX_FAILED_LOGIN_ATTEMPTS ||
+    (normalizedEmail && (counts?.emailFailedCount ?? 0) >= MAX_FAILED_LOGIN_ATTEMPTS_PER_EMAIL) ||
+    (normalizedIp !== "unknown" && (counts?.ipFailedCount ?? 0) >= MAX_FAILED_LOGIN_ATTEMPTS_PER_IP)
+  ) {
     throw new AuthError(
       "too_many_attempts",
       `Too many failed login attempts. Try again in ${LOGIN_ATTEMPT_WINDOW_MINUTES} minutes.`,
@@ -107,7 +154,7 @@ export async function assertLoginAttemptAllowed(email: string, ipAddress: string
 }
 
 export async function recordLoginAttempt(email: string, ipAddress: string, succeeded: boolean) {
-  const normalizedEmail = normalizeEmail(email);
+  const normalizedEmail = normalizeEmail(email).slice(0, EMAIL_MAX_LENGTH);
 
   if (!normalizedEmail) {
     return;
@@ -115,7 +162,7 @@ export async function recordLoginAttempt(email: string, ipAddress: string, succe
 
   await getDb().insert(schema.authLoginAttempts).values({
     email: normalizedEmail,
-    ipAddress,
+    ipAddress: ipAddress.slice(0, 128),
     succeeded,
   });
 }
@@ -128,7 +175,10 @@ export async function signUpWithPassword(email: string, password: string): Promi
     throw new AuthError("missing_fields", "Email and password are required.");
   }
 
-  if (!getAllowedEmails().includes(normalizedEmail)) {
+  if (
+    normalizedEmail.length > EMAIL_MAX_LENGTH ||
+    !getAllowedEmails().includes(normalizedEmail)
+  ) {
     throw new AuthError("email_not_allowed", "This email address is not allowed yet.");
   }
 
@@ -136,6 +186,13 @@ export async function signUpWithPassword(email: string, password: string): Promi
     throw new AuthError(
       "password_too_short",
       `Passwords must be at least ${PASSWORD_MIN_LENGTH} characters long.`,
+    );
+  }
+
+  if (normalizedPassword.length > PASSWORD_MAX_LENGTH) {
+    throw new AuthError(
+      "invalid_credentials",
+      `Passwords must be ${PASSWORD_MAX_LENGTH} characters or fewer.`,
     );
   }
 
@@ -184,8 +241,17 @@ export async function signInWithPassword(email: string, password: string): Promi
     throw new AuthError("missing_fields", "Email and password are required.");
   }
 
-  if (!getAllowedEmails().includes(normalizedEmail)) {
+  if (
+    normalizedEmail.length > EMAIL_MAX_LENGTH ||
+    !getAllowedEmails().includes(normalizedEmail)
+  ) {
+    verifyPasswordConstantTime(normalizedPassword, null, null);
     throw new AuthError("email_not_allowed", "This email address is not allowed yet.");
+  }
+
+  if (normalizedPassword.length > PASSWORD_MAX_LENGTH) {
+    verifyPasswordConstantTime(normalizedPassword, null, null);
+    throw new AuthError("invalid_credentials", "Email or password is incorrect.");
   }
 
   const db = getDb();
@@ -201,19 +267,18 @@ export async function signInWithPassword(email: string, password: string): Promi
     .where(eq(schema.authUsers.email, normalizedEmail))
     .limit(1);
 
-  if (!existingUser) {
+  const passwordValid = verifyPasswordConstantTime(
+    normalizedPassword,
+    existingUser?.passwordSalt,
+    existingUser?.passwordHash,
+  );
+
+  if (!existingUser || !passwordValid) {
     throw new AuthError("invalid_credentials", "Email or password is incorrect.");
   }
 
   if (!existingUser.isActive) {
     throw new AuthError("account_disabled", "This account has been disabled.");
-  }
-
-  const expectedHash = Buffer.from(existingUser.passwordHash, "hex");
-  const providedHash = Buffer.from(hashPassword(normalizedPassword, existingUser.passwordSalt), "hex");
-
-  if (expectedHash.length !== providedHash.length || !timingSafeEqual(expectedHash, providedHash)) {
-    throw new AuthError("invalid_credentials", "Email or password is incorrect.");
   }
 
   await db
@@ -248,7 +313,7 @@ export async function createSessionForUser(userId: number) {
   await setSessionCookie(sessionToken, expiresAt);
 }
 
-export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
+export const getCurrentUser = cache(async (): Promise<AuthenticatedUser | null> => {
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
@@ -265,6 +330,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
       sessionId: schema.authSessions.id,
       userId: schema.authUsers.id,
       email: schema.authUsers.email,
+      lastSeenAt: schema.authSessions.lastSeenAt,
     })
     .from(schema.authSessions)
     .innerJoin(schema.authUsers, eq(schema.authUsers.id, schema.authSessions.userId))
@@ -281,18 +347,23 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
     return null;
   }
 
-  await db
-    .update(schema.authSessions)
-    .set({
-      lastSeenAt: now,
-    })
-    .where(eq(schema.authSessions.id, activeSession.sessionId));
+  if (
+    !activeSession.lastSeenAt ||
+    now.getTime() - activeSession.lastSeenAt.getTime() > SESSION_LAST_SEEN_THROTTLE_MS
+  ) {
+    await db
+      .update(schema.authSessions)
+      .set({
+        lastSeenAt: now,
+      })
+      .where(eq(schema.authSessions.id, activeSession.sessionId));
+  }
 
   return {
     id: activeSession.userId,
     email: activeSession.email,
   } satisfies AuthenticatedUser;
-}
+});
 
 export function getSafeRedirectPath(value: string | null | undefined) {
   if (!value) {
@@ -300,11 +371,23 @@ export function getSafeRedirectPath(value: string | null | undefined) {
   }
 
   const trimmed = value.trim();
-  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
+  if (
+    !trimmed.startsWith("/") ||
+    trimmed.startsWith("//") ||
+    /[\u0000-\u001f\u007f\\]/.test(trimmed)
+  ) {
     return null;
   }
 
-  return trimmed;
+  try {
+    const parsed = new URL(trimmed, "http://localhost");
+    if (parsed.origin !== "http://localhost") {
+      return null;
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
 }
 
 export async function requireCurrentUser(loginNextPath?: string | null) {
@@ -320,6 +403,17 @@ export async function requireCurrentUser(loginNextPath?: string | null) {
 
 export function isAdmin(email: string) {
   return loadWebEnv().adminEmails.includes(email.toLowerCase());
+}
+
+export async function getAuthenticatedAdmin(): Promise<{
+  user: AuthenticatedUser | null;
+  isAuthorized: boolean;
+}> {
+  const currentUser = await getCurrentUser();
+  if (!currentUser) {
+    return { user: null, isAuthorized: false };
+  }
+  return { user: currentUser, isAuthorized: isAdmin(currentUser.email) };
 }
 
 export async function requireAdmin() {
