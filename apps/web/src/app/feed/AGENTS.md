@@ -17,7 +17,7 @@ This file applies to `apps/web/src/app/feed`.
 - Server-action redirects should fall back to `window=week` when no current window is submitted.
 - The feed reads pre-computed scores from `document_scores`, then may call OpenRouter once at render time to create a profile-level briefing for the selected top stories.
 - Feed copy should describe scoring as pre-computed while treating the profile briefing as a live, failure-tolerant enhancement that can include trends, learnings, and a further-study paragraph.
-- The stored per-story `whyRelevant` copy should stay available to the UI, but rendering is gated by `FEED_SHOW_WHY_RELEVANT`.
+- Each story card renders a practitioner take (`formatPractitionerTake(curatorNote, whyRelevant)`) explaining why the story matters and what AI engineers can learn from it, preferring manual `curatorNote` overrides and falling back to cleaned `whyRelevant` commentary.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
 - After read state is applied for signed-in users, stories marked read are removed from the top-10 shortlist and the next unread candidates backfill those slots.
 - Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s default profile, styled with personal branding (`BRAND_AUTHOR_*`) and an inline email newsletter subscription form plus RSS link; profile management and story curation controls stay signed-in only.

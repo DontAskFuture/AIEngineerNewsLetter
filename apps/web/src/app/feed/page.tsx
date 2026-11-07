@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatPractitionerTake } from "@ai-intel/shared";
 import { getCurrentUser } from "@/lib/auth";
 import { loadWebEnv } from "@/lib/env";
 import {
@@ -396,15 +397,23 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
               Top stories
             </p>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-              {personalizedFeed.topStoriesSummary
-                ? "Pre-computed relevance scores are capped for source diversity, then summarized for the selected profile before you review the individual stories."
-                : "Pre-computed relevance scores are capped for source diversity so you can review the most recent high-signal items first."}
+              {isPublicView
+                ? "The highest-signal AI engineering, model, and infrastructure stories in this window — each with practitioner notes on why it matters and what to learn from it."
+                : personalizedFeed.topStoriesSummary
+                  ? "Pre-computed relevance scores are capped for source diversity, then summarized for the selected profile before you review the individual stories."
+                  : "Pre-computed relevance scores are capped for source diversity so you can review the most recent high-signal items first."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-            <span className="surface-chip px-3 py-2">10 stories</span>
-            <span className="surface-chip px-3 py-2">max 5 per source family</span>
-            <span className="surface-chip px-3 py-2">{personalizedFeed.selectedProfile.displayName}</span>
+            <span className="surface-chip px-3 py-2">Top 10 curated</span>
+            {!isPublicView ? (
+              <>
+                <span className="surface-chip px-3 py-2">max 5 per source family</span>
+                <span className="surface-chip px-3 py-2">{personalizedFeed.selectedProfile.displayName}</span>
+              </>
+            ) : (
+              <span className="surface-chip px-3 py-2">For AI Engineers</span>
+            )}
           </div>
         </div>
 
@@ -413,15 +422,17 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                  Profile briefing
+                  Curator&apos;s Briefing · What AI Engineers Should Watch
                 </p>
                 <p className="mt-3 max-w-4xl text-sm leading-7 text-[color:var(--ink)] sm:text-base">
                   {personalizedFeed.topStoriesSummary.summary}
                 </p>
               </div>
-              <span className="surface-chip w-fit max-w-full break-all px-3 py-1 text-left text-xs uppercase tracking-[0.16em]">
-                {personalizedFeed.topStoriesSummary.model}
-              </span>
+              {!isPublicView ? (
+                <span className="surface-chip w-fit max-w-full break-all px-3 py-1 text-left text-xs uppercase tracking-[0.16em]">
+                  {personalizedFeed.topStoriesSummary.model}
+                </span>
+              ) : null}
             </div>
             {personalizedFeed.topStoriesSummary.takeaways.length > 0 ? (
               <ul className="mt-4 grid gap-2 text-sm leading-6 text-[color:var(--muted)] sm:grid-cols-2">
@@ -434,7 +445,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             ) : null}
             <div className="surface-panel mt-4 rounded-[1rem] px-4 py-3">
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                Study next
+                What To Build &amp; Study Next
               </p>
               <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                 {personalizedFeed.topStoriesSummary.furtherStudy}
@@ -444,7 +455,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         ) : null}
 
         <div className="mt-6 grid gap-4">
-          {personalizedFeed.topDocuments.map((document) => (
+          {personalizedFeed.topDocuments.map((document) => {
+            const takeNote = formatPractitionerTake(document.curatorNote, document.whyRelevant);
+            return (
             <article
               key={document.id}
               className={`surface-panel rounded-[1.5rem] p-5 transition sm:p-6 ${document.isRead ? "opacity-80" : ""}`}
@@ -465,7 +478,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                         Read{document.readAt ? ` ${formatRelativeTime(document.readAt)}` : ""}
                       </span>
                     ) : null}
-                    {document.llmRank ? (
+                    {!isPublicView && document.llmRank ? (
                       <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
                         LLM rank #{document.llmRank}
                       </span>
@@ -487,23 +500,13 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
-                  {document.curatorNote ? (
+                  {takeNote ? (
                     <div className="surface-panel-strong mt-4 border-l-4 border-[color:var(--leaf)] rounded-[1.25rem] p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                        {env.brandAuthorName}&apos;s Take
+                        {env.brandAuthorName}&apos;s Take · Why It Matters &amp; What To Learn
                       </p>
                       <p className="mt-2 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
-                        {document.curatorNote}
-                      </p>
-                    </div>
-                  ) : null}
-                  {personalizedFeed.showWhyRelevant && document.whyRelevant ? (
-                    <div className="surface-panel-strong mt-4 rounded-[1.25rem] p-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                        Why Relevant To You
-                      </p>
-                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
-                        {document.whyRelevant}
+                        {takeNote}
                       </p>
                     </div>
                   ) : null}
@@ -530,7 +533,8 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </section>
 

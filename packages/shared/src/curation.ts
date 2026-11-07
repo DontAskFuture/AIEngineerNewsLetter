@@ -39,6 +39,48 @@ export function sanitizeHttpUrl(value: string, fallback: string): string {
   return fallback;
 }
 
+/**
+ * Returns the manual `curatorNote` if present, or falls back to `whyRelevant`
+ * while stripping legacy second-person profile-matching boilerplate so every
+ * story card reads like a direct practitioner take for AI engineers.
+ */
+export function formatPractitionerTake(
+  curatorNote?: string | null,
+  whyRelevant?: string | null,
+): string | null {
+  const manual = curatorNote?.trim();
+  if (manual) {
+    return manual;
+  }
+
+  const raw = whyRelevant?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  let cleaned = raw
+    .replace(
+      /[,\s;—–-]+(?:which\s+is\s+|making\s+it\s+)?(?:directly\s+)?(?:relevant|aligned|aligning|matching|matches|addressing)\s+(?:to|for|with|the\s+trending\s+topic\s+of)?\s*(?:your\s+interest(?:s)?(?:\s+in)?|an?\s+AI\s+engineer(?:'s)?|AI\s+engineering\s+advancements|AI\s+agent\s+infrastructure\s+engineering|agentic\s+AI\s+architecture)[^.]*\.?$/i,
+      ".",
+    )
+    .replace(
+      /[,\s;—–-]+(?:which\s+are\s+|a\s+)?core\s+(?:AI\s+engineering\s+concern|interest(?:s)?\s+for\s+an?\s+AI\s+engineer)[^.]*\.?$/i,
+      ".",
+    )
+    .replace(
+      /[,\s;—–-]+matching\s+interest\s+in\s+[^.]*\.?$/i,
+      ".",
+    )
+    .replace(/\.\.+$/, ".")
+    .trim();
+
+  if (!cleaned) {
+    cleaned = raw;
+  }
+
+  return cleaned;
+}
+
 export interface CuratedRssItemInput {
   id: number;
   title: string;
@@ -48,6 +90,7 @@ export interface CuratedRssItemInput {
   sortTime: Date;
   previewParagraph: string | null;
   curatorNote: string | null;
+  whyRelevant?: string | null;
   isPinned: boolean;
 }
 
@@ -74,9 +117,10 @@ export function buildCuratedRssXml({
       const link = sanitizeHttpUrl(doc.canonicalUrl, feedUrl);
       const titlePrefix = doc.isPinned ? "[Pinned Pick] " : "";
       const descriptionParts: string[] = [];
+      const take = formatPractitionerTake(doc.curatorNote, doc.whyRelevant);
 
-      if (doc.curatorNote) {
-        descriptionParts.push(`${brandAuthorName}'s Take: ${doc.curatorNote}`);
+      if (take) {
+        descriptionParts.push(`${brandAuthorName}'s Take: ${take}`);
       }
       if (doc.previewParagraph) {
         descriptionParts.push(doc.previewParagraph);

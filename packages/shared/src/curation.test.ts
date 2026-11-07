@@ -4,6 +4,7 @@ import {
   InvalidSubscriberEmailError,
   buildCuratedRssXml,
   escapeXml,
+  formatPractitionerTake,
   normalizeSubscriberEmail,
   sanitizeHttpUrl,
 } from "./curation";
@@ -24,8 +25,27 @@ describe("normalizeSubscriberEmail", () => {
   });
 });
 
+describe("formatPractitionerTake", () => {
+  it("prefers manual curatorNote when provided", () => {
+    assert.equal(
+      formatPractitionerTake("Custom curator insight.", "AI generated note."),
+      "Custom curator insight.",
+    );
+  });
+
+  it("falls back to whyRelevant and strips legacy profile-matching boilerplate", () => {
+    assert.equal(
+      formatPractitionerTake(
+        null,
+        "Details scaling GLM-5.3-Flash training to 1M tokens on 64 B200 GPUs in SkyRL, directly relevant to AI engineering advancements and model updates.",
+      ),
+      "Details scaling GLM-5.3-Flash training to 1M tokens on 64 B200 GPUs in SkyRL.",
+    );
+  });
+});
+
 describe("buildCuratedRssXml", () => {
-  it("renders valid RSS 2.0 XML with pinned badges, curator notes, and escaped XML entities", () => {
+  it("renders valid RSS 2.0 XML with pinned badges, curator notes, whyRelevant fallback, and escaped XML entities", () => {
     const xml = buildCuratedRssXml({
       brandAuthorName: "Autumn <AI>",
       brandAuthorBio: "Opinionated AI & infra notes.",
@@ -41,6 +61,7 @@ describe("buildCuratedRssXml", () => {
           sortTime: new Date("2026-11-07T12:00:00Z"),
           previewParagraph: "Fast weight refit across training & inference GPUs.",
           curatorNote: "Watch the collective bandwidth curve <100ms.",
+          whyRelevant: null,
           isPinned: true,
         },
         {
@@ -52,6 +73,7 @@ describe("buildCuratedRssXml", () => {
           sortTime: new Date("2026-11-07T11:00:00Z"),
           previewParagraph: "Preview text.",
           curatorNote: null,
+          whyRelevant: "Shows how KV cache offloading reduces TTFT by 40%.",
           isPinned: false,
         },
       ],
@@ -62,6 +84,10 @@ describe("buildCuratedRssXml", () => {
     assert.match(
       xml,
       /Autumn &lt;AI&gt;&apos;s Take: Watch the collective bandwidth curve &lt;100ms\./,
+    );
+    assert.match(
+      xml,
+      /Autumn &lt;AI&gt;&apos;s Take: Shows how KV cache offloading reduces TTFT by 40%\./,
     );
     assert.match(xml, /<link>https:\/\/example\.com\/feed\?window=week<\/link>/);
     assert.equal(sanitizeHttpUrl("javascript:alert(1)", "https://example.com"), "https://example.com");

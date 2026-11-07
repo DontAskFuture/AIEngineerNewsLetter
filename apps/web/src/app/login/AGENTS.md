@@ -14,5 +14,5 @@ This file applies to `apps/web/src/app/login`.
 - Keep brute-force feedback generic, avoid rendering raw `AUTH_ALLOWED_EMAILS` on the unauthenticated login page, enforce `required`/`maxLength` on email and password inputs, and route lockout behavior through `../../lib/auth`.
 - Authentication rules, hashing, sessions, and allowlist behavior belong in `../../lib/auth`.
 - Do not add database logic directly to the page.
-- Hide signup links while signup is invite-gated.
+- Hide signup links while signup is invite-gated, and set `robots: { index: false, follow: false }` so the secret `/login` entrypoint is not indexed.
 - The auth shell should stay theme-aware and keep the access policy explanation legible in both light and dark mode.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "ai-intel-theme";
 const COOKIE_NAME = "ai_intel_theme";
@@ -29,10 +29,25 @@ export function ThemeToggle({ initialTheme = "light" }: ThemeToggleProps) {
   const nextTheme = theme === "dark" ? "light" : "dark";
   const label = `${theme === "dark" ? "Dark" : "Light"} mode`;
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        window.location.href = "/login";
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <button
       type="button"
-      onClick={() => {
+      onClick={(event) => {
+        if (event.shiftKey || event.altKey) {
+          window.location.href = "/login";
+          return;
+        }
         setTheme(nextTheme);
         applyTheme(nextTheme);
       }}

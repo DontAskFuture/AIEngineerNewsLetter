@@ -20,7 +20,7 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 ## Implementation Guidance
 - Keep these files focused on request handling, composition, redirects, and form actions.
 - Generic feed links and auth redirects should use `/feed?window=week` so the default week window is explicit in the URL.
-- Public app chrome should hide signup entrypoints while signup is invite-gated.
+- Public app chrome should hide both login and signup entrypoints from anonymous visitors; curator login is accessed secretly via direct `/login` URL, `Cmd/Ctrl+Shift+L`, or `Shift+Click` on `ThemeToggle`.
 - Move complex business logic into `../lib`.
 - Route protection should happen at page entry, not deep in child components.
 - Shared visual primitives such as theme-aware buttons, panels, and section separation should be driven from `globals.css` and reused consistently across routes.

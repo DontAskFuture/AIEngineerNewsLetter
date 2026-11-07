@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { formatPractitionerTake } from "@ai-intel/shared";
 import {
   addDocumentToReadListAction,
   markDocumentReadAction,
@@ -36,8 +37,9 @@ export function FeedStoryActions({
   timeWindow,
   profileSlug,
 }: FeedStoryActionsProps) {
+  const defaultTake = formatPractitionerTake(curatorNote, whyRelevant) ?? "";
   const [isEditingTake, setIsEditingTake] = useState(false);
-  const [draftNote, setDraftNote] = useState(curatorNote ?? "");
+  const [draftNote, setDraftNote] = useState(defaultTake);
 
   return (
     <div className="flex flex-col gap-2 sm:items-end">
@@ -58,12 +60,12 @@ export function FeedStoryActions({
         <button
           type="button"
           onClick={() => {
-            setDraftNote(curatorNote ?? "");
+            setDraftNote(defaultTake);
             setIsEditingTake((prev) => !prev);
           }}
           className="button-secondary text-xs"
         >
-          {curatorNote ? "Edit My Take" : "Add My Take"}
+          {curatorNote || whyRelevant ? "Edit My Take" : "Add My Take"}
         </button>
 
         <form action={toggleStoryHideAction}>

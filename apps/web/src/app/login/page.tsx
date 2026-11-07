@@ -1,8 +1,16 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser, getSafeRedirectPath } from "@/lib/auth";
 import { loginAction } from "@/app/auth-actions";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 const errorMessages: Record<string, string> = {
   missing_fields: "Enter both your email and password.",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatPractitionerTake } from "@ai-intel/shared";
 import {
   formatCategoryLabel,
   formatPercent,
@@ -133,26 +134,19 @@ export function MoreStories({
                   <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
-                  {document.curatorNote ? (
-                    <div className="surface-panel-strong mt-3 border-l-4 border-[color:var(--leaf)] rounded-[1rem] p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                        {brandAuthorName}&apos;s Take
-                      </p>
-                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)]">
-                        {document.curatorNote}
-                      </p>
-                    </div>
-                  ) : null}
-                  {showWhyRelevant && document.whyRelevant ? (
-                    <div className="surface-panel-strong mt-3 rounded-[1rem] p-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                        Why Relevant To You
-                      </p>
-                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)]">
-                        {document.whyRelevant}
-                      </p>
-                    </div>
-                  ) : null}
+                  {(() => {
+                    const takeNote = formatPractitionerTake(document.curatorNote, document.whyRelevant);
+                    return takeNote ? (
+                      <div className="surface-panel-strong mt-3 border-l-4 border-[color:var(--leaf)] rounded-[1rem] p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                          {brandAuthorName}&apos;s Take · Why It Matters &amp; What To Learn
+                        </p>
+                        <p className="mt-2 text-sm leading-7 text-[color:var(--ink)]">
+                          {takeNote}
+                        </p>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 <div className="flex flex-col gap-2 sm:items-end">
                   <span className="surface-chip w-fit px-3 py-1 text-xs uppercase tracking-[0.18em]">

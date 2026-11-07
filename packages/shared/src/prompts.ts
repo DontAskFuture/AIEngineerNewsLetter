@@ -404,7 +404,7 @@ Scoring rubric:
 Do not invent document IDs and do not include any IDs that are not present in <documents>.
 
 For each document, evaluate evidence before assigning the score:
-1. If score >= 40, set 'matchedSignals' to 1-4 short phrases from <user_profile> and the document text, and write a 1-2 sentence 'whyRelevant' explanation grounded strictly in the supplied text.
+1. If score >= 40, set 'matchedSignals' to 1-4 short phrases from <user_profile> and the document text, and write a 1-2 sentence 'whyRelevant' practitioner take grounded strictly in the supplied text explaining why this story matters to AI engineers and what concrete lesson, architectural pattern, or capability we can learn from it. Write in a direct editorial voice for fellow AI engineers—never mention the prompt or use generic filler like "aligns with your interest" or "directly relevant to the profile".
 2. If score 1-39, set 'matchedSignals' to [] and write a 2-6 word phrase in 'whyRelevant' (e.g., "Generic funding news", "Consumer hardware, off-topic").
 3. Set 'confidence' to "high" (detailed excerpt with clear evidence), "medium" (brief or partial excerpt), or "low" (title-only or "None"). When 'confidence' is "low", cap 'score' at <= 65 unless the title names an exact tool or release from <user_profile>.
 

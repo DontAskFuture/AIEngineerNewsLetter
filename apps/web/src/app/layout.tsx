@@ -111,9 +111,6 @@ export default async function RootLayout({
                       RSS
                     </a>
                     <ThemeToggle initialTheme={initialTheme} />
-                    <Link href="/login" className="button-secondary">
-                      Login
-                    </Link>
                   </>
                 )}
               </nav>

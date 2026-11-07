@@ -18,7 +18,7 @@ This file applies to `packages/shared/src`.
 - `model-pool.ts` composes the two into `ScoringModelPool`, the single entry point both apps use for scoring candidates (`candidates(now, fallbackModel)`). Construct it once per process — the breaker is worthless if a fresh instance is created per call.
 - Seeded source endpoints should default to hourly cadence unless there is a deliberate reason to poll faster.
 - `url.ts` handles canonicalization, enforces `http:`/`https:` URL protocols, and rejects URLs containing embedded credentials (`username`/`password`). Covered by `url.test.ts`.
-- `curation.ts` owns pure subscriber email normalization/validation (`normalizeSubscriberEmail`, `InvalidSubscriberEmailError`) and RSS 2.0 XML feed serialization (`buildCuratedRssXml`, `escapeXml`, `sanitizeHttpUrl`). Covered by `curation.test.ts`.
+- `curation.ts` owns pure subscriber email normalization/validation (`normalizeSubscriberEmail`, `InvalidSubscriberEmailError`), practitioner take formatting (`formatPractitionerTake`), and RSS 2.0 XML feed serialization (`buildCuratedRssXml`, `escapeXml`, `sanitizeHttpUrl`). Covered by `curation.test.ts`.
 - `index.ts` is the package export surface.
 
 ## Implementation Guidance
