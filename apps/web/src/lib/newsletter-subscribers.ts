@@ -1,24 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { getDb, schema } from "@ai-intel/db";
+import { InvalidSubscriberEmailError, normalizeSubscriberEmail } from "@ai-intel/shared";
 import { eq, sql } from "drizzle-orm";
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_EMAIL_LENGTH = 254;
-
-export class InvalidSubscriberEmailError extends Error {
-  constructor() {
-    super("Enter a valid email address.");
-    this.name = "InvalidSubscriberEmailError";
-  }
-}
-
-export function normalizeSubscriberEmail(rawEmail: string): string {
-  const cleaned = rawEmail.trim().toLowerCase();
-  if (!cleaned || cleaned.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(cleaned)) {
-    throw new InvalidSubscriberEmailError();
-  }
-  return cleaned;
-}
+export { InvalidSubscriberEmailError, normalizeSubscriberEmail };
 
 export async function subscribeToNewsletter(rawEmail: string) {
   const email = normalizeSubscriberEmail(rawEmail);

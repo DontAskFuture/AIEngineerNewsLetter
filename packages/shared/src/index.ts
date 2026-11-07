@@ -1,3 +1,4 @@
+export * from "./curation";
 export * from "./default-sources";
 export * from "./prompts";
 export * from "./model-discovery";

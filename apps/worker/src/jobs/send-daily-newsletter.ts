@@ -24,14 +24,14 @@ const defaultNewsletterProfile = {
   isDefault: true,
 };
 
-interface NewsletterRecipient {
+export interface NewsletterRecipient {
   userId: number;
   email: string;
   profileId: number;
   profileName: string;
 }
 
-interface NewsletterStory {
+export interface NewsletterStory {
   id: number;
   title: string;
   canonicalUrl: string;
@@ -74,7 +74,7 @@ function sanitizeStoryUrl(value: string): string {
   return "#";
 }
 
-function selectTopStories(stories: NewsletterStory[]) {
+export function selectTopStories(stories: NewsletterStory[]) {
   const sourceCounts = new Map<string, number>();
   const seenIds = new Set<number>();
   const seenTitles = new Set<string>();
@@ -313,13 +313,14 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
   );
 }
 
-function buildNewsletterHtml(
+export function buildNewsletterHtml(
   recipient: NewsletterRecipient,
   stories: NewsletterStory[],
   newsletterDate: string,
   unsubscribeUrl?: string,
+  timeZone?: string,
 ) {
-  const env = loadWorkerEnv();
+  const resolvedTimeZone = timeZone ?? loadWorkerEnv().APP_TIME_ZONE;
   const storyItems = stories
     .map(
       (story, index) => `
@@ -331,7 +332,7 @@ function buildNewsletterHtml(
             ${escapeHtml(story.title)}
           </a>
           <p style="margin:8px 0 0 0;color:#5f6a6f;font-size:13px;">
-            ${escapeHtml(formatDate(story.sortTime, env.APP_TIME_ZONE))}
+            ${escapeHtml(formatDate(story.sortTime, resolvedTimeZone))}
           </p>
           ${
             story.curatorNote
@@ -382,13 +383,14 @@ function buildNewsletterHtml(
   `;
 }
 
-function buildNewsletterText(
+export function buildNewsletterText(
   recipient: NewsletterRecipient,
   stories: NewsletterStory[],
   newsletterDate: string,
   unsubscribeUrl?: string,
+  timeZone?: string,
 ) {
-  const env = loadWorkerEnv();
+  const resolvedTimeZone = timeZone ?? loadWorkerEnv().APP_TIME_ZONE;
   const lines = [
     `Daily AI intelligence brief for ${recipient.profileName}`,
     newsletterDate,
@@ -406,7 +408,7 @@ function buildNewsletterText(
   stories.forEach((story, index) => {
     lines.push(`${index + 1}. ${story.title}${story.isPinned ? " [Pinned Pick]" : ""}`);
     lines.push(`${story.sourceName}${story.score ? ` · Match ${story.score}/100` : ""}`);
-    lines.push(formatDate(story.sortTime, env.APP_TIME_ZONE));
+    lines.push(formatDate(story.sortTime, resolvedTimeZone));
     if (story.curatorNote) {
       lines.push(`Curator's Take: ${story.curatorNote}`);
     } else if (story.whyRelevant) {

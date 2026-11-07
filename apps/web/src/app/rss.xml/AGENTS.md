@@ -4,7 +4,7 @@
 This file applies to `apps/web/src/app/rss.xml`.
 
 ## Architecture
-- `route.ts` serves the public RSS 2.0 XML feed (`GET /rss.xml`) built from `getPublicAiEngineerFeedSnapshot("week")` and personal brand metadata in `loadWebEnv()`.
+- `route.ts` serves the public RSS 2.0 XML feed (`GET /rss.xml`) built from `getPublicAiEngineerFeedSnapshot("week")`, `buildCuratedRssXml` from `@ai-intel/shared`, and personal brand metadata in `loadWebEnv()`.
 - Pinned stories appear first, hidden stories are excluded, and any curator "My Take" (`curatorNote`) is prepended to each item's `<description>`.
 
 ## Implementation Guidance

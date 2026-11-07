@@ -6,7 +6,7 @@ This file applies to `apps/worker/src/jobs`.
 ## Architecture
 - `fetch-source-endpoint.ts` executes fetches and converts remote content into raw and normalized records.
 - `score-documents.ts` scores the most recent unscored documents for a given user profile using the shared scoring config. It writes scores to `document_scores` with progress tracked in `scoring_jobs`.
-- `send-daily-newsletter.ts` sends each active user a daily brief for their default active profile, falling back to their earliest-created active profile, through `services/smtp.ts`, and records successful sends in `newsletter_sends`.
+- `send-daily-newsletter.ts` sends each active user a daily brief for their default active profile, falling back to their earliest-created active profile, through `services/smtp.ts`, and records successful sends in `newsletter_sends`. Its pure selection and HTML/text rendering helpers (`selectTopStories`, `buildNewsletterHtml`, `buildNewsletterText`) are covered by `send-daily-newsletter.test.ts`.
 - `cleanup-crawled-documents.ts` prunes expired normalized documents, raw payload rows/files (verifying `storageKey` stays within `RAW_STORAGE_DIR`), expired `auth_sessions`, expired `ranking_cache` entries, and `auth_login_attempts` older than 7 days using the worker TTL settings.
 - `html-links.ts` owns listing-page link extraction: the `parserKey` selector registry (`htmlParserConfigs`) and `extractArticleLinks`. It is a pure, dependency-light module so listing strategies can be verified against live HTML without a database. Covered by `html-links.test.ts`.
 
