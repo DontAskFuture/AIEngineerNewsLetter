@@ -23,7 +23,12 @@ const display = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: "AI Builder Intelligence",
-  description: "Phase 0 scaffold for the AI builder market intelligence platform.",
+  description: "Opinionated AI engineering & infrastructure signal synthesis workspace.",
+  alternates: {
+    types: {
+      "application/rss+xml": "/rss.xml",
+    },
+  },
 };
 
 const themeBootstrapScript = `
@@ -97,6 +102,14 @@ export default async function RootLayout({
                   </>
                 ) : (
                   <>
+                    <a
+                      href="/rss.xml"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="button-secondary"
+                    >
+                      RSS
+                    </a>
                     <ThemeToggle initialTheme={initialTheme} />
                     <Link href="/login" className="button-secondary">
                       Login

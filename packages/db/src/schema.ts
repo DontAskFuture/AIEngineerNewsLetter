@@ -145,6 +145,48 @@ export const userDocumentReadList = pgTable(
   ],
 );
 
+export const storyCurations = pgTable(
+  "story_curations",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => authUsers.id, { onDelete: "cascade" }),
+    documentId: bigint("document_id", { mode: "number" })
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    curatorNote: text("curator_note"),
+    isPinned: boolean("is_pinned").notNull().default(false),
+    isHidden: boolean("is_hidden").notNull().default(false),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("story_curations_user_document_idx").on(table.userId, table.documentId),
+    index("story_curations_user_pinned_idx").on(table.userId, table.isPinned),
+  ],
+);
+
+export const newsletterSubscribers = pgTable(
+  "newsletter_subscribers",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    email: text("email").notNull(),
+    unsubscribeToken: text("unsubscribe_token").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    lastSentDate: text("last_sent_date"),
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("newsletter_subscribers_email_idx").on(table.email),
+    uniqueIndex("newsletter_subscribers_token_idx").on(table.unsubscribeToken),
+    index("newsletter_subscribers_active_idx").on(table.isActive),
+  ],
+);
+
 export const sources = pgTable(
   "sources",
   {

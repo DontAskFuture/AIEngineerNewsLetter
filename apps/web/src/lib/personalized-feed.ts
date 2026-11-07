@@ -10,7 +10,7 @@ import {
   type SourceCategory,
 } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, asc, desc, eq, gt, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, ne, or, sql } from "drizzle-orm";
 import { enqueueProfileScoring } from "@/lib/crawler";
 import { loadWebEnv } from "@/lib/env";
 import { summarizeTopStoriesForProfile } from "@/lib/openrouter";
@@ -21,11 +21,14 @@ const MAX_SELECTED_DOCUMENTS = 10;
 const MAX_PER_SOURCE = 5;
 const MIN_TOP_STORY_SCORE = 40;
 const MAX_ACTIVE_PROFILES_PER_USER = 10;
+export const MAX_CURATOR_NOTE_LENGTH = 1000;
 const PUBLIC_FEED_OWNER_EMAIL = "lianglingfan@gmail.com";
 const PUBLIC_FEED_PROFILE_SLUG = "founding-analyst";
 const PUBLIC_FEED_CACHE_TTL_MS = 30_000;
-const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v4";
+const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v3";
 const TOP_STORIES_SUMMARY_CACHE_TTL_HOURS = 24;
+const SUMMARY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+const summaryFailureCooldownUntil = new Map<number, number>();
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
 
@@ -98,6 +101,18 @@ export class ProfileLimitExceededError extends Error {
   }
 }
 
+function comparePinnedDocs(
+  a: PersonalizedFeedDocument,
+  b: PersonalizedFeedDocument,
+) {
+  const aPinnedTime = a.pinnedAt ? a.pinnedAt.getTime() : 0;
+  const bPinnedTime = b.pinnedAt ? b.pinnedAt.getTime() : 0;
+  if (bPinnedTime !== aPinnedTime) {
+    return bPinnedTime - aPinnedTime;
+  }
+  return compareBySortTimeDescThenIdDesc(a, b);
+}
+
 function selectTopDocuments(
   primaryDocs: PersonalizedFeedDocument[],
   fallbackDocs: PersonalizedFeedDocument[],
@@ -108,9 +123,37 @@ function selectTopDocuments(
   const seenIds = new Set<number>();
   const seenTitles = new Set<string>();
   const sourceCounts = new Map<string, number>();
+  const allCandidates = [...primaryDocs, ...fallbackDocs];
 
-  for (const doc of [...primaryDocs, ...fallbackDocs]) {
+  const pinnedCandidates = allCandidates
+    .filter((doc) => doc.isPinned && !doc.isHidden)
+    .sort(comparePinnedDocs);
+
+  for (const doc of pinnedCandidates) {
     if (seenIds.has(doc.id)) {
+      continue;
+    }
+
+    const normalizedTitle = normalizeStoryTitle(doc.title);
+    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
+      continue;
+    }
+
+    selected.push(doc);
+    seenIds.add(doc.id);
+    if (normalizedTitle) {
+      seenTitles.add(normalizedTitle);
+    }
+    const sourceKey = doc.sourceGroupKey;
+    sourceCounts.set(sourceKey, (sourceCounts.get(sourceKey) ?? 0) + 1);
+
+    if (selected.length >= limit) {
+      return selected;
+    }
+  }
+
+  for (const doc of allCandidates) {
+    if (doc.isHidden || seenIds.has(doc.id)) {
       continue;
     }
 
@@ -148,13 +191,16 @@ function promoteUnreadTopStories(
   maxPerSource: number,
 ) {
   const initialTopIds = new Set(topDocuments.map((document) => document.id));
+  const pinnedRemaining = remainingDocuments
+    .filter((doc) => doc.isPinned && !doc.isHidden)
+    .sort(comparePinnedDocs);
   const qualifyingRemaining = remainingDocuments.filter(
-    (doc) => doc.matchScore !== null && doc.matchScore >= MIN_TOP_STORY_SCORE,
+    (doc) => !doc.isPinned && !doc.isHidden && doc.matchScore !== null && doc.matchScore >= MIN_TOP_STORY_SCORE,
   );
   const otherRemaining = remainingDocuments.filter(
-    (doc) => doc.matchScore === null || doc.matchScore < MIN_TOP_STORY_SCORE,
+    (doc) => !doc.isPinned && !doc.isHidden && (doc.matchScore === null || doc.matchScore < MIN_TOP_STORY_SCORE),
   );
-  const priorityPool = [...topDocuments, ...qualifyingRemaining, ...otherRemaining];
+  const priorityPool = [...topDocuments, ...pinnedRemaining, ...qualifyingRemaining, ...otherRemaining];
   const displayPool = [...topDocuments, ...remainingDocuments];
   const seenIds = new Set<number>();
   const seenTitles = new Set<string>();
@@ -162,11 +208,16 @@ function promoteUnreadTopStories(
   const unreadTop: PersonalizedFeedDocument[] = [];
 
   for (const document of priorityPool) {
-    if (document.isRead || seenIds.has(document.id)) {
+    if (document.isHidden || seenIds.has(document.id)) {
+      continue;
+    }
+
+    if (document.isRead && !document.isPinned) {
       continue;
     }
 
     if (
+      !document.isPinned &&
       !initialTopIds.has(document.id) &&
       document.matchScore !== null &&
       document.matchScore < MIN_TOP_STORY_SCORE
@@ -180,7 +231,7 @@ function promoteUnreadTopStories(
     }
 
     const sourceCount = sourceCounts.get(document.sourceGroupKey) ?? 0;
-    if (sourceCount >= maxPerSource) {
+    if (!document.isPinned && sourceCount >= maxPerSource) {
       continue;
     }
 
@@ -208,6 +259,13 @@ function promoteUnreadTopStories(
     dedupedRemaining.push(document);
     remainingSeen.add(document.id);
   }
+
+  dedupedRemaining.sort((a, b) => {
+    if (a.isHidden !== b.isHidden) {
+      return a.isHidden ? 1 : -1;
+    }
+    return 0;
+  });
 
   return {
     topDocuments: unreadTop,
@@ -255,6 +313,10 @@ export interface PersonalizedFeedDocument {
   llmRank: number | null;
   matchScore: number | null;
   whyRelevant: string | null;
+  curatorNote: string | null;
+  isPinned: boolean;
+  isHidden: boolean;
+  pinnedAt: Date | null;
   isRead: boolean;
   readAt: Date | null;
 }
@@ -298,6 +360,10 @@ interface CandidateDocumentRow {
   discoveredAt: Date;
   sortTime: Date;
   readAt?: Date | null;
+  curatorNote?: string | null;
+  isPinned?: boolean | null;
+  isHidden?: boolean | null;
+  pinnedAt?: Date | null;
 }
 
 interface TopStoriesSummaryCachePayload {
@@ -362,6 +428,8 @@ function normalizeProfileRow(row: {
 
 function mapCandidateRow(row: CandidateDocumentRow) {
   const readAt = row.readAt ? (row.readAt instanceof Date ? row.readAt : new Date(row.readAt)) : null;
+  const pinnedAt = row.pinnedAt ? (row.pinnedAt instanceof Date ? row.pinnedAt : new Date(row.pinnedAt)) : null;
+  const curatorNote = row.curatorNote?.trim() ? row.curatorNote.trim() : null;
   return {
     id: row.id,
     title: row.title,
@@ -379,6 +447,10 @@ function mapCandidateRow(row: CandidateDocumentRow) {
     llmRank: null,
     matchScore: null,
     whyRelevant: null,
+    curatorNote,
+    isPinned: Boolean(row.isPinned),
+    isHidden: Boolean(row.isHidden),
+    pinnedAt,
     isRead: Boolean(readAt),
     readAt,
   } satisfies PersonalizedFeedDocument;
@@ -389,8 +461,11 @@ function buildTopStoriesSummaryCacheKey(
   interestStatement: string,
   documents: PersonalizedFeedDocument[],
 ) {
-  const storyIds = documents.slice(0, MAX_SELECTED_DOCUMENTS).map((document) => document.id);
-  const cacheInput = `${TOP_STORIES_SUMMARY_CACHE_PREFIX}:${timeWindow}:${interestStatement.trim()}:${storyIds.join(",")}`;
+  const storyFingerprint = documents
+    .slice(0, MAX_SELECTED_DOCUMENTS)
+    .map((document) => document.id)
+    .join(",");
+  const cacheInput = `${TOP_STORIES_SUMMARY_CACHE_PREFIX}:${timeWindow}:${interestStatement.trim()}:${storyFingerprint}`;
   return createHash("sha256").update(cacheInput).digest("hex");
 }
 
@@ -571,6 +646,13 @@ async function summarizeTopDocumentsForProfile(
     return null;
   }
 
+  if (!options.forceRefresh) {
+    const cooldownUntil = summaryFailureCooldownUntil.get(profile.id) ?? 0;
+    if (cooldownUntil > Date.now()) {
+      return null;
+    }
+  }
+
   try {
     const result = await summarizeTopStoriesForProfile({
       profileName: profile.displayName,
@@ -584,7 +666,9 @@ async function summarizeTopDocumentsForProfile(
         sourceCategory: document.category,
         publishedAt: document.sortTime,
         score: document.matchScore,
-        whyRelevant: document.whyRelevant,
+        whyRelevant: document.curatorNote
+          ? `Curator's take: ${document.curatorNote}${document.whyRelevant ? ` | ${document.whyRelevant}` : ""}`
+          : document.whyRelevant,
       })),
     });
 
@@ -604,15 +688,21 @@ async function summarizeTopDocumentsForProfile(
       summary,
     });
 
+    summaryFailureCooldownUntil.delete(profile.id);
     return summary;
   } catch (error) {
+    summaryFailureCooldownUntil.set(profile.id, Date.now() + SUMMARY_FAILURE_COOLDOWN_MS);
     const message = error instanceof Error ? error.message : "Unknown error";
     console.warn(`[feed] Failed to summarize top stories for profile ${profile.id}: ${message}`);
     return null;
   }
 }
 
-async function getCandidateDocuments(cutoff: Date, readStateUserId: number | null) {
+async function getCandidateDocuments(
+  cutoff: Date,
+  readStateUserId: number | null,
+  ownerUserId: number,
+) {
   const db = getDb();
   const baseSelect = {
     id: schema.documents.id,
@@ -628,7 +718,12 @@ async function getCandidateDocuments(cutoff: Date, readStateUserId: number | nul
     sourcePublishedAt: schema.documents.sourcePublishedAt,
     discoveredAt: schema.documents.discoveredAt,
     sortTime: documentSortKey,
+    curatorNote: schema.storyCurations.curatorNote,
+    isPinned: schema.storyCurations.isPinned,
+    isHidden: schema.storyCurations.isHidden,
+    pinnedAt: schema.storyCurations.pinnedAt,
   };
+  const pinnedFirstOrder = sql<boolean>`coalesce(${schema.storyCurations.isPinned}, false) AND NOT coalesce(${schema.storyCurations.isHidden}, false)`;
 
   if (readStateUserId) {
     const rows = await db
@@ -639,14 +734,21 @@ async function getCandidateDocuments(cutoff: Date, readStateUserId: number | nul
       .from(schema.documents)
       .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
       .leftJoin(
+        schema.storyCurations,
+        and(
+          eq(schema.storyCurations.documentId, schema.documents.id),
+          eq(schema.storyCurations.userId, ownerUserId),
+        ),
+      )
+      .leftJoin(
         schema.documentReads,
         and(
           eq(schema.documentReads.documentId, schema.documents.id),
           eq(schema.documentReads.userId, readStateUserId),
         ),
       )
-      .where(gt(documentSortKey, cutoff))
-      .orderBy(desc(documentSortKey), desc(schema.documents.id))
+      .where(or(gt(documentSortKey, cutoff), eq(schema.storyCurations.isPinned, true)))
+      .orderBy(desc(pinnedFirstOrder), desc(documentSortKey), desc(schema.documents.id))
       .limit(MAX_CANDIDATE_DOCUMENTS);
 
     return rows.map((row) => mapCandidateRow(row));
@@ -656,8 +758,15 @@ async function getCandidateDocuments(cutoff: Date, readStateUserId: number | nul
     .select(baseSelect)
     .from(schema.documents)
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-    .where(gt(documentSortKey, cutoff))
-    .orderBy(desc(documentSortKey), desc(schema.documents.id))
+    .leftJoin(
+      schema.storyCurations,
+      and(
+        eq(schema.storyCurations.documentId, schema.documents.id),
+        eq(schema.storyCurations.userId, ownerUserId),
+      ),
+    )
+    .where(or(gt(documentSortKey, cutoff), eq(schema.storyCurations.isPinned, true)))
+    .orderBy(desc(pinnedFirstOrder), desc(documentSortKey), desc(schema.documents.id))
     .limit(MAX_CANDIDATE_DOCUMENTS);
 
   return rows.map((row) => mapCandidateRow(row));
@@ -1147,10 +1256,12 @@ async function queryScoredDocumentsForProfile({
   profileIdFilter,
   cutoff,
   readStateUserId,
+  ownerUserId,
 }: {
   profileIdFilter: number | ReturnType<typeof buildSelectedProfileIdSubquery>;
   cutoff: Date;
   readStateUserId: number | null;
+  ownerUserId: number;
 }) {
   const db = getDb();
   const baseSelect = {
@@ -1171,7 +1282,12 @@ async function queryScoredDocumentsForProfile({
     score: schema.documentScores.score,
     whyRelevant: schema.documentScores.whyRelevant,
     model: schema.documentScores.model,
+    curatorNote: schema.storyCurations.curatorNote,
+    isPinned: schema.storyCurations.isPinned,
+    isHidden: schema.storyCurations.isHidden,
+    pinnedAt: schema.storyCurations.pinnedAt,
   };
+  const pinnedFirstOrder = sql<boolean>`coalesce(${schema.storyCurations.isPinned}, false) AND NOT coalesce(${schema.storyCurations.isHidden}, false)`;
 
   if (readStateUserId) {
     return db
@@ -1183,6 +1299,13 @@ async function queryScoredDocumentsForProfile({
       .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
       .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
       .leftJoin(
+        schema.storyCurations,
+        and(
+          eq(schema.storyCurations.documentId, schema.documents.id),
+          eq(schema.storyCurations.userId, ownerUserId),
+        ),
+      )
+      .leftJoin(
         schema.documentReads,
         and(
           eq(schema.documentReads.documentId, schema.documents.id),
@@ -1192,10 +1315,10 @@ async function queryScoredDocumentsForProfile({
       .where(
         and(
           eq(schema.documentScores.profileId, profileIdFilter),
-          gt(documentSortKey, cutoff),
+          or(gt(documentSortKey, cutoff), eq(schema.storyCurations.isPinned, true)),
         ),
       )
-      .orderBy(desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
+      .orderBy(desc(pinnedFirstOrder), desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
       .limit(MAX_CANDIDATE_DOCUMENTS);
   }
 
@@ -1204,13 +1327,20 @@ async function queryScoredDocumentsForProfile({
     .from(schema.documentScores)
     .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .leftJoin(
+      schema.storyCurations,
+      and(
+        eq(schema.storyCurations.documentId, schema.documents.id),
+        eq(schema.storyCurations.userId, ownerUserId),
+      ),
+    )
     .where(
       and(
         eq(schema.documentScores.profileId, profileIdFilter),
-        gt(documentSortKey, cutoff),
+        or(gt(documentSortKey, cutoff), eq(schema.storyCurations.isPinned, true)),
       ),
     )
-    .orderBy(desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
+    .orderBy(desc(pinnedFirstOrder), desc(schema.documentScores.score), desc(documentSortKey), desc(schema.documents.id))
     .limit(MAX_CANDIDATE_DOCUMENTS);
 }
 
@@ -1233,11 +1363,12 @@ async function buildPersonalizedFeedSnapshot({
   const profileSubquery = buildSelectedProfileIdSubquery(ownerUserId, profileSlug);
   const [profiles, candidateDocuments, initialScoredRows] = await Promise.all([
     getProfiles(ownerUserId),
-    getCandidateDocuments(cutoff, readStateUserId),
+    getCandidateDocuments(cutoff, readStateUserId, ownerUserId),
     queryScoredDocumentsForProfile({
       profileIdFilter: profileSubquery,
       cutoff,
       readStateUserId,
+      ownerUserId,
     }),
   ]);
   const matchedBySlug = profileSlug
@@ -1256,8 +1387,13 @@ async function buildPersonalizedFeedSnapshot({
 
   function buildRemainingDocuments(excludeIds: Set<number>) {
     return candidateDocuments
-      .filter((d) => !excludeIds.has(d.id))
-      .sort(compareBySortTimeDescThenIdDesc);
+      .filter((d) => !excludeIds.has(d.id) && (readStateUserId !== null || !d.isHidden))
+      .sort((a, b) => {
+        if (a.isHidden !== b.isHidden) {
+          return a.isHidden ? 1 : -1;
+        }
+        return compareBySortTimeDescThenIdDesc(a, b);
+      });
   }
 
   if (candidateDocuments.length === 0) {
@@ -1285,7 +1421,7 @@ async function buildPersonalizedFeedSnapshot({
     if (!readStateUserId) {
       return {
         topDocuments,
-        remainingDocuments,
+        remainingDocuments: remainingDocuments.filter((d) => !d.isHidden),
       };
     }
 
@@ -1323,6 +1459,7 @@ async function buildPersonalizedFeedSnapshot({
           profileIdFilter: selectedProfile.id,
           cutoff,
           readStateUserId,
+          ownerUserId,
         })
       : initialScoredRows;
 
@@ -1370,7 +1507,7 @@ async function buildPersonalizedFeedSnapshot({
     const scoredIds = new Set(scoredDocs.map((d) => d.id));
     const unscoredCandidates = candidateDocuments.filter((d) => !scoredIds.has(d.id));
     const qualifyingScoredDocs = scoredDocs.filter(
-      (d) => (d.matchScore ?? 0) >= MIN_TOP_STORY_SCORE,
+      (d) => d.isPinned || (d.matchScore ?? 0) >= MIN_TOP_STORY_SCORE,
     );
 
     const topDocuments = selectTopDocuments(
@@ -1504,6 +1641,115 @@ const publicFeedCache = new Map<
   { expiresAt: number; snapshot: PersonalizedFeedSnapshot }
 >();
 const publicFeedInFlight = new Map<TimeWindow, Promise<PersonalizedFeedSnapshot>>();
+
+export function invalidatePublicFeedCache() {
+  publicFeedCache.clear();
+}
+
+export async function saveStoryCurationNote({
+  userId,
+  documentId,
+  curatorNote,
+}: {
+  userId: number;
+  documentId: number;
+  curatorNote: string;
+}) {
+  const db = getDb();
+  const normalizedNote = curatorNote.trim().slice(0, MAX_CURATOR_NOTE_LENGTH) || null;
+  const now = new Date();
+
+  await db
+    .insert(schema.storyCurations)
+    .values({
+      userId,
+      documentId,
+      curatorNote: normalizedNote,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [schema.storyCurations.userId, schema.storyCurations.documentId],
+      set: {
+        curatorNote: normalizedNote,
+        updatedAt: now,
+      },
+    });
+
+  invalidatePublicFeedCache();
+}
+
+export async function setStoryPinned({
+  userId,
+  documentId,
+  isPinned,
+}: {
+  userId: number;
+  documentId: number;
+  isPinned: boolean;
+}) {
+  const db = getDb();
+  const now = new Date();
+
+  await db
+    .insert(schema.storyCurations)
+    .values({
+      userId,
+      documentId,
+      isPinned,
+      isHidden: false,
+      pinnedAt: isPinned ? now : null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [schema.storyCurations.userId, schema.storyCurations.documentId],
+      set: {
+        isPinned,
+        isHidden: isPinned ? false : sql`${schema.storyCurations.isHidden}`,
+        pinnedAt: isPinned ? now : null,
+        updatedAt: now,
+      },
+    });
+
+  invalidatePublicFeedCache();
+}
+
+export async function setStoryHidden({
+  userId,
+  documentId,
+  isHidden,
+}: {
+  userId: number;
+  documentId: number;
+  isHidden: boolean;
+}) {
+  const db = getDb();
+  const now = new Date();
+
+  await db
+    .insert(schema.storyCurations)
+    .values({
+      userId,
+      documentId,
+      isHidden,
+      isPinned: false,
+      pinnedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [schema.storyCurations.userId, schema.storyCurations.documentId],
+      set: {
+        isHidden,
+        isPinned: isHidden ? false : sql`${schema.storyCurations.isPinned}`,
+        pinnedAt: isHidden ? null : sql`${schema.storyCurations.pinnedAt}`,
+        updatedAt: now,
+      },
+    });
+
+  invalidatePublicFeedCache();
+}
 
 export async function getPublicAiEngineerFeedSnapshot(timeWindow: TimeWindow = "week"): Promise<PersonalizedFeedSnapshot> {
   const now = Date.now();

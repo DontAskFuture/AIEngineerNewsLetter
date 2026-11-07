@@ -14,6 +14,7 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 - `api/score-all` streams Server-Sent Events while iterating active profiles and delegating per-profile work to `../lib/scoring`. It must stay admin-gated via `getAuthenticatedAdmin()` (`401`/`403`) and thin; it is not currently invoked by any admin UI control (the admin "Score all" button instead enqueues a pg-boss job via `../lib/crawler`).
 - `api/scoring-status` is an admin-only JSON endpoint (`getAuthenticatedAdmin()`) that surfaces the current scoring job and recent history via `../lib/scoring-tracker`, powering the admin progress UI polling loop.
 - `/` is a thin redirect to `/feed?window=week`, which is the canonical default public feed entrypoint.
+- `/rss.xml` serves a public RSS 2.0 XML feed of the curated public shortlist, including pinned picks and curator "My Take" notes, and `layout.tsx` advertises `/rss.xml` in metadata alternates and navigation.
 - `/read-list` is the authenticated story read-list surface for saving individual documents and reading them later.
 
 ## Implementation Guidance

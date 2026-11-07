@@ -1,3 +1,20 @@
+function sanitizeHttpUrl(raw: string | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.toString();
+    }
+  } catch {
+    // Ignore invalid URL
+  }
+  return null;
+}
+
+const DEFAULT_BRAND_AUTHOR_BIO =
+  "Opinionated daily curation of high-signal AI engineering, agent tooling, and inference infrastructure stories across 122 primary sources — with practitioner notes on what actually matters.";
+
 let cachedEnv:
   | {
       openRouterApiKey: string | null;
@@ -8,6 +25,11 @@ let cachedEnv:
       authAllowedEmails: string[];
       adminEmails: string[];
       authSessionDays: number;
+      brandAuthorName: string;
+      brandAuthorBio: string;
+      brandXUrl: string | null;
+      brandLinkedinUrl: string | null;
+      brandGithubUrl: string | null;
     }
   | undefined;
 
@@ -35,6 +57,11 @@ export function loadWebEnv() {
       authAllowedEmails: allowedEmails.length > 0 ? allowedEmails : ["lianglingfan@gmail.com"],
       adminEmails: adminEmails.length > 0 ? adminEmails : ["lianglingfan@gmail.com"],
       authSessionDays: Number.isFinite(authSessionDays) && authSessionDays > 0 ? authSessionDays : 30,
+      brandAuthorName: process.env.BRAND_AUTHOR_NAME?.trim() || "Founding AI Engineer",
+      brandAuthorBio: process.env.BRAND_AUTHOR_BIO?.trim() || DEFAULT_BRAND_AUTHOR_BIO,
+      brandXUrl: sanitizeHttpUrl(process.env.BRAND_X_URL),
+      brandLinkedinUrl: sanitizeHttpUrl(process.env.BRAND_LINKEDIN_URL),
+      brandGithubUrl: sanitizeHttpUrl(process.env.BRAND_GITHUB_URL),
     };
   }
 

@@ -14,8 +14,8 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 1. Curated sources (currently 122) are defined in `packages/shared/src/default-sources.ts`; the worker reseeds this registry on startup and deactivates sources/endpoints that drop out of the seed list, so retired sources stop being crawled without deleting history. The web app lists those sources in a concise footer.
 2. The worker fetches endpoints and writes `fetch_jobs`, `fetch_attempts`, `raw_documents`, and `documents`.
 3. The worker scores documents against user interest profiles via OpenRouter, writing `document_scores` and tracking progress in `scoring_jobs`.
-4. The worker sends daily newsletter emails over SMTP using each active user's default active profile, falling back to the first active profile, then records successful sends in `newsletter_sends`.
-5. The web app reads normalized tables for dashboards and the personalized feed.
+4. The worker sends daily newsletter emails over SMTP using each active user's default active profile, falling back to the first active profile, then records successful sends in `newsletter_sends`. Public email subscribers (`newsletter_subscribers`) also receive the public curator's daily brief with one-click unsubscribe links.
+5. The web app reads normalized tables for dashboards and the personalized feed, including curator story overrides (`story_curations` for "My Take" editorial notes, pins, and hides), personal branding configuration (`BRAND_AUTHOR_*`), and the public `/rss.xml` feed.
 6. Auth is handled in the web app with `auth_users`, `auth_sessions`, and an `HttpOnly` session cookie.
 7. Personalized ranking uses pre-computed `document_scores` joined with `documents` and `sources`, filtered by a time window (day/week/month/quarter/year).
 

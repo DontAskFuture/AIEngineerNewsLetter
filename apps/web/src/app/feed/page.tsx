@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
+import { loadWebEnv } from "@/lib/env";
 import {
   formatCategoryLabel,
   formatDateTime,
@@ -7,6 +8,7 @@ import {
   formatRelativeTime,
   summarizeText,
 } from "@/lib/formatters";
+import { getActiveNewsletterSubscriberCount } from "@/lib/newsletter-subscribers";
 import {
   getPersonalizedFeedSnapshot,
   getPublicAiEngineerFeedSnapshot,
@@ -18,6 +20,7 @@ import {
   createUserProfileAction,
   deleteUserProfileAction,
   setDefaultUserProfileAction,
+  subscribeNewsletterAction,
   updateUserProfileAction,
 } from "./actions";
 import { FeedStoryActions } from "./feed-story-actions";
@@ -31,6 +34,7 @@ interface FeedPageProps {
     error?: string;
     profile?: string;
     window?: string;
+    newsletter?: string;
   }>;
 }
 
@@ -43,11 +47,13 @@ const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string }[] = [
 ];
 
 export default async function FeedPage({ searchParams }: FeedPageProps) {
+  const env = loadWebEnv();
   const currentUser = await getCurrentUser();
   const isPublicView = currentUser === null;
   const params = searchParams ? await searchParams : undefined;
   const selectedProfileSlug = currentUser && typeof params?.profile === "string" ? params.profile : undefined;
   const errorCode = typeof params?.error === "string" ? params.error : undefined;
+  const newsletterStatus = typeof params?.newsletter === "string" ? params.newsletter : undefined;
   const rawWindow = typeof params?.window === "string" ? params.window : "week";
   const timeWindow: TimeWindow = isValidTimeWindow(rawWindow) ? rawWindow : "week";
   const profileError =
@@ -59,37 +65,48 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           ? "You have reached the maximum of 10 active profiles. Delete an existing profile before creating a new one."
           : null;
 
-  const [personalizedFeed, savedDocumentIds] = await Promise.all([
+  const [personalizedFeed, savedDocumentIds, subscriberCount] = await Promise.all([
     currentUser
       ? getPersonalizedFeedSnapshot(selectedProfileSlug, timeWindow, currentUser.id)
       : getPublicAiEngineerFeedSnapshot(timeWindow),
     currentUser ? listUserReadListDocumentIds(currentUser.id) : Promise.resolve([] as number[]),
+    currentUser ? getActiveNewsletterSubscriberCount() : Promise.resolve(0),
   ]);
   const savedDocumentIdSet = new Set(savedDocumentIds);
   const orderedProfiles = [
     personalizedFeed.selectedProfile,
     ...personalizedFeed.profiles.filter((profile) => profile.id !== personalizedFeed.selectedProfile.id),
   ];
+  const socialLinks = [
+    env.brandXUrl ? { label: "X / Twitter", href: env.brandXUrl } : null,
+    env.brandLinkedinUrl ? { label: "LinkedIn", href: env.brandLinkedinUrl } : null,
+    env.brandGithubUrl ? { label: "GitHub", href: env.brandGithubUrl } : null,
+  ].filter((item): item is { label: string; href: string } => item !== null);
 
   return (
     <main className="page-shell">
       <section className="glass-card rounded-[2rem] p-6 sm:p-8">
         <div className="flex flex-wrap gap-2">
           <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
-            {isPublicView ? "Public preview" : "Ranked top 10"}
+            {isPublicView ? "Opinionated curation" : "Ranked top 10"}
           </span>
           <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
             Time-aware
           </span>
+          {!isPublicView ? (
+            <span className="surface-chip px-3 py-2 text-xs font-medium uppercase tracking-[0.16em]">
+              {subscriberCount} email subscriber{subscriberCount === 1 ? "" : "s"}
+            </span>
+          ) : null}
         </div>
         <p className="mt-4 text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-          Personalized live feed
+          Curated by {env.brandAuthorName}
         </p>
         <div className="mt-4 flex max-w-4xl flex-col gap-3 text-sm leading-7 text-[color:var(--muted)] sm:text-base">
           <p>
             {isPublicView
-              ? "Browse the public AI Engineer feed, powered by the AI Engineer profile from lianglingfan@gmail.com."
-              : "Each profile below stores a plain-English interest statement. We screen the newest stories in the active daily window, use pre-computed relevance scores when the worker has them, then fall back to newest stories while scoring catches up."}
+              ? env.brandAuthorBio
+              : "Each profile below stores a plain-English interest statement. Pin must-read stories, hide noise, or add your personal My Take commentary to publish your opinionated shortlist."}
           </p>
           <p>
             Current window: {personalizedFeed.windowLabel}. Screened {personalizedFeed.candidateCount} candidate
@@ -97,13 +114,32 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           </p>
         </div>
 
-        {!isPublicView ? (
-          <div className="mt-6">
+        <div className="mt-6 flex flex-wrap items-center gap-2">
+          {!isPublicView ? (
             <Link href="/read-list" className="button-secondary">
               Open read list
             </Link>
-          </div>
-        ) : null}
+          ) : null}
+          {socialLinks.map((link) => (
+            <a
+              key={link.label}
+              href={link.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="button-secondary"
+            >
+              {link.label}
+            </a>
+          ))}
+          <a
+            href="/rss.xml"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="button-secondary"
+          >
+            RSS feed
+          </a>
+        </div>
 
         <div className="mt-6 flex flex-wrap gap-2">
           {TIME_WINDOW_OPTIONS.map((option) => {
@@ -302,20 +338,51 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
       </section>
       ) : (
         <section className="glass-card rounded-[1.75rem] p-6 sm:p-8">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-                Public profile
+                Daily AI brief &amp; RSS
               </p>
-              <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-                You are viewing {personalizedFeed.selectedProfile.displayName} as a read-only public feed.
-                Contact us to create and tune your own profiles.
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+                Subscribe to get {env.brandAuthorName}&apos;s curated top stories and practitioner notes delivered to your inbox, or follow the feed via RSS.
               </p>
             </div>
-            <a href="mailto:michael@audivolt.ai" className="button-primary w-fit">
-              Contact us
-            </a>
+            <form action={subscribeNewsletterAction} className="flex w-full max-w-md flex-wrap gap-2">
+              <input type="hidden" name="timeWindow" value={timeWindow} />
+              <label htmlFor="newsletterEmail" className="sr-only">
+                Email address
+              </label>
+              <input
+                id="newsletterEmail"
+                name="email"
+                type="email"
+                required
+                maxLength={254}
+                placeholder="you@company.com"
+                className="field-shell min-w-[14rem] flex-1 px-4 py-3 text-sm"
+              />
+              <button type="submit" className="button-primary">
+                Subscribe
+              </button>
+            </form>
           </div>
+          {newsletterStatus === "subscribed" ? (
+            <div className="surface-panel-strong mt-4 rounded-[1rem] px-4 py-3 text-sm text-[color:var(--leaf)]" role="status">
+              You&apos;re subscribed! You&apos;ll receive the next daily curated brief in your inbox.
+            </div>
+          ) : newsletterStatus === "unsubscribed" ? (
+            <div className="surface-panel mt-4 rounded-[1rem] px-4 py-3 text-sm text-[color:var(--muted)]" role="status">
+              You have been unsubscribed from the daily email brief.
+            </div>
+          ) : newsletterStatus === "invalid_email" ? (
+            <div className="alert-error mt-4 rounded-[1rem] px-4 py-3 text-sm" role="alert">
+              Please enter a valid email address to subscribe.
+            </div>
+          ) : newsletterStatus === "error" ? (
+            <div className="alert-error mt-4 rounded-[1rem] px-4 py-3 text-sm" role="alert">
+              Could not complete your subscription right now. Please try again.
+            </div>
+          ) : null}
         </section>
       )}
 
@@ -388,6 +455,11 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                     <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
                       {document.sourceName}
                     </p>
+                    {document.isPinned ? (
+                      <span className="surface-chip px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        Pinned Pick
+                      </span>
+                    ) : null}
                     {document.isRead ? (
                       <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
                         Read{document.readAt ? ` ${formatRelativeTime(document.readAt)}` : ""}
@@ -415,6 +487,16 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
+                  {document.curatorNote ? (
+                    <div className="surface-panel-strong mt-4 border-l-4 border-[color:var(--leaf)] rounded-[1.25rem] p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        {env.brandAuthorName}&apos;s Take
+                      </p>
+                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
+                        {document.curatorNote}
+                      </p>
+                    </div>
+                  ) : null}
                   {personalizedFeed.showWhyRelevant && document.whyRelevant ? (
                     <div className="surface-panel-strong mt-4 rounded-[1.25rem] p-4">
                       <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
@@ -437,6 +519,10 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                       documentId={document.id}
                       isRead={document.isRead}
                       isInReadList={savedDocumentIdSet.has(document.id)}
+                      isPinned={document.isPinned}
+                      isHidden={document.isHidden}
+                      curatorNote={document.curatorNote}
+                      whyRelevant={document.whyRelevant}
                       timeWindow={timeWindow}
                       profileSlug={personalizedFeed.selectedProfile.slug}
                     />
@@ -455,6 +541,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           savedDocumentIds={savedDocumentIds}
           timeWindow={timeWindow}
           profileSlug={personalizedFeed.selectedProfile.slug}
+          brandAuthorName={env.brandAuthorName}
           documents={personalizedFeed.remainingDocuments.map((doc) => ({
             id: doc.id,
             title: doc.title,
@@ -465,6 +552,9 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             previewParagraph: doc.previewParagraph,
             matchScore: doc.matchScore,
             whyRelevant: doc.whyRelevant,
+            curatorNote: doc.curatorNote,
+            isPinned: doc.isPinned,
+            isHidden: doc.isHidden,
             isRead: doc.isRead,
             readAt: doc.readAt ? doc.readAt.toISOString() : null,
           }))}

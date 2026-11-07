@@ -6,10 +6,11 @@ This file applies to `apps/web/src/app/feed`.
 ## Architecture
 - This route is the personalized feed experience.
 - It displays pre-computed document scores joined with documents and sources, filtered by a configurable time window (day/week/month/quarter/year, defaulting to week).
-- Server actions in this folder mutate `user_profiles`, including profile CRUD and the user's default profile selection.
-- Time window and profile selection are driven by URL search params (`window`, `profile`).
+- Server actions in this folder mutate `user_profiles` (profile CRUD and default profile selection), `story_curations` ("My Take" notes, pin-to-top-10, and hide-story toggles), and `newsletter_subscribers` (public email subscription).
+- Time window, profile selection, and newsletter status banners are driven by URL search params (`window`, `profile`, `newsletter`).
 - Profile switching uses a small client selector for optimistic click feedback, but the selected profile data is still loaded by the server page from URL params.
-- `profile-selector.tsx`, `feed-story-actions.tsx`, and `more-stories.tsx` are the client components for profile switching, per-story read-list/mark-read actions, and the paginated secondary story list, respectively.
+- `profile-selector.tsx`, `feed-story-actions.tsx`, and `more-stories.tsx` are the client components for profile switching, per-story curation ("My Take" note editor with AI draft seeding, Pin/Unpin, Hide/Unhide) plus read-list/mark-read actions, and the paginated secondary story list, respectively.
+- `unsubscribe/route.ts` handles one-click newsletter unsubscriptions via `token` query param.
 
 ## Implementation Guidance
 - Keep form handling and redirects here, but keep ranking and persistence logic in `../../lib/personalized-feed`.
@@ -19,8 +20,7 @@ This file applies to `apps/web/src/app/feed`.
 - The stored per-story `whyRelevant` copy should stay available to the UI, but rendering is gated by `FEED_SHOW_WHY_RELEVANT`.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
 - After read state is applied for signed-in users, stories marked read are removed from the top-10 shortlist and the next unread candidates backfill those slots.
-- Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s `AI Engineer` profile; profile management stays signed-in only.
-- The anonymous public-profile row should use a contact CTA to `mailto:michael@audivolt.ai` rather than a sign-in CTA.
+- Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s default profile, styled with personal branding (`BRAND_AUTHOR_*`) and an inline email newsletter subscription form plus RSS link; profile management and story curation controls stay signed-in only.
 - Preserve clear visual separation between feed hero controls, profile editing, top stories, and more stories, and keep those surfaces theme-aware.
 - The public source list lives in the root layout footer. Do not rebuild the old per-source crawl-stats registry on this page; operational source health stays on `/admin`.
 - Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.

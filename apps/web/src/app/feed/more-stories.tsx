@@ -19,6 +19,9 @@ interface MoreStoriesDocument {
   previewParagraph: string;
   matchScore: number | null;
   whyRelevant: string | null;
+  curatorNote: string | null;
+  isPinned: boolean;
+  isHidden: boolean;
   isRead: boolean;
   readAt: string | null;
 }
@@ -30,6 +33,7 @@ interface MoreStoriesProps {
   savedDocumentIds: number[];
   timeWindow: string;
   profileSlug: string;
+  brandAuthorName: string;
 }
 
 const PAGE_SIZE = 20;
@@ -41,6 +45,7 @@ export function MoreStories({
   savedDocumentIds,
   timeWindow,
   profileSlug,
+  brandAuthorName,
 }: MoreStoriesProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -83,7 +88,9 @@ export function MoreStories({
           {visibleDocs.map((document) => (
             <article
               key={document.id}
-              className={`surface-panel rounded-[1.25rem] px-5 py-4 transition sm:px-6 ${document.isRead ? "opacity-80" : ""}`}
+              className={`surface-panel rounded-[1.25rem] px-5 py-4 transition sm:px-6 ${
+                document.isRead || document.isHidden ? "opacity-75" : ""
+              }`}
             >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-4xl">
@@ -94,6 +101,16 @@ export function MoreStories({
                     <span className="text-xs text-[color:var(--muted)]">
                       {formatRelativeTime(document.sortTime)}
                     </span>
+                    {document.isPinned && (
+                      <span className="surface-chip px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        Pinned Pick
+                      </span>
+                    )}
+                    {document.isHidden && (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em] text-[color:var(--danger)]">
+                        Hidden from public
+                      </span>
+                    )}
                     {document.isRead && (
                       <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
                         Read{document.readAt ? ` ${formatRelativeTime(document.readAt)}` : ""}
@@ -116,6 +133,16 @@ export function MoreStories({
                   <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
+                  {document.curatorNote ? (
+                    <div className="surface-panel-strong mt-3 border-l-4 border-[color:var(--leaf)] rounded-[1rem] p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        {brandAuthorName}&apos;s Take
+                      </p>
+                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)]">
+                        {document.curatorNote}
+                      </p>
+                    </div>
+                  ) : null}
                   {showWhyRelevant && document.whyRelevant ? (
                     <div className="surface-panel-strong mt-3 rounded-[1rem] p-4">
                       <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--leaf)]">
@@ -136,6 +163,10 @@ export function MoreStories({
                       documentId={document.id}
                       isRead={document.isRead}
                       isInReadList={savedDocumentIdSet.has(document.id)}
+                      isPinned={document.isPinned}
+                      isHidden={document.isHidden}
+                      curatorNote={document.curatorNote}
+                      whyRelevant={document.whyRelevant}
                       timeWindow={timeWindow}
                       profileSlug={profileSlug}
                     />

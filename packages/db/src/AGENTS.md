@@ -4,7 +4,7 @@
 This file applies to `packages/db/src`.
 
 ## Architecture
-- `schema.ts` defines every table and enum: ingestion (`sources`, `sourceEndpoints`, `fetchJobs`, `fetchAttempts`, `rawDocuments`, `documents`), entity extraction (`entities`, `documentEntities`), scoring/feed (`documentScores`, `scoringJobs`, `rankingCache`, `documentReads`, `userDocumentReadList`), newsletter (`newsletterSends`), and auth/profile (`authUsers`, `authSessions`, `authLoginAttempts`, `userProfiles`) tables.
+- `schema.ts` defines every table and enum: ingestion (`sources`, `sourceEndpoints`, `fetchJobs`, `fetchAttempts`, `rawDocuments`, `documents`), entity extraction (`entities`, `documentEntities`), scoring/feed (`documentScores`, `scoringJobs`, `rankingCache`, `documentReads`, `userDocumentReadList`, `storyCurations`), newsletter (`newsletterSends`, `newsletterSubscribers`), and auth/profile (`authUsers`, `authSessions`, `authLoginAttempts`, `userProfiles`) tables.
 - Enums: `sourceCategoryEnum`, `endpointKindEnum`, `fetchStatusEnum`, `storageProviderEnum`, `entityKindEnum`, and `scoringJobStatusEnum`.
 - `entities` and `documentEntities` model extracted companies/models/products/repos/papers/people/topics per document but currently have no reader or writer in `apps/web` or `apps/worker`.
 - `authLoginAttempts` stores failed and successful auth attempts so the public login surface can throttle repeated failures.
