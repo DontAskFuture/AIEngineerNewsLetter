@@ -4,7 +4,7 @@ import { COOLDOWN_MS, ModelHealthTracker, classifyFailure } from "./model-health
 
 const FREE_A = "vendor/a:free";
 const FREE_B = "vendor/b:free";
-const PAID = "deepseek/deepseek-v4.1-flash-1017";
+const PAID = "~deepseek/deepseek-flash-latest";
 
 describe("classifyFailure", () => {
   it("treats 429 as an exhausted quota", () => {
