@@ -6,7 +6,8 @@ This file applies to `scripts`.
 ## Architecture
 - This folder contains repository-level automation and policy scripts.
 - Scripts here should be lightweight, deterministic, and runnable in local and CI contexts.
-- `server.mjs` is the local operations CLI for Docker Compose lifecycle, service logs, crawl/scoring/newsletter queue job visibility, and remote deploys.
+- `server.mjs` is the local operations CLI for Docker Compose lifecycle, service logs, crawl/scoring/newsletter queue job visibility, remote deploys, and remote VM health watchdog setup.
+- `vm-watchdog.sh` is the 5-minute systemd health watchdog script installed on the remote VM (`pnpm ops setup-watchdog`); it verifies `postgres`, `worker`, local `web` (`/api/health`), public Cloudflare Tunnel reachability (`${APP_BASE_URL}/api/health`), and root disk usage, auto-restarting unhealthy containers and sending rate-limited SMTP alert emails via `.env` credentials.
 
 ## Implementation Guidance
 - Prefer Node built-ins for repo policy checks so scripts run without install-time coupling.

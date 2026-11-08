@@ -23,11 +23,18 @@ cannot hold the worker's crawl-time memory peaks.
    unless you plan to raise `CRAWLED_DOCUMENT_TTL_DAYS` well beyond 30.
 3. Skip inbound Security List / NSG rules beyond SSH (port 22). Cloudflare
    Tunnel dials out from the VM, so port 3000 never needs to be exposed.
-4. Note the VM's public IP and confirm you can `ssh` into it with your key.
+4. Note the VM's public IP and confirm you can `ssh` into it with your key. If
+   the instance was created without a Public IPv4 address, open the instance's
+   **Networking -> Primary VNIC -> IPv4 Addresses** tab in the OCI Console,
+   click `⋮ -> Edit` on the private IP row, and attach an **Ephemeral public IP**
+   (which persists across reboots and stop/start cycles in OCI) or a **Reserved
+   public IP**.
 
 ## 2. Install Docker on the VM
 
-SSH in and install Docker Engine plus the Compose plugin:
+SSH in and install Docker Engine plus the Compose plugin.
+
+**Ubuntu 24.04 (`ubuntu@<vm-ip>`):**
 
 ```bash
 ssh ubuntu@<vm-ip>
@@ -35,6 +42,18 @@ ssh ubuntu@<vm-ip>
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
 # log out and back in for the group change to take effect
+```
+
+**Oracle Linux 9 (`opc@<vm-ip>`):**
+
+```bash
+ssh opc@<vm-ip>
+
+sudo dnf install -y git dnf-plugins-core
+sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
 ```
 
 Verify:
@@ -81,7 +100,9 @@ Follow the [README's Cloudflare Tunnel section](../README.md#cloudflare-tunnel):
 ```bash
 mkdir -p .secrets
 printf '%s\n' 'your-tunnel-token-here' > .secrets/cloudflare_tunnel_token
-chmod 600 .secrets/cloudflare_tunnel_token
+chmod 644 .secrets/cloudflare_tunnel_token
+# On Oracle Linux / SELinux hosts, label .secrets so cloudflared can read the mounted secret:
+chcon -Rt svirt_sandbox_file_t .secrets || true
 ```
 
 Point the tunnel's public hostname at `http://web:3000` in Cloudflare Zero
@@ -193,11 +214,44 @@ docker compose --profile tunnel up --build -d
 Return to the branch tip (`git checkout main`) once a fix is ready, then
 resume using `pnpm ops deploy` as normal.
 
-## 10. Known gaps
+## 10. 5-Minute Health Watchdog & Email Alerts
+
+[`scripts/vm-watchdog.sh`](../scripts/vm-watchdog.sh) runs every 5 minutes via a
+`systemd` timer (`tunnel-watchdog.timer`) on the VM to guard against wedged
+Cloudflare Tunnel edge connections, unhealthy containers, or high root disk
+usage:
+
+1. Checks `ai-intel-postgres` health (`healthy`), `aiengineernewsletter-worker-1`
+   status (`running`), local web + database readiness
+   (`http://127.0.0.1:3000/api/health`), and end-to-end public Cloudflare Tunnel
+   reachability (`${APP_BASE_URL}/api/health`).
+2. Automatically restarts `cloudflared` if only the public tunnel is unreachable,
+   or runs `docker compose --profile tunnel up -d` / restarts `web` +
+   `cloudflared` if a core service is unhealthy.
+3. Prunes Docker build cache (`docker builder prune -af`) if `/` disk usage
+   reaches `>= 85%`.
+4. Sends an alert email over SMTP (using `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+   `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, and `ADMIN_EMAILS` from `.env`, with a
+   30-minute cooldown) whenever auto-recovery runs.
+
+Install or update the watchdog on the VM from your local machine:
+
+```bash
+pnpm ops setup-watchdog --host opc@<vm-ip> --path /home/opc/AIEngineerNewsLetter
+```
+
+Check timer schedule or watchdog logs on the VM:
+
+```bash
+ssh opc@<vm-ip> 'systemctl list-timers tunnel-watchdog.timer'
+ssh opc@<vm-ip> 'sudo journalctl -u tunnel-watchdog.service -n 50 --no-pager'
+```
+
+## 11. Known gaps
 
 See §5 of
 [`oracle-cloud-deployment-readiness.md`](./oracle-cloud-deployment-readiness.md)
-for what this setup does not yet cover: no `/api/health`-based healthchecks
-on `web`/`worker`, no container memory limits, and no automated Postgres
-backup. None of these block a first deploy, but plan to address the backup
-gap before trusting the VM with data you can't afford to lose.
+for what this setup does not yet cover: no container memory limits and no
+automated off-host Postgres backup. None of these block a first deploy, but
+plan to address the backup gap before trusting the VM with data you can't
+afford to lose.

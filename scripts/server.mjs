@@ -15,6 +15,7 @@ function usage() {
   pnpm ops logs [all|web|worker|cloudflared|postgres] [--tail N] [--follow]
   pnpm ops job-logs [all|crawl|scoring|queue] [--limit N]
   pnpm ops deploy [--host user@host] [--path /remote/repo] [--branch main]
+  pnpm ops setup-watchdog [--host user@host] [--path /remote/repo]
   pnpm ops db-dump [--file local/path.dump]
   pnpm ops db-restore --host user@host [--path /remote/repo] --file local/path.dump
 
@@ -25,6 +26,7 @@ Examples:
   pnpm ops job-logs scoring
   DEPLOY_SSH_HOST=ubuntu@1.2.3.4 pnpm ops deploy
   pnpm ops deploy --host ubuntu@1.2.3.4 --path /home/ubuntu/AIEngineerNewsLetter
+  pnpm ops setup-watchdog --host opc@129.146.2.10 --path /home/opc/AIEngineerNewsLetter
   pnpm ops db-dump
   pnpm ops db-restore --host ubuntu@1.2.3.4 --file var/backups/ai_intel-2026-07-26T12-00-00.dump
 
@@ -403,6 +405,26 @@ function dbRestore(args) {
   );
 }
 
+function setupWatchdog(args) {
+  const options = parseDeployOptions(args);
+  const sshUser = options.host.includes("@") ? options.host.split("@")[0] : "opc";
+
+  const remoteCommand = [
+    `cd ${options.path}`,
+    `sudo cp scripts/vm-watchdog.sh /usr/local/bin/tunnel-watchdog.sh`,
+    `sudo chmod +x /usr/local/bin/tunnel-watchdog.sh`,
+    `printf '%s\\n' '[Unit]' 'Description=Cloudflare Tunnel & Web End-to-End Health Watchdog' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'User=${sshUser}' 'ExecStart=/usr/local/bin/tunnel-watchdog.sh ${options.path}' | sudo tee /etc/systemd/system/tunnel-watchdog.service >/dev/null`,
+    `printf '%s\\n' '[Unit]' 'Description=Run Cloudflare Tunnel Watchdog every 5 minutes' '' '[Timer]' 'OnBootSec=2min' 'OnUnitActiveSec=5min' 'AccuracySec=15s' 'Persistent=true' '' '[Install]' 'WantedBy=timers.target' | sudo tee /etc/systemd/system/tunnel-watchdog.timer >/dev/null`,
+    `sudo systemctl daemon-reload`,
+    `sudo systemctl enable --now tunnel-watchdog.timer`,
+    `sudo systemctl start tunnel-watchdog.service`,
+    `systemctl list-timers tunnel-watchdog.timer --no-pager`,
+  ].join(" && ");
+
+  console.log(`Installing 5-minute health watchdog on ${options.host}:${options.path}\n`);
+  run("ssh", [options.host, remoteCommand]);
+}
+
 function main() {
   const [command, ...args] = process.argv.slice(2);
 
@@ -426,6 +448,8 @@ function main() {
       jobLogs(args);
     } else if (command === "deploy") {
       deploy(args);
+    } else if (command === "setup-watchdog") {
+      setupWatchdog(args);
     } else if (command === "db-dump") {
       dbDump(args);
     } else if (command === "db-restore") {
