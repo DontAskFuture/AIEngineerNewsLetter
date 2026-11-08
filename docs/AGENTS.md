@@ -8,7 +8,8 @@ This file applies to `docs` and its subdirectories unless a deeper file override
 - `feature-and-implementation-plan.md`: product thesis, target users, phased roadmap, and a target information-model/pipeline design.
 - `oracle-cloud-deployment-readiness.md`: assessment of the Compose stack against a single Oracle Cloud VM, with blockers, nice-to-haves, a ranked fix list, and a phased execution plan.
 - `deployment.md`: the operational runbook for provisioning an Oracle Cloud VM and deploying/updating/rolling back the stack on it. Unlike the readiness assessment, this is meant to be followed step by step, not just read for context. The free shape in that runbook is exactly 2 OCPU and 12 GB, the full Always Free Ampere allotment as of 2026-11-02.
-- Product/roadmap docs describe aspirational architecture and are not guaranteed to match the current implementation; the readiness assessment and the deployment runbook are the exceptions and are kept aligned with the actual Compose stack and `scripts/server.mjs`.
+- `home-origin-daily-static-site.md`: scoped plan for retiring that VM. The home machine runs the existing Compose stack behind Cloudflare Tunnel, and a daily worker job publishes the anonymous brief to Workers Static Assets. It is not implemented; `deployment.md` stays the current runbook until a cutover lands.
+- Product/roadmap docs describe aspirational architecture and are not guaranteed to match the current implementation; the readiness assessment and the deployment runbook are the exceptions and are kept aligned with the actual Compose stack and `scripts/server.mjs`. The home-origin scope is a plan, not a description of the running system.
 
 ## Implementation Guidance
 - Do not treat this directory as a source of truth for current runtime behavior; prefer the code-adjacent `AGENTS.md` files for that.
