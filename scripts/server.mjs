@@ -413,15 +413,20 @@ function setupWatchdog(args) {
     `cd ${options.path}`,
     `sudo cp scripts/vm-watchdog.sh /usr/local/bin/tunnel-watchdog.sh`,
     `sudo chmod +x /usr/local/bin/tunnel-watchdog.sh`,
+    `sudo cp scripts/vm-backup-db.sh /usr/local/bin/vm-backup-db.sh`,
+    `sudo chmod +x /usr/local/bin/vm-backup-db.sh`,
+    `if [ -d /var/oled ]; then sudo mkdir -p /var/oled/backups && sudo chown ${sshUser}:${sshUser} /var/oled/backups; fi`,
     `printf '%s\\n' '[Unit]' 'Description=Cloudflare Tunnel & Web End-to-End Health Watchdog' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'User=${sshUser}' 'ExecStart=/usr/local/bin/tunnel-watchdog.sh ${options.path}' | sudo tee /etc/systemd/system/tunnel-watchdog.service >/dev/null`,
     `printf '%s\\n' '[Unit]' 'Description=Run Cloudflare Tunnel Watchdog every 5 minutes' '' '[Timer]' 'OnBootSec=2min' 'OnUnitActiveSec=5min' 'AccuracySec=15s' 'Persistent=true' '' '[Install]' 'WantedBy=timers.target' | sudo tee /etc/systemd/system/tunnel-watchdog.timer >/dev/null`,
+    `printf '%s\\n' '[Unit]' 'Description=Daily Postgres Backup for AI Newsletter' 'After=docker.service' '' '[Service]' 'Type=oneshot' 'User=${sshUser}' 'ExecStart=/usr/local/bin/vm-backup-db.sh ${options.path}' | sudo tee /etc/systemd/system/db-backup.service >/dev/null`,
+    `printf '%s\\n' '[Unit]' 'Description=Run Daily Postgres Backup at 03:30 UTC' '' '[Timer]' 'OnCalendar=*-*-* 03:30:00 UTC' 'Persistent=true' '' '[Install]' 'WantedBy=timers.target' | sudo tee /etc/systemd/system/db-backup.timer >/dev/null`,
     `sudo systemctl daemon-reload`,
-    `sudo systemctl enable --now tunnel-watchdog.timer`,
+    `sudo systemctl enable --now tunnel-watchdog.timer db-backup.timer`,
     `sudo systemctl start tunnel-watchdog.service`,
-    `systemctl list-timers tunnel-watchdog.timer --no-pager`,
+    `systemctl list-timers tunnel-watchdog.timer db-backup.timer --no-pager`,
   ].join(" && ");
 
-  console.log(`Installing 5-minute health watchdog on ${options.host}:${options.path}\n`);
+  console.log(`Installing 5-minute health watchdog and daily DB backup timer on ${options.host}:${options.path}\n`);
   run("ssh", [options.host, remoteCommand]);
 }
 

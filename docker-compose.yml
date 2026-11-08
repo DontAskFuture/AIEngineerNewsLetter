@@ -25,6 +25,7 @@ services:
       retries: 5
     # Without this, Postgres does not return after a host reboot while web and
     # worker do, leaving them to crash-loop against a missing database.
+    mem_limit: 1g
     restart: unless-stopped
     logging: *logging
 
@@ -37,9 +38,9 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-ai_intel}
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       RAW_STORAGE_DIR: /app/var/raw
-      FETCH_INTERVAL_MINUTES: 60
+      FETCH_INTERVAL_MINUTES: ${FETCH_INTERVAL_MINUTES:-60}
     restart: "no"
     logging: *logging
 
@@ -52,9 +53,8 @@ services:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-ai_intel}
-      LOG_LEVEL: info
-      RAW_STORAGE_DIR: /app/var/raw
-      FETCH_INTERVAL_MINUTES: 60
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      FETCH_INTERVAL_MINUTES: ${FETCH_INTERVAL_MINUTES:-60}
       CRAWLED_DOCUMENT_TTL_DAYS: ${CRAWLED_DOCUMENT_TTL_DAYS:-30}
       CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES: ${CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES:-1440}
       CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE: ${CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE:-500}
@@ -86,6 +86,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    mem_limit: 1g
     restart: unless-stopped
     logging: *logging
 
@@ -94,9 +95,16 @@ services:
     depends_on:
       web:
         condition: service_started
-    command: tunnel --no-autoupdate --protocol http2 run --token-file /run/secrets/cloudflare_tunnel_token
+    command: tunnel --no-autoupdate --protocol http2 --metrics 127.0.0.1:2000 run --token-file /run/secrets/cloudflare_tunnel_token
     secrets:
       - cloudflare_tunnel_token
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 256m
     restart: always
     logging: *logging
     profiles:
@@ -111,10 +119,10 @@ services:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-ai_intel}
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       RAW_STORAGE_DIR: /app/var/raw
-      FETCH_INTERVAL_MINUTES: 60
-      FETCH_WORKER_CONCURRENCY: 5
+      FETCH_INTERVAL_MINUTES: ${FETCH_INTERVAL_MINUTES:-60}
+      FETCH_WORKER_CONCURRENCY: ${FETCH_WORKER_CONCURRENCY:-5}
       CRAWLED_DOCUMENT_TTL_DAYS: ${CRAWLED_DOCUMENT_TTL_DAYS:-30}
       CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES: ${CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES:-1440}
       CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE: ${CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE:-500}
@@ -135,6 +143,7 @@ services:
       NODE_ENV: production
     volumes:
       - raw_data:/app/var/raw
+    mem_limit: 2g
     restart: unless-stopped
     logging: *logging
 

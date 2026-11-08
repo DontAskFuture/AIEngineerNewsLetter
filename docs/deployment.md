@@ -214,13 +214,11 @@ docker compose --profile tunnel up --build -d
 Return to the branch tip (`git checkout main`) once a fix is ready, then
 resume using `pnpm ops deploy` as normal.
 
-## 10. 5-Minute Health Watchdog & Email Alerts
+## 10. 5-Minute Health Watchdog, Daily DB Backups & Email Alerts
 
-[`scripts/vm-watchdog.sh`](../scripts/vm-watchdog.sh) runs every 5 minutes via a
-`systemd` timer (`tunnel-watchdog.timer`) on the VM to guard against wedged
-Cloudflare Tunnel edge connections, unhealthy containers, or high root disk
-usage:
+`pnpm ops setup-watchdog` installs two `systemd` timers on the VM:
 
+### A. 5-Minute Health Watchdog (`tunnel-watchdog.timer` -> [`scripts/vm-watchdog.sh`](../scripts/vm-watchdog.sh))
 1. Checks `ai-intel-postgres` health (`healthy`), `aiengineernewsletter-worker-1`
    status (`running`), local web + database readiness
    (`http://127.0.0.1:3000/api/health`), and end-to-end public Cloudflare Tunnel
@@ -234,24 +232,33 @@ usage:
    `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, and `ADMIN_EMAILS` from `.env`, with a
    30-minute cooldown) whenever auto-recovery runs.
 
-Install or update the watchdog on the VM from your local machine:
+### B. Daily Postgres Backup (`db-backup.timer` -> [`scripts/vm-backup-db.sh`](../scripts/vm-backup-db.sh))
+1. Runs daily at `03:30 UTC` (`pg_dump -Fc` inside `ai-intel-postgres`).
+2. Writes atomically to `/var/oled/backups/ai_intel-YYYY-MM-DD.dump` (using the
+   separate `/var/oled` logical volume on Oracle Linux, or `var/backups`
+   elsewhere) and prunes archives older than 7 days.
+3. Sends an SMTP alert email if a backup fails.
+
+Install or update both timers on the VM from your local machine:
 
 ```bash
 pnpm ops setup-watchdog --host opc@<vm-ip> --path /home/opc/AIEngineerNewsLetter
 ```
 
-Check timer schedule or watchdog logs on the VM:
+Check timer schedules or logs on the VM:
 
 ```bash
-ssh opc@<vm-ip> 'systemctl list-timers tunnel-watchdog.timer'
-ssh opc@<vm-ip> 'sudo journalctl -u tunnel-watchdog.service -n 50 --no-pager'
+ssh opc@<vm-ip> 'systemctl list-timers tunnel-watchdog.timer db-backup.timer'
+ssh opc@<vm-ip> 'sudo journalctl -u tunnel-watchdog.service -u db-backup.service -n 50 --no-pager'
 ```
 
-## 11. Known gaps
+## 11. Expanding the OCI Boot Volume Online
 
-See §5 of
-[`oracle-cloud-deployment-readiness.md`](./oracle-cloud-deployment-readiness.md)
-for what this setup does not yet cover: no container memory limits and no
-automated off-host Postgres backup. None of these block a first deploy, but
-plan to address the backup gap before trusting the VM with data you can't
-afford to lose.
+Oracle Always Free includes up to **200 GB** of block/boot storage. If you resize
+the Boot Volume in the OCI Console (**Instance -> Boot volume -> View boot volume
+details -> Edit -> Volume Size (in GB)**), apply the new size online without
+rebooting:
+
+```bash
+ssh opc@<vm-ip> 'echo 1 | sudo tee /sys/class/block/sda/device/rescan && sudo /usr/libexec/oci-growfs -y && df -h /'
+```
