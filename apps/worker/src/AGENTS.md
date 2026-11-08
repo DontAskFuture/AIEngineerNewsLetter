@@ -7,7 +7,7 @@ This file applies to `apps/worker/src` and its subdirectories unless a deeper fi
 - `index.ts` is the long-running entrypoint. It starts pg-boss, registers fetch, scoring, and newsletter queues, seeds sources, enqueues startup fetch and profile-scoring runs, and schedules periodic fetch/newsletter enqueuing plus crawled-document cleanup.
 - Successful fetch jobs that insert new normalized documents enqueue `score-documents` jobs for active profiles, using per-profile singleton keys so crawl bursts do not create duplicate scoring work.
 - `fetch-once.ts` and `seed-sources.ts` are operational scripts for one-shot local runs.
-- `env.ts` loads and validates worker config, including OpenRouter and SMTP credentials, from the repo-root `.env`; `OPENROUTER_MODEL` defaults to `deepseek/deepseek-v4-flash-0731`.
+- `env.ts` loads and validates worker config, including OpenRouter and SMTP credentials, from the repo-root `.env`; `OPENROUTER_MODEL` defaults to `deepseek/deepseek-v4.1-flash-1017`.
 - `logger.ts` configures the shared pino logger: pretty-printed when `NODE_ENV=development`, structured JSON otherwise, gated by `LOG_LEVEL`, with `err` and `error` serializers so `Error` instances log message and stack traces instead of `{}`.
 - Worker OpenRouter env default is the same DeepSeek model as the shared scoring config's sole scoring/summary candidate, so there is currently no cross-provider fallback if that model or provider has an outage.
 - The default periodic fetch enqueue interval is 60 minutes unless `FETCH_INTERVAL_MINUTES` overrides it.

@@ -1,4 +1,4 @@
-const deepseekV4Flash0731Model = "deepseek/deepseek-v4-flash-0731";
+const deepseekV41Flash1017Model = "deepseek/deepseek-v4.1-flash-1017";
 
 /**
  * Zero-cost OpenRouter models, tried in order ahead of the paid backstop.
@@ -26,10 +26,10 @@ export const scoringConfig = {
   preferredModel: freeScoringModelPool[0],
   // Scoring is the high-volume caller, so it exhausts the free pool before
   // spending anything, with the paid model as the guaranteed backstop.
-  scoringModelCandidates: [...freeScoringModelPool, deepseekV4Flash0731Model],
+  scoringModelCandidates: [...freeScoringModelPool, deepseekV41Flash1017Model],
   // Summaries are low volume and user-facing prose, so they stay on the paid
   // model rather than trading quality for a negligible saving.
-  summaryModelCandidates: [deepseekV4Flash0731Model],
+  summaryModelCandidates: [deepseekV41Flash1017Model],
 } as const;
 
 export function selectScoringModelCandidates() {

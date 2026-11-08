@@ -8,7 +8,7 @@ describe("isFreeTierModel", () => {
   });
 
   it("rejects paid model ids", () => {
-    assert.equal(isFreeTierModel("deepseek/deepseek-v4-flash-0731"), false);
+    assert.equal(isFreeTierModel("deepseek/deepseek-v4.1-flash-1017"), false);
   });
 
   it("ignores surrounding whitespace", () => {

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { ScoringModelPool } from "./model-pool";
 import { scoringConfig } from "./scoring-config";
 
-const PAID = "deepseek/deepseek-v4-flash-0731";
+const PAID = "deepseek/deepseek-v4.1-flash-1017";
 
 function modelsPayload(ids: string[]) {
   return {
