@@ -160,7 +160,7 @@ describe("renderScoreDocumentsPrompt", () => {
 
     assert.ok(prompt.system.includes("Return 'scores' with exactly 1 entries in the same order as <documents>"));
     assert.ok(prompt.system.includes("Source-category weighting:"));
-    assert.ok(prompt.system.includes("spicy, high-conviction practitioner take"));
+    assert.ok(prompt.system.includes("How AI engineers should apply it"));
     assert.ok(prompt.system.includes('"matchedSignals": ["..."], "whyRelevant": "...", "confidence": "high|medium|low", "score": <int 1-100>'));
     assert.ok(prompt.user.includes("<user_profile>"));
     assert.ok(prompt.user.includes("Profile name: Infra scout"));
