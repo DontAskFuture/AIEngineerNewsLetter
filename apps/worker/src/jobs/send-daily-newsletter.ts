@@ -1,13 +1,10 @@
 import { and, asc, desc, eq, gt, gte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import {
-  MAX_TOP_STORIES_PER_TOPIC,
   computeAdjustedStoryScore,
   formatPractitionerTake,
-  normalizeStoryTitle,
   parseWhyRelevantMetadata,
-  recordStoryTopic,
-  storyTopicAtCap,
+  selectDiverseShortlist,
   type SendDailyNewsletterPayload,
 } from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
@@ -80,41 +77,10 @@ function sanitizeStoryUrl(value: string): string {
 }
 
 export function selectTopStories(stories: NewsletterStory[]) {
-  const sourceCounts = new Map<string, number>();
-  const topicCounts = new Map<string, number>();
-  const seenIds = new Set<number>();
-  const seenTitles = new Set<string>();
-  const selected: NewsletterStory[] = [];
-
-  const pinnedStories = stories.filter((story) => story.isPinned && !story.isHidden);
-  const regularStories = stories.filter((story) => !story.isPinned && !story.isHidden);
-
-  const tryAdd = (story: NewsletterStory, relaxTopic: boolean) => {
-    if (selected.length >= MAX_NEWSLETTER_STORIES || seenIds.has(story.id)) return;
-
-    const normalizedTitle = normalizeStoryTitle(story.title);
-    if (normalizedTitle && seenTitles.has(normalizedTitle)) return;
-
-    const count = sourceCounts.get(story.sourceGroupKey) ?? 0;
-    if (!story.isPinned && count >= MAX_PER_SOURCE) return;
-    if (!story.isPinned && !relaxTopic && storyTopicAtCap(topicCounts, story.storyTopic, MAX_TOP_STORIES_PER_TOPIC)) {
-      return;
-    }
-
-    selected.push(story);
-    seenIds.add(story.id);
-    sourceCounts.set(story.sourceGroupKey, count + 1);
-    recordStoryTopic(topicCounts, story.storyTopic);
-    if (normalizedTitle) seenTitles.add(normalizedTitle);
-  };
-
-  for (const story of pinnedStories) tryAdd(story, true);
-  for (const story of regularStories) tryAdd(story, false);
-  if (selected.length < MAX_NEWSLETTER_STORIES) {
-    for (const story of regularStories) tryAdd(story, true);
-  }
-
-  return selected;
+  return selectDiverseShortlist(stories, {
+    limit: MAX_NEWSLETTER_STORIES,
+    maxPerSource: MAX_PER_SOURCE,
+  });
 }
 
 async function getRecipients() {

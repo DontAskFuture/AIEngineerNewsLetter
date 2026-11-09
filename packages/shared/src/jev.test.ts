@@ -5,6 +5,7 @@ import {
   buildStoryDecisionRequest,
   buildTopicDecisionRequest,
   decideStoryRelevanceBatch,
+  hasStoredPractitionerTake,
   mapJevRelevanceScore,
   parseJevStoryDecision,
   recordStoryTopic,
@@ -12,6 +13,7 @@ import {
   storyTopicAtCap,
   storyTopicKey,
 } from "./jev";
+import { scoringConfig } from "./scoring-config";
 
 describe("mapJevRelevanceScore", () => {
   it("maps ordered levels onto the existing 1-100 bands", () => {
@@ -55,6 +57,7 @@ describe("buildStoryDecisionRequest", () => {
       },
     });
 
+    assert.equal(fresh.model, "perplexity/pplx-decider-flash-v1.2");
     assert.equal(fresh.questions.topic?.type, "choice");
     assert.equal(fresh.questions.relevance?.type, "score");
     assert.equal(fresh.state.title, "vLLM FP8 kernel");
@@ -92,7 +95,7 @@ describe("buildTopicDecisionRequest", () => {
 });
 
 describe("parseJevStoryDecision and relevance storage", () => {
-  it("reads a score and a known topic, and parks an opinion for qualifying stories", () => {
+  it("reads a score and a known topic, and withholds the take until the daily shortlist", () => {
     const parsed = parseJevStoryDecision(
       {
         model: "typesafe/jev-1.14-20261014",
@@ -109,9 +112,10 @@ describe("parseJevStoryDecision and relevance storage", () => {
     assert.ok(parsed.score >= 40);
 
     const stored = relevanceStorage(parsed);
-    assert.equal(stored.needsOpinion, true);
-    assert.equal(stored.opinionModel, null);
-    assert.match(stored.whyRelevant, /^Opinion pending\./);
+    assert.equal(stored.needsOpinion, false);
+    assert.equal(stored.opinionModel, "not_required");
+    assert.match(stored.whyRelevant, /^Take withheld\./);
+    assert.equal(hasStoredPractitionerTake(stored.whyRelevant, stored.opinionModel), false);
 
     const withTake = applyOpinionToStoredWhyRelevant({
       existingWhyRelevant: stored.whyRelevant,
@@ -121,6 +125,7 @@ describe("parseJevStoryDecision and relevance storage", () => {
     assert.match(withTake, /Pin the kernel/);
     assert.match(withTake, /Confidence: high/);
     assert.match(withTake, /Signals: FP8/);
+    assert.equal(hasStoredPractitionerTake(withTake, scoringConfig.opinionModelCandidates[0]), true);
   });
 
   it("stores a short non-opinion for scores below the take threshold", () => {

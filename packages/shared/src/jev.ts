@@ -2,8 +2,10 @@ import { decideRetry } from "./openrouter-retry";
 import {
   formatWhyRelevant,
   MAX_INTEREST_STATEMENT_LENGTH,
-  OPINION_PENDING_TEXT,
+  normalizeStoryTitle,
   parseWhyRelevantMetadata,
+  TAKE_WITHHELD_TEXT,
+  isTakePlaceholder,
   type ScoreConfidence,
 } from "./prompts";
 import { scoringConfig } from "./scoring-config";
@@ -86,6 +88,79 @@ export function recordStoryTopic(
 ): void {
   const key = storyTopicKey(topic);
   counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+export interface DiverseShortlistStory {
+  id: number;
+  title: string;
+  sourceGroupKey: string;
+  storyTopic: string | null;
+  isPinned: boolean;
+  isHidden: boolean;
+}
+
+/**
+ * Picks the daily shortlist. Pins go first and bypass the topic cap. Unpinned
+ * stories then fill the list with at most `maxPerTopic` from one topic and
+ * `maxPerSource` from one source family. A short list backfills past the topic
+ * cap. Input order is the rank order within pins and within the rest.
+ */
+export function selectDiverseShortlist<T extends DiverseShortlistStory>(
+  stories: readonly T[],
+  options?: {
+    limit?: number;
+    maxPerSource?: number;
+    maxPerTopic?: number;
+  },
+): T[] {
+  const limit = options?.limit ?? scoringConfig.dailyTakeCount;
+  const maxPerSource = options?.maxPerSource ?? scoringConfig.dailyTakeMaxPerSource;
+  const maxPerTopic = options?.maxPerTopic ?? MAX_TOP_STORIES_PER_TOPIC;
+  const sourceCounts = new Map<string, number>();
+  const topicCounts = new Map<string, number>();
+  const seenIds = new Set<number>();
+  const seenTitles = new Set<string>();
+  const selected: T[] = [];
+
+  const pinnedStories = stories.filter((story) => story.isPinned && !story.isHidden);
+  const regularStories = stories.filter((story) => !story.isPinned && !story.isHidden);
+
+  const tryAdd = (story: T, relaxTopic: boolean) => {
+    if (selected.length >= limit || seenIds.has(story.id)) return;
+
+    const normalizedTitle = normalizeStoryTitle(story.title);
+    if (normalizedTitle && seenTitles.has(normalizedTitle)) return;
+
+    const count = sourceCounts.get(story.sourceGroupKey) ?? 0;
+    if (!story.isPinned && count >= maxPerSource) return;
+    if (!story.isPinned && !relaxTopic && storyTopicAtCap(topicCounts, story.storyTopic, maxPerTopic)) {
+      return;
+    }
+
+    selected.push(story);
+    seenIds.add(story.id);
+    sourceCounts.set(story.sourceGroupKey, count + 1);
+    recordStoryTopic(topicCounts, story.storyTopic);
+    if (normalizedTitle) seenTitles.add(normalizedTitle);
+  };
+
+  for (const story of pinnedStories) tryAdd(story, true);
+  for (const story of regularStories) tryAdd(story, false);
+  if (selected.length < limit) {
+    for (const story of regularStories) tryAdd(story, true);
+  }
+
+  return selected;
+}
+
+export function hasStoredPractitionerTake(
+  whyRelevant: string | null | undefined,
+  opinionModel: string | null | undefined,
+): boolean {
+  if (opinionModel && opinionModel !== OPINION_NOT_REQUIRED) return true;
+  const cleaned = parseWhyRelevantMetadata(whyRelevant).whyRelevant.trim();
+  if (!cleaned || isTakePlaceholder(cleaned) || cleaned === OFF_TOPIC_WHY_RELEVANT) return false;
+  return true;
 }
 
 export function mapJevConfidence(confidence: number | null | undefined): ScoreConfidence {
@@ -345,21 +420,13 @@ export function relevanceStorage(decision: {
   score: number;
   confidence: ScoreConfidence;
 }): StoredRelevance {
-  if (decision.score >= scoringConfig.minOpinionScore) {
-    return {
-      whyRelevant: formatWhyRelevant({
-        whyRelevant: OPINION_PENDING_TEXT,
-        confidence: decision.confidence,
-        matchedSignals: [],
-      }),
-      opinionModel: null,
-      needsOpinion: true,
-    };
-  }
+  const note = decision.score >= scoringConfig.minOpinionScore
+    ? TAKE_WITHHELD_TEXT
+    : OFF_TOPIC_WHY_RELEVANT;
 
   return {
     whyRelevant: formatWhyRelevant({
-      whyRelevant: OFF_TOPIC_WHY_RELEVANT,
+      whyRelevant: note,
       confidence: decision.confidence,
       matchedSignals: [],
     }),

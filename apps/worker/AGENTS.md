@@ -8,7 +8,7 @@ This file applies to `apps/worker` and its subdirectories unless a deeper file o
 - It runs pg-boss queues: `fetch-source-endpoint` for crawling, `score-documents` for relevance scoring, and `send-daily-newsletter` for email briefs.
 - A separate in-process interval (not a pg-boss queue) prunes expired documents and raw payload files once retention settings expire, guarded so overlapping runs are skipped.
 - Fetch jobs persist raw payloads and insert only new normalized documents, skipping rows whose canonical URL already exists.
-- Score jobs call Jev on OpenRouter for profile relevance and story topic, then DeepSeek for Michael's Take on qualifying stories. Scores land in `document_scores`, topics on `documents.story_topic`, and progress in `scoring_jobs`.
+- Score jobs call Perplexity Decider Flash on OpenRouter for profile relevance and story topic on every story in the run, then DeepSeek for Michael's Take on the daily top 10. Scores land in `document_scores`, topics on `documents.story_topic`, and progress in `scoring_jobs`.
 - Newsletter jobs send SMTP mail for the top daily stories for each active user's default active profile, falling back to their earliest-created active profile.
 - Startup re-seeds the source registry from `packages/shared` and deactivates sources/endpoints that dropped out of the seed list, so retired sources stop being crawled.
 

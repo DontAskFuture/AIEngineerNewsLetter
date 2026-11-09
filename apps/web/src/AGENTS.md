@@ -28,7 +28,7 @@ This file applies to `apps/web/src` and its subdirectories unless a deeper file 
 - Profile-level feed summary prompts should come from shared prompt helpers and summarize the selected top stories as a collection rather than replacing stored document scores.
 - Top-story profile briefings should use the existing `ranking_cache` table keyed by profile and selected story set so admin refreshes can force regeneration without changing ranking; cache version changes should force regeneration when the briefing JSON contract changes.
 - Web OpenRouter parsing should tolerate shared scoring/ranking responses with confidence and matched-signal fields while preserving displayable relevance explanations.
-- Web-triggered scoring should match worker scoring: Jev for relevance and story topic, DeepSeek for Michael's Take, with batch size and model ids read from shared scoring config.
+- Web-triggered scoring should match worker scoring: Decider Flash for relevance and story topic on every story in the run, DeepSeek for Michael's Take on the daily top 10 only, with batch size and model ids read from shared scoring config.
 - Web OpenRouter prose calls (opinions and the industry-trend briefing) should select ordered model candidates from shared scoring config and keep the env model as the explicit final fallback.
 - Web OpenRouter env defaults may remain a DeepSeek fallback for that prose. Relevance does not fall back to a chat model.
 - Personalized feed time windows should filter candidate documents in SQL/application code before any OpenRouter prompt is rendered.

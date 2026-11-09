@@ -10,11 +10,19 @@ export const MAX_INTEREST_STATEMENT_LENGTH = 2000;
 
 export type ScoreConfidence = "high" | "medium" | "low";
 
-/** Stored in why_relevant until DeepSeek writes Michael's Take for a qualifying story. */
+/** Legacy sentinel. New scores use TAKE_WITHHELD_TEXT until a story joins the daily top 10. */
 export const OPINION_PENDING_TEXT = "Opinion pending.";
+
+/** Stored when a story is scored but is not one of the day's top takes. */
+export const TAKE_WITHHELD_TEXT = "Take withheld.";
 
 export function isOpinionPending(value: string | null | undefined): boolean {
   return value?.trim().startsWith(OPINION_PENDING_TEXT) ?? false;
+}
+
+export function isTakePlaceholder(value: string | null | undefined): boolean {
+  const text = value?.trim() ?? "";
+  return text.startsWith(OPINION_PENDING_TEXT) || text.startsWith(TAKE_WITHHELD_TEXT);
 }
 
 export interface PromptCandidate {
@@ -202,7 +210,7 @@ export function parseWhyRelevantMetadata(
     .trim();
 
   return {
-    whyRelevant: isOpinionPending(whyRelevant) ? "" : whyRelevant,
+    whyRelevant: isTakePlaceholder(whyRelevant) ? "" : whyRelevant,
     confidence,
     matchedSignals,
   };

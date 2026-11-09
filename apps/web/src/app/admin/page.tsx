@@ -125,7 +125,7 @@ export default async function AdminPage() {
               {scoringConfig.jevModel}
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              Jev scores profile relevance and assigns a story topic so the top stories mix subjects. At most {MAX_TOP_STORIES_PER_TOPIC} stories from one topic are kept before the shortlist backfills.
+              Decider Flash scores relevance and assigns a topic for every story. DeepSeek writes the practitioner take for the daily top 10 only. At most {MAX_TOP_STORIES_PER_TOPIC} stories from one topic land in that shortlist before it backfills.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">

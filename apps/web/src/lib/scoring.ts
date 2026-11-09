@@ -1,17 +1,22 @@
 import {
+  OPINION_NOT_REQUIRED,
   OPINION_PENDING_TEXT,
+  TAKE_WITHHELD_TEXT,
   applyOpinionToStoredWhyRelevant,
   classifyStoryTopicsBatch,
+  computeAdjustedStoryScore,
   decideStoryRelevanceBatch,
   deduplicateScoringCandidates,
   extractDocumentPreview,
+  hasStoredPractitionerTake,
+  parseWhyRelevantMetadata,
   scoringConfig,
-  type PromptCandidate,
+  selectDiverseShortlist,
   type StoryRelevanceInput,
   type StoryRelevanceOutcome,
 } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, desc, eq, gt, isNull, like, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, like, notInArray, or, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
 import { writeStoryOpinions } from "@/lib/openrouter";
 import {
@@ -26,6 +31,7 @@ export { getScoringJobState } from "@/lib/scoring-tracker";
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const DEFAULT_LOOKBACK_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DAILY_TAKE_CANDIDATE_LIMIT = 200;
 
 async function persistTopics(topics: Array<{ documentId: number; topic: string }>) {
   if (topics.length === 0) return;
@@ -64,7 +70,12 @@ async function persistOpinions(
         .where(and(
           eq(schema.documentScores.documentId, documentId),
           eq(schema.documentScores.profileId, profileId),
-          like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
+          or(
+            isNull(schema.documentScores.opinionModel),
+            eq(schema.documentScores.opinionModel, OPINION_NOT_REQUIRED),
+            like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
+            like(schema.documentScores.whyRelevant, `${TAKE_WITHHELD_TEXT}%`),
+          ),
         ));
     }
   }
@@ -88,6 +99,7 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
   const [profile] = await db
     .select({
       id: schema.userProfiles.id,
+      userId: schema.userProfiles.userId,
       displayName: schema.userProfiles.displayName,
       interestStatement: schema.userProfiles.interestStatement,
     })
@@ -142,7 +154,12 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
 
   if (unscoredDocs.length === 0) {
     await backfillStoryTopics(env.openRouterApiKey ?? "", env.appBaseUrl ?? "http://localhost:3000", cutoff);
-    await backfillPendingOpinions(profileId, profile.displayName, profile.interestStatement, cutoff);
+    await writeDailyTakes({
+      profileId,
+      userId: profile.userId,
+      profileName: profile.displayName,
+      interestStatement: profile.interestStatement,
+    });
     return progress;
   }
 
@@ -196,7 +213,7 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
         }
 
         if (successes.length === 0) {
-          throw new Error(failures[0] && "error" in failures[0] ? failures[0].error : "Jev returned no relevance scores");
+          throw new Error(failures[0] && "error" in failures[0] ? failures[0].error : "Decider returned no relevance scores");
         }
 
         const expandedScores = successes.flatMap((decision) => {
@@ -241,40 +258,6 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
         });
         await persistTopics(topicWrites);
 
-        const opinionStories = successes.filter((decision) => decision.needsOpinion);
-        if (opinionStories.length > 0) {
-          const storedWhyRelevant = new Map<number, string>();
-          const opinionCandidates: PromptCandidate[] = opinionStories.map((decision) => {
-            const story = stories.find((candidate) => candidate.id === decision.documentId);
-            const targetIds = duplicateTargetIdsByRepresentative.get(decision.documentId) ?? [decision.documentId];
-            for (const documentId of targetIds) storedWhyRelevant.set(documentId, decision.whyRelevant);
-            return {
-              id: decision.documentId,
-              title: story?.title ?? "Untitled",
-              previewParagraph: story?.excerpt ?? "",
-              sourceName: story?.sourceName ?? null,
-              sourceCategory: story?.sourceCategory ?? null,
-            };
-          });
-          try {
-            const opinions = await writeStoryOpinions({
-              profileName: profile.displayName,
-              interestStatement: profile.interestStatement,
-              candidates: opinionCandidates,
-            });
-            await persistOpinions(
-              profileId,
-              opinions.model,
-              opinions.opinions,
-              duplicateTargetIdsByRepresentative,
-              storedWhyRelevant,
-            );
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Unknown error";
-            console.error(`[scoring] Opinion generation failed; Jev scores were kept: ${message}`);
-          }
-        }
-
         progress.scored += expandedScores.length;
 
         const missedCount = Math.max(0, batchDocumentCount - expandedScores.length);
@@ -308,54 +291,79 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
   }
 
   await backfillStoryTopics(env.openRouterApiKey ?? "", env.appBaseUrl ?? "http://localhost:3000", cutoff);
-  await backfillPendingOpinions(profileId, profile.displayName, profile.interestStatement, cutoff);
+  await writeDailyTakes({
+    profileId,
+    userId: profile.userId,
+    profileName: profile.displayName,
+    interestStatement: profile.interestStatement,
+  });
   return progress;
 }
 
 async function backfillStoryTopics(apiKey: string, referer: string, cutoff: Date) {
   if (!apiKey) return;
   const db = getDb();
-  const rows = await db
-    .select({
-      id: schema.documents.id,
-      title: schema.documents.title,
-      summary: schema.documents.summary,
-      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
-      sourceName: schema.sources.name,
-      sourceCategory: schema.sources.category,
-    })
-    .from(schema.documents)
-    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-    .where(and(isNull(schema.documents.storyTopic), gt(documentSortKey, cutoff)))
-    .orderBy(desc(documentSortKey), desc(schema.documents.id))
-    .limit(scoringConfig.batchSize);
+  const skipped = new Set<number>();
+  let considered = 0;
 
-  if (rows.length === 0) return;
+  while (considered < scoringConfig.maxDocumentsPerRun) {
+    const filters = [isNull(schema.documents.storyTopic), gt(documentSortKey, cutoff)];
+    if (skipped.size > 0) {
+      filters.push(notInArray(schema.documents.id, Array.from(skipped)));
+    }
+    const rows = await db
+      .select({
+        id: schema.documents.id,
+        title: schema.documents.title,
+        summary: schema.documents.summary,
+        bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
+        sourceName: schema.sources.name,
+        sourceCategory: schema.sources.category,
+      })
+      .from(schema.documents)
+      .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+      .where(and(...filters))
+      .orderBy(desc(documentSortKey), desc(schema.documents.id))
+      .limit(Math.min(scoringConfig.batchSize, scoringConfig.maxDocumentsPerRun - considered));
 
-  const classified = await classifyStoryTopicsBatch({
-    apiKey,
-    referer,
-    stories: rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      excerpt: extractDocumentPreview(row.summary, row.bodyText),
-      sourceName: row.sourceName,
-      sourceCategory: row.sourceCategory,
-      storyTopic: null,
-    })),
-  });
-  await persistTopics(
-    classified.flatMap((row) => (row.topic ? [{ documentId: row.documentId, topic: row.topic }] : [])),
-  );
+    if (rows.length === 0) return;
+
+    const classified = await classifyStoryTopicsBatch({
+      apiKey,
+      referer,
+      stories: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        excerpt: extractDocumentPreview(row.summary, row.bodyText),
+        sourceName: row.sourceName,
+        sourceCategory: row.sourceCategory,
+        storyTopic: null,
+      })),
+    });
+    const writes = classified.flatMap((row) => (row.topic ? [{ documentId: row.documentId, topic: row.topic }] : []));
+    await persistTopics(writes);
+    const written = new Set(writes.map((row) => row.documentId));
+    for (const row of rows) {
+      if (!written.has(row.id)) skipped.add(row.id);
+    }
+    considered += rows.length;
+  }
 }
 
-async function backfillPendingOpinions(
-  profileId: number,
-  profileName: string,
-  interestStatement: string,
-  cutoff: Date,
-) {
+async function writeDailyTakes({
+  profileId,
+  userId,
+  profileName,
+  interestStatement,
+}: {
+  profileId: number;
+  userId: number;
+  profileName: string;
+  interestStatement: string;
+}) {
   const db = getDb();
+  const dayCutoff = new Date(Date.now() - DAY_MS);
+  const now = Date.now();
   const rows = await db
     .select({
       id: schema.documents.id,
@@ -364,54 +372,108 @@ async function backfillPendingOpinions(
       bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
       sourceName: schema.sources.name,
       sourceCategory: schema.sources.category,
+      sourceGroupKey: schema.sources.canonicalDomain,
+      storyTopic: schema.documents.storyTopic,
+      trustTier: schema.sources.trustTier,
+      sortTime: documentSortKey,
+      score: schema.documentScores.score,
       whyRelevant: schema.documentScores.whyRelevant,
+      opinionModel: schema.documentScores.opinionModel,
+      isPinned: schema.storyCurations.isPinned,
+      isHidden: schema.storyCurations.isHidden,
     })
     .from(schema.documentScores)
     .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
     .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .leftJoin(
+      schema.storyCurations,
+      and(
+        eq(schema.storyCurations.documentId, schema.documents.id),
+        eq(schema.storyCurations.userId, userId),
+      ),
+    )
     .where(and(
       eq(schema.documentScores.profileId, profileId),
-      like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
-      gt(documentSortKey, cutoff),
+      or(
+        and(
+          gte(schema.documentScores.score, scoringConfig.minOpinionScore),
+          gt(documentSortKey, dayCutoff),
+        ),
+        eq(schema.storyCurations.isPinned, true),
+      ),
     ))
-    .orderBy(desc(documentSortKey), desc(schema.documents.id))
-    .limit(scoringConfig.batchSize);
+    .orderBy(desc(schema.documentScores.score), desc(documentSortKey))
+    .limit(DAILY_TAKE_CANDIDATE_LIMIT);
 
-  if (rows.length === 0) return;
+  const ranked = rows
+    .map((row) => {
+      const sortTime = new Date(row.sortTime);
+      const parsed = parseWhyRelevantMetadata(row.whyRelevant);
+      const adjustedScore = computeAdjustedStoryScore({
+        score: row.score,
+        sortTime,
+        cutoff: dayCutoff,
+        now,
+        freshnessBoostMax: 12,
+        trustTier: row.trustTier,
+        confidence: parsed.confidence,
+        minQualifyingScore: scoringConfig.minOpinionScore,
+      });
+      return {
+        ...row,
+        sortTime,
+        adjustedScore: adjustedScore ?? row.score,
+        isPinned: Boolean(row.isPinned),
+        isHidden: Boolean(row.isHidden),
+        previewParagraph: extractDocumentPreview(row.summary, row.bodyText),
+      };
+    })
+    .sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      const scoreDiff = (b.adjustedScore ?? 0) - (a.adjustedScore ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return b.sortTime.getTime() - a.sortTime.getTime();
+    });
 
-  const groups = deduplicateScoringCandidates(
-    rows.map((row) => ({
-      ...row,
-      previewParagraph: extractDocumentPreview(row.summary, row.bodyText),
-    })),
-  );
-  const duplicateIds = new Map<number, number[]>();
-  const storedWhyRelevant = new Map<number, string>();
-  const candidates: PromptCandidate[] = groups.map((group) => {
-    duplicateIds.set(group.representative.id, group.duplicateIds);
-    for (const documentId of group.duplicateIds) {
-      const match = rows.find((row) => row.id === documentId);
-      if (match) storedWhyRelevant.set(documentId, match.whyRelevant);
-    }
-    return {
-      id: group.representative.id,
-      title: group.representative.title,
-      previewParagraph: group.representative.previewParagraph ?? "",
-      sourceName: group.representative.sourceName,
-      sourceCategory: group.representative.sourceCategory,
-    };
-  });
+  const shortlist = selectDiverseShortlist(ranked);
+  const shortlistIds = shortlist.map((story) => story.id);
+  const retireFilters = [
+    eq(schema.documentScores.profileId, profileId),
+    like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
+  ];
+  if (shortlistIds.length > 0) {
+    retireFilters.push(notInArray(schema.documentScores.documentId, shortlistIds));
+  }
+  await db
+    .update(schema.documentScores)
+    .set({
+      whyRelevant: sql`replace(${schema.documentScores.whyRelevant}, ${OPINION_PENDING_TEXT}, ${TAKE_WITHHELD_TEXT})`,
+      opinionModel: OPINION_NOT_REQUIRED,
+    })
+    .where(and(...retireFilters));
 
+  const missing = shortlist.filter((story) => !hasStoredPractitionerTake(story.whyRelevant, story.opinionModel));
+  if (missing.length === 0) return;
+
+  const storedWhyRelevant = new Map(missing.map((story) => [story.id, story.whyRelevant]));
+  const duplicateIds = new Map(missing.map((story) => [story.id, [story.id]]));
   try {
     const opinions = await writeStoryOpinions({
       profileName,
       interestStatement,
-      candidates,
+      candidates: missing.map((story) => ({
+        id: story.id,
+        title: story.title,
+        previewParagraph: story.previewParagraph ?? "",
+        sourceName: story.sourceName,
+        sourceCategory: story.sourceCategory,
+        publishedAt: story.sortTime,
+      })),
     });
     await persistOpinions(profileId, opinions.model, opinions.opinions, duplicateIds, storedWhyRelevant);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    console.error(`[scoring] Pending opinion backfill failed: ${message}`);
+    console.error(`[scoring] Daily take generation failed; scores were kept: ${message}`);
   }
 }
 

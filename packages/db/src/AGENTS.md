@@ -15,7 +15,7 @@ This file applies to `packages/db/src`.
 - `ranking_cache` stores a cached top-stories summary JSON blob per `(profile_id, candidates_hash)` with an `expires_at` TTL; it is read and written by the web app's personalized feed code.
 - `client.ts` owns pool and Drizzle client creation via `getPool`/`getDb` (with bounded connection/idle timeouts, TCP keepAlive, an idle-client error listener, and `globalThis` reuse in development), and exposes `closePool` for teardown.
 - `index.ts` re-exports `client.ts` and the whole `schema.ts` module as `schema`.
-- `documents.story_topic` stores the Jev editorial topic used to diversify top stories. `document_scores.opinion_model` records which model wrote Michael's Take, or `not_required` when the score is below the take threshold. Both columns are nullable so existing rows keep working.
+- `documents.story_topic` stores the Decider Flash editorial topic used to diversify top stories. `document_scores.opinion_model` records which model wrote Michael's Take, or `not_required` until a story is in the daily top 10. Both columns are nullable so existing rows keep working.
 - `schema.ts` includes supporting indexes for feed sort order, profile-scoped score lookup, fetch history, and raw/document retention cleanup.
 
 ## Implementation Guidance
