@@ -72,7 +72,7 @@ async function callLlm(
 
   for (const model of models) {
     const freeTier = isFreeTierModel(model);
-    const maxTokens = Math.min(3600, Math.max(600, candidates.length * 160));
+    const maxTokens = Math.min(8192, Math.max(2048, candidates.length * 300));
     const body = JSON.stringify({
       model,
       temperature: 0.1,

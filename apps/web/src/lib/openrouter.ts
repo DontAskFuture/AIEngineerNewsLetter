@@ -232,7 +232,7 @@ export async function summarizeTopStoriesForProfile({
   const result = await chatCompletion(
     prompt.system,
     prompt.user,
-    1200,
+    4096,
     parseSummarizeTopStoriesResponse,
     [...selectSummaryModelCandidates(), env.openRouterModel],
   );
@@ -259,7 +259,7 @@ export async function scoreDocumentBatch({
     candidates,
   });
   const allowedIds = new Set(candidates.map((c) => c.id));
-  const maxTokens = Math.min(3600, Math.max(600, candidates.length * 160));
+  const maxTokens = Math.min(8192, Math.max(2048, candidates.length * 300));
 
   const { models, pool } = await resolveScoringCandidates();
   const result = await chatCompletion(
