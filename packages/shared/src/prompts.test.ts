@@ -160,6 +160,7 @@ describe("renderScoreDocumentsPrompt", () => {
 
     assert.ok(prompt.system.includes("Return 'scores' with exactly 1 entries in the same order as <documents>"));
     assert.ok(prompt.system.includes("Source-category weighting:"));
+    assert.ok(prompt.system.includes("spicy, high-conviction practitioner take"));
     assert.ok(prompt.system.includes('"matchedSignals": ["..."], "whyRelevant": "...", "confidence": "high|medium|low", "score": <int 1-100>'));
     assert.ok(prompt.user.includes("<user_profile>"));
     assert.ok(prompt.user.includes("Profile name: Infra scout"));
@@ -213,6 +214,7 @@ describe("renderSummarizeTopStoriesPrompt", () => {
     });
 
     assert.ok(prompt.system.includes("shortlist of 2 AI and software engineering news stories"));
+    assert.ok(prompt.system.includes("Today's Trend & Highlights"));
     assert.ok(prompt.system.includes("Weight the synthesis toward the highest-scoring stories"));
     assert.ok(prompt.user.includes('<top_stories count="2">'));
     assert.ok(prompt.user.includes("Ranking note: Matches agent tooling."));

@@ -15,9 +15,9 @@ This file applies to `apps/web/src/app/feed`.
 ## Implementation Guidance
 - Keep form handling and redirects here, but keep ranking and persistence logic in `../../lib/personalized-feed`.
 - Server-action redirects should fall back to `window=week` when no current window is submitted.
-- The feed reads pre-computed scores from `document_scores`, then may call OpenRouter once at render time to create a profile-level briefing for the selected top stories.
-- Feed copy should describe scoring as pre-computed while treating the profile briefing as a live, failure-tolerant enhancement that can include trends, learnings, and a further-study paragraph.
-- Each story card renders a practitioner take (`formatPractitionerTake(curatorNote, whyRelevant)`) labeled `{brandAuthorName}'s Take` (defaulting to `Michael's Take`), preferring manual `curatorNote` overrides and falling back to cleaned `whyRelevant` commentary.
+- The feed reads pre-computed scores from `document_scores`, then may call OpenRouter once at render time to create a profile-level briefing for the selected top stories, rendered as a dedicated `Today's Trend & Highlights` section (`Today's Industry Trend`, `Today's Highlights`, and `Engineering Radar · What To Stress-Test Next`) above `Top stories`.
+- Feed copy should describe scoring as pre-computed while treating the `Today's Trend & Highlights` briefing as a live, failure-tolerant enhancement that synthesizes macro industry trends, standout highlights, and a further-study radar paragraph.
+- Each story card renders a spicy practitioner take (`formatPractitionerTake(curatorNote, whyRelevant)`) labeled `{brandAuthorName}'s Take` (defaulting to `Michael's Take`), preferring manual `curatorNote` overrides and falling back to cleaned `whyRelevant` commentary.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
 - After read state is applied for signed-in users, stories marked read are removed from the top-10 shortlist and the next unread candidates backfill those slots.
 - Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s default profile, styled with personal branding (`BRAND_AUTHOR_*`) and an inline email newsletter subscription form plus RSS link; profile management and story curation controls stay signed-in only.
