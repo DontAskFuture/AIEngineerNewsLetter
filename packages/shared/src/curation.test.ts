@@ -33,6 +33,12 @@ describe("formatPractitionerTake", () => {
     );
   });
 
+  it("hides a pending opinion so Michael's Take stays empty until DeepSeek writes it", () => {
+    assert.equal(formatPractitionerTake(null, "Opinion pending."), null);
+    assert.equal(formatPractitionerTake(null, "Opinion pending.\n\nConfidence: high"), null);
+    assert.equal(formatPractitionerTake("Manual take.", "Opinion pending."), "Manual take.");
+  });
+
   it("falls back to whyRelevant and strips legacy profile-matching boilerplate", () => {
     assert.equal(
       formatPractitionerTake(

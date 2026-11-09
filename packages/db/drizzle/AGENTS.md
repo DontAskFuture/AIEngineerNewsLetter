@@ -4,7 +4,7 @@
 This file applies to `packages/db/drizzle` and its subdirectories.
 
 ## Architecture
-- This directory holds drizzle-kit's generated migration artifacts: numbered `NNNN_*.sql` migration files (through `0018`) and the `meta/_journal.json` plus `meta/NNNN_snapshot.json` schema snapshots.
+- This directory holds drizzle-kit's generated migration artifacts: numbered `NNNN_*.sql` migration files (through `0019`) and the `meta/_journal.json` plus `meta/NNNN_snapshot.json` schema snapshots. `0019` adds nullable `documents.story_topic` and `document_scores.opinion_model`.
 - These files are generated output derived from `packages/db/src/schema.ts`, not hand-authored source.
 
 ## Implementation Guidance

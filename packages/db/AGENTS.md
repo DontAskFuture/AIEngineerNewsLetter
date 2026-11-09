@@ -7,7 +7,7 @@ This file applies to `packages/db` and its subdirectories unless a deeper file o
 - This package is the single source of truth for the Postgres schema and Drizzle client.
 - It exports schema objects used by both the web app and the worker.
 - Ingestion tables: `sources`, `source_endpoints`, `fetch_jobs`, `fetch_attempts`, `raw_documents`, and `documents`.
-- Scoring and feed tables: `document_scores`, `scoring_jobs`, `ranking_cache`, `document_reads`, and `user_document_read_list`.
+- Scoring and feed tables: `document_scores` (including nullable `opinion_model` for Michael's Take), `scoring_jobs`, `ranking_cache`, `document_reads`, and `user_document_read_list`. `documents.story_topic` stores the Jev topic used to diversify the top stories.
 - Auth and identity tables: `auth_users`, `auth_sessions`, `auth_login_attempts`, and `user_profiles`.
 - Entity extraction tables `entities` and `document_entities` are defined but not yet written to or read by any web or worker code.
 - Newsletter delivery is tracked in `newsletter_sends`.

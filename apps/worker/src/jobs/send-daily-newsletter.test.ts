@@ -15,6 +15,7 @@ function makeStory(overrides: Partial<NewsletterStory> & { id: number; title: st
     canonicalUrl: overrides.canonicalUrl ?? `https://example.com/story-${overrides.id}`,
     sourceName: overrides.sourceName ?? "Example Blog",
     sourceGroupKey: overrides.sourceGroupKey ?? "example.com",
+    storyTopic: overrides.storyTopic ?? null,
     sortTime: overrides.sortTime ?? new Date("2026-11-07T12:00:00Z"),
     score: overrides.score ?? 85,
     whyRelevant: overrides.whyRelevant ?? "Relevant to AI builders.",
@@ -57,6 +58,28 @@ describe("selectTopStories", () => {
     // Story 7 is pinned (comes first), plus 4 unpinned from openai.com to reach source cap of 5
     assert.equal(selected[0]?.id, 7);
     assert.equal(selected.length, 5);
+  });
+
+  it("mixes story topics before backfilling a dominant topic", () => {
+    const stories = [
+      ...[1, 2, 3, 4, 5, 6].map((id) =>
+        makeStory({
+          id,
+          title: `Model release ${id}`,
+          sourceGroupKey: `lab-${id}.example`,
+          storyTopic: "models",
+          score: 95,
+        }),
+      ),
+      makeStory({ id: 7, title: "Agent runtime", sourceGroupKey: "agents.example", storyTopic: "agents", score: 80 }),
+      makeStory({ id: 8, title: "Serving kernel", sourceGroupKey: "infra.example", storyTopic: "infrastructure", score: 78 }),
+    ];
+
+    const selected = selectTopStories(stories);
+    assert.deepEqual(
+      selected.map((story) => story.id),
+      [1, 2, 7, 8, 3, 4, 5, 6],
+    );
   });
 });
 

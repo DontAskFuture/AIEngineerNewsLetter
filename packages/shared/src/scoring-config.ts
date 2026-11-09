@@ -24,12 +24,22 @@ export const scoringConfig = {
   batchSize: 20,
   maxDocumentsPerRun: 20,
   preferredModel: freeScoringModelPool[0],
-  // Scoring is the high-volume caller, so it exhausts the free pool before
-  // spending anything, with the paid model as the guaranteed backstop.
+  // Retained for ScoringModelPool tests and discovery. Relevance scoring no
+  // longer consults this list; it goes to Jev.
   scoringModelCandidates: [...freeScoringModelPool, deepseekFlashLatestModel],
-  // Summaries are low volume and user-facing prose, so they stay on the paid
-  // model rather than trading quality for a negligible saving.
+  // Industry-trend briefings are user-facing prose, so they stay on DeepSeek.
   summaryModelCandidates: [deepseekFlashLatestModel],
+  // Michael's Take is the only generative scoring step, and it stays on DeepSeek.
+  opinionModelCandidates: [deepseekFlashLatestModel],
+  // TypeSafe Jev via OpenRouter's Decisions API. Cheap structured decisions
+  // for relevance scores and story topics.
+  jevModel: "typesafe/jev-1.14",
+  jevConcurrency: 8,
+  jevTimeoutMs: 15_000,
+  jevMaxRetries: 3,
+  // Stories at or above this score get a DeepSeek opinion. Matches the feed's
+  // top-story qualification threshold.
+  minOpinionScore: 40,
 } as const;
 
 export function selectScoringModelCandidates() {
@@ -38,4 +48,8 @@ export function selectScoringModelCandidates() {
 
 export function selectSummaryModelCandidates() {
   return [...scoringConfig.summaryModelCandidates];
+}
+
+export function selectOpinionModelCandidates() {
+  return [...scoringConfig.opinionModelCandidates];
 }

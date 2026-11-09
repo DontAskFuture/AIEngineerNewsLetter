@@ -134,6 +134,13 @@
       "when": 1794012614322,
       "tag": "0018_messy_skin",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794205526009,
+      "tag": "0019_fresh_punisher",
+      "breakpoints": true
     }
   ]
 }

@@ -9,7 +9,7 @@ This file applies to `apps/worker/src` and its subdirectories unless a deeper fi
 - `fetch-once.ts` and `seed-sources.ts` are operational scripts for one-shot local runs.
 - `env.ts` loads and validates worker config, including OpenRouter, SMTP (`SMTP_FROM_NAME` defaulting to `"Michael's AI Brief"`), and personal brand (`BRAND_AUTHOR_*`, with generic AI engineering curation default bio) credentials, from the repo-root `.env`; `OPENROUTER_MODEL` defaults to `~deepseek/deepseek-flash-latest`.
 - `logger.ts` configures the shared pino logger: pretty-printed when `NODE_ENV=development`, structured JSON otherwise, gated by `LOG_LEVEL`, with `err` and `error` serializers so `Error` instances log message and stack traces instead of `{}`.
-- Worker OpenRouter env default is the same DeepSeek model as the shared scoring config's sole scoring/summary candidate, so there is currently no cross-provider fallback if that model or provider has an outage.
+- Worker OpenRouter env default remains DeepSeek, used only as the fallback for Michael's Take and the industry-trend briefing. Relevance and story topics go to Jev and do not fall back onto that chat model.
 - The default periodic fetch enqueue interval is 60 minutes unless `FETCH_INTERVAL_MINUTES` overrides it.
 - Crawl work uses pg-boss `localConcurrency`, defaulting to 5 concurrent fetch workers via `FETCH_WORKER_CONCURRENCY`.
 - Newsletter enqueuing checks the local hour in `APP_TIME_ZONE` against `NEWSLETTER_SEND_HOUR` every `NEWSLETTER_CHECK_INTERVAL_MINUTES`, then uses a 36-hour singleton key per calendar date so at most one newsletter job is queued per day.

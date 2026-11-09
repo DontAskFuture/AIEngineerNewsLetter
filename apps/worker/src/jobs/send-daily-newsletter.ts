@@ -1,10 +1,13 @@
 import { and, asc, desc, eq, gt, gte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import {
+  MAX_TOP_STORIES_PER_TOPIC,
   computeAdjustedStoryScore,
   formatPractitionerTake,
   normalizeStoryTitle,
   parseWhyRelevantMetadata,
+  recordStoryTopic,
+  storyTopicAtCap,
   type SendDailyNewsletterPayload,
 } from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
@@ -38,6 +41,7 @@ export interface NewsletterStory {
   canonicalUrl: string;
   sourceName: string;
   sourceGroupKey: string;
+  storyTopic: string | null;
   sortTime: Date;
   score: number | null;
   whyRelevant: string | null;
@@ -77,6 +81,7 @@ function sanitizeStoryUrl(value: string): string {
 
 export function selectTopStories(stories: NewsletterStory[]) {
   const sourceCounts = new Map<string, number>();
+  const topicCounts = new Map<string, number>();
   const seenIds = new Set<number>();
   const seenTitles = new Set<string>();
   const selected: NewsletterStory[] = [];
@@ -84,32 +89,29 @@ export function selectTopStories(stories: NewsletterStory[]) {
   const pinnedStories = stories.filter((story) => story.isPinned && !story.isHidden);
   const regularStories = stories.filter((story) => !story.isPinned && !story.isHidden);
 
-  for (const story of [...pinnedStories, ...regularStories]) {
-    if (seenIds.has(story.id)) {
-      continue;
-    }
+  const tryAdd = (story: NewsletterStory, relaxTopic: boolean) => {
+    if (selected.length >= MAX_NEWSLETTER_STORIES || seenIds.has(story.id)) return;
 
     const normalizedTitle = normalizeStoryTitle(story.title);
-    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
-      continue;
-    }
+    if (normalizedTitle && seenTitles.has(normalizedTitle)) return;
 
     const count = sourceCounts.get(story.sourceGroupKey) ?? 0;
-
-    if (!story.isPinned && count >= MAX_PER_SOURCE) {
-      continue;
+    if (!story.isPinned && count >= MAX_PER_SOURCE) return;
+    if (!story.isPinned && !relaxTopic && storyTopicAtCap(topicCounts, story.storyTopic, MAX_TOP_STORIES_PER_TOPIC)) {
+      return;
     }
 
     selected.push(story);
     seenIds.add(story.id);
     sourceCounts.set(story.sourceGroupKey, count + 1);
-    if (normalizedTitle) {
-      seenTitles.add(normalizedTitle);
-    }
+    recordStoryTopic(topicCounts, story.storyTopic);
+    if (normalizedTitle) seenTitles.add(normalizedTitle);
+  };
 
-    if (selected.length >= MAX_NEWSLETTER_STORIES) {
-      break;
-    }
+  for (const story of pinnedStories) tryAdd(story, true);
+  for (const story of regularStories) tryAdd(story, false);
+  if (selected.length < MAX_NEWSLETTER_STORIES) {
+    for (const story of regularStories) tryAdd(story, true);
   }
 
   return selected;
@@ -200,6 +202,7 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
       canonicalUrl: schema.documents.canonicalUrl,
       sourceName: schema.sources.name,
       sourceGroupKey: schema.sources.canonicalDomain,
+      storyTopic: schema.documents.storyTopic,
       trustTier: schema.sources.trustTier,
       sortTime: documentSortKey,
       score: schema.documentScores.score,
@@ -251,6 +254,7 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
         canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
         sourceName: row.sourceName,
         sourceGroupKey: row.sourceGroupKey,
+        storyTopic: row.storyTopic,
         sortTime,
         score: row.score,
         adjustedScore: adjustedScore ?? row.score,
@@ -279,6 +283,7 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
       canonicalUrl: schema.documents.canonicalUrl,
       sourceName: schema.sources.name,
       sourceGroupKey: schema.sources.canonicalDomain,
+      storyTopic: schema.documents.storyTopic,
       sortTime: documentSortKey,
       curatorNote: schema.storyCurations.curatorNote,
       isPinned: schema.storyCurations.isPinned,
@@ -304,6 +309,7 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
       canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
       sourceName: row.sourceName,
       sourceGroupKey: row.sourceGroupKey,
+      storyTopic: row.storyTopic,
       sortTime: new Date(row.sortTime),
       score: null,
       whyRelevant: null,

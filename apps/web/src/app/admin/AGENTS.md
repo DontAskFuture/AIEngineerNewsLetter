@@ -20,4 +20,4 @@ This file applies to `apps/web/src/app/admin`.
 - Admin status tables and progress panels should use the shared theme-aware surface styles rather than route-local hardcoded light-mode colors.
 - Dense numeric and job-status admin tables should use semantic table markup with fixed columns, tabular numbers for times/counts, truncation for long source names, and horizontal overflow rather than freeform grid rows.
 - Error log tables should show the captured error text directly but keep long messages clamped with full text in the title attribute.
-- Model selection, model fallback order, and ranking configuration details that are too operational for the feed should be surfaced here instead.
+- Model selection for relevance (Jev) and for Michael's Take / the industry-trend briefing (DeepSeek) should be surfaced here instead of on the feed.

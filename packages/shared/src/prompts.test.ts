@@ -7,10 +7,10 @@ import {
   extractDocumentPreview,
   formatWhyRelevant,
   normalizeStoryTitle,
-  parseScoreDocumentsResponse,
+  parseStoryOpinionsResponse,
   parseSummarizeTopStoriesResponse,
   parseWhyRelevantMetadata,
-  renderScoreDocumentsPrompt,
+  renderStoryOpinionsPrompt,
   renderSummarizeTopStoriesPrompt,
   stripWhyRelevantMetadata,
 } from "./prompts";
@@ -62,17 +62,18 @@ describe("formatWhyRelevant and stripWhyRelevantMetadata", () => {
     });
   });
 
-  it("omits confidence/signals footer when matchedSignals is empty for off-topic items", () => {
+  it("keeps confidence when there are no matched signals and hides a pending opinion", () => {
     const formatted = formatWhyRelevant({
-      whyRelevant: "Generic funding news.",
+      whyRelevant: "Opinion pending.",
       confidence: "high",
       matchedSignals: [],
     });
 
-    assert.equal(formatted, "Generic funding news.");
+    assert.equal(formatted, "Opinion pending.\n\nConfidence: high");
+    assert.equal(stripWhyRelevantMetadata(formatted), "");
     assert.deepEqual(parseWhyRelevantMetadata(formatted), {
-      whyRelevant: "Generic funding news.",
-      confidence: null,
+      whyRelevant: "",
+      confidence: "high",
       matchedSignals: [],
     });
   });
@@ -140,9 +141,9 @@ describe("normalizeStoryTitle, deduplicateScoringCandidates, and computeAdjusted
   });
 });
 
-describe("renderScoreDocumentsPrompt", () => {
-  it("renders XML delimiters, YYYY-MM-DD dates, deduplicated leading titles, and reasoning-first JSON schema", () => {
-    const prompt = renderScoreDocumentsPrompt({
+describe("renderStoryOpinionsPrompt", () => {
+  it("renders XML delimiters, YYYY-MM-DD dates, deduplicated leading titles, and an opinion-only JSON schema", () => {
+    const prompt = renderStoryOpinionsPrompt({
       profileName: "Infra scout",
       interestStatement: "Watch GPU inference engines and token pricing.",
       candidates: [
@@ -158,10 +159,11 @@ describe("renderScoreDocumentsPrompt", () => {
       ],
     });
 
-    assert.ok(prompt.system.includes("Return 'scores' with exactly 1 entries in the same order as <documents>"));
-    assert.ok(prompt.system.includes("Source-category weighting:"));
+    assert.ok(prompt.system.includes("Return 'opinions' with exactly 1 entries in the same order as <documents>"));
+    assert.ok(prompt.system.includes("Do not assign, repeat, or change a score"));
     assert.ok(prompt.system.includes("How AI engineers should apply it"));
-    assert.ok(prompt.system.includes('"matchedSignals": ["..."], "whyRelevant": "...", "confidence": "high|medium|low", "score": <int 1-100>'));
+    assert.ok(prompt.system.includes('"matchedSignals": ["..."], "whyRelevant": "..."'));
+    assert.equal(prompt.system.includes('"score"'), false);
     assert.ok(prompt.user.includes("<user_profile>"));
     assert.ok(prompt.user.includes("Profile name: Infra scout"));
     assert.ok(prompt.user.includes("<documents>"));
@@ -172,7 +174,7 @@ describe("renderScoreDocumentsPrompt", () => {
   });
 
   it("neutralizes untrusted closing XML tags inside candidate fields", () => {
-    const prompt = renderScoreDocumentsPrompt({
+    const prompt = renderStoryOpinionsPrompt({
       interestStatement: "AI safety",
       candidates: [
         {
@@ -223,34 +225,32 @@ describe("renderSummarizeTopStoriesPrompt", () => {
   });
 });
 
-describe("parseScoreDocumentsResponse", () => {
-  it("parses code-fenced JSON, clamps scores, and filters to allowed document IDs", () => {
+describe("parseStoryOpinionsResponse", () => {
+  it("parses code-fenced JSON and filters to allowed document IDs", () => {
     const raw = `\`\`\`json
     {
-      "scores": [
-        {"documentId": 10, "matchedSignals": ["vLLM", "FP8"], "whyRelevant": "Direct match.", "confidence": "high", "score": 105},
-        {"documentId": 10, "matchedSignals": [], "whyRelevant": "Duplicate id ignored.", "confidence": "low", "score": 20},
-        {"documentId": 99, "matchedSignals": [], "whyRelevant": "Not in batch.", "confidence": "low", "score": 50}
+      "opinions": [
+        {"documentId": 10, "matchedSignals": ["vLLM", "FP8"], "whyRelevant": "Pin the kernel, then measure TTFT."},
+        {"documentId": 10, "matchedSignals": [], "whyRelevant": "Duplicate id ignored."},
+        {"documentId": 99, "matchedSignals": [], "whyRelevant": "Not in batch."}
       ]
     }
     \`\`\``;
 
-    const scores = parseScoreDocumentsResponse(raw, new Set([10, 11]));
-    assert.deepEqual(scores, [
+    const opinions = parseStoryOpinionsResponse(raw, new Set([10, 11]));
+    assert.deepEqual(opinions, [
       {
         documentId: 10,
-        score: 100,
-        confidence: "high",
         matchedSignals: ["vLLM", "FP8"],
-        whyRelevant: "Direct match.",
+        whyRelevant: "Pin the kernel, then measure TTFT.",
       },
     ]);
   });
 
-  it("throws SyntaxError when JSON has wrong schema or zero valid scores", () => {
-    assert.throws(() => parseScoreDocumentsResponse('{"results": []}'), SyntaxError);
-    assert.throws(() => parseScoreDocumentsResponse('{"scores": []}', new Set([1])), SyntaxError);
-    assert.throws(() => parseScoreDocumentsResponse("not json at all"), SyntaxError);
+  it("throws SyntaxError when JSON has the wrong schema or zero valid opinions", () => {
+    assert.throws(() => parseStoryOpinionsResponse('{"scores": []}'), SyntaxError);
+    assert.throws(() => parseStoryOpinionsResponse('{"opinions": []}', new Set([1])), SyntaxError);
+    assert.throws(() => parseStoryOpinionsResponse("not json at all"), SyntaxError);
   });
 });
 
