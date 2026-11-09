@@ -395,10 +395,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-                Today&apos;s Trend &amp; Highlights
-              </p>
-              <p className="mt-2 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-                Synthesized macro industry shifts, standout highlights, and unvarnished engineering insights across this window&apos;s top stories.
+                Today&apos;s Industry Trend · Macro Signal &amp; Insights
               </p>
             </div>
             <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
@@ -412,37 +409,24 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
             </div>
           </div>
 
-          <div className="surface-panel-strong mt-6 border-l-4 border-[color:var(--leaf)] rounded-[1.25rem] p-5 sm:p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-              Today&apos;s Industry Trend · Macro Signal &amp; Insights
-            </p>
-            <p className="mt-3 max-w-4xl text-sm leading-7 text-[color:var(--ink)] sm:text-base">
-              {personalizedFeed.topStoriesSummary.summary}
-            </p>
-          </div>
-
-          {personalizedFeed.topStoriesSummary.takeaways.length > 0 ? (
-            <div className="mt-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                Today&apos;s Highlights · Standout Shifts &amp; Takeaways
-              </p>
-              <ul className="mt-3 grid gap-3 text-sm leading-6 text-[color:var(--ink)] sm:grid-cols-2">
+          <div className="surface-panel-strong mt-5 border-l-4 border-[color:var(--leaf)] rounded-[1.25rem] p-5 sm:p-6">
+            {personalizedFeed.topStoriesSummary.takeaways.length > 0 ? (
+              <ul className="grid gap-3 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
                 {personalizedFeed.topStoriesSummary.takeaways.map((takeaway) => (
-                  <li key={takeaway} className="surface-panel rounded-[1rem] px-4 py-3.5">
-                    {takeaway}
+                  <li key={takeaway} className="flex gap-3">
+                    <span
+                      className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--leaf)]"
+                      aria-hidden="true"
+                    />
+                    <span>{takeaway}</span>
                   </li>
                 ))}
               </ul>
-            </div>
-          ) : null}
-
-          <div className="surface-panel mt-5 rounded-[1rem] px-4 py-3.5">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-              Engineering Radar · What To Stress-Test Next
-            </p>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              {personalizedFeed.topStoriesSummary.furtherStudy}
-            </p>
+            ) : (
+              <p className="max-w-4xl text-sm leading-7 text-[color:var(--ink)] sm:text-base">
+                {personalizedFeed.topStoriesSummary.summary}
+              </p>
+            )}
           </div>
         </section>
       ) : null}
