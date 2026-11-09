@@ -9,13 +9,59 @@ interface SendEmailInput {
   subject: string;
   html: string;
   text: string;
+  unsubscribeUrl?: string;
 }
 
 function sanitizeHeaderField(value: string): string {
   return value.replace(/[\r\n]+/g, " ").trim();
 }
 
-export async function sendTransactionalEmail({ to, subject, html, text }: SendEmailInput) {
+function sanitizeHttpHeaderUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  const cleaned = sanitizeHeaderField(value).replace(/[<>]/g, "");
+  try {
+    const parsed = new URL(cleaned);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.toString();
+    }
+  } catch {
+    // Ignore invalid URLs
+  }
+  return null;
+}
+
+export function buildListUnsubscribeHeaders(
+  fromEmail: string,
+  unsubscribeUrl?: string,
+): Record<string, string> {
+  const cleanFromEmail = sanitizeHeaderField(fromEmail).replace(/[<>]/g, "");
+  const cleanUnsubscribeUrl = sanitizeHttpHeaderUrl(unsubscribeUrl);
+  const mailtoEntry = cleanFromEmail ? `<mailto:${cleanFromEmail}?subject=unsubscribe>` : null;
+
+  if (cleanUnsubscribeUrl) {
+    const entries = [`<${cleanUnsubscribeUrl}>`, mailtoEntry].filter(Boolean);
+    return {
+      "List-Unsubscribe": entries.join(", "),
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    };
+  }
+
+  if (mailtoEntry) {
+    return {
+      "List-Unsubscribe": mailtoEntry,
+    };
+  }
+
+  return {};
+}
+
+export async function sendTransactionalEmail({
+  to,
+  subject,
+  html,
+  text,
+  unsubscribeUrl,
+}: SendEmailInput) {
   const env = loadWorkerEnv();
 
   if (!env.SMTP_USER || !env.SMTP_PASSWORD || !env.SMTP_FROM_EMAIL) {
@@ -32,13 +78,15 @@ export async function sendTransactionalEmail({ to, subject, html, text }: SendEm
     },
   });
 
+  const cleanFromEmail = sanitizeHeaderField(env.SMTP_FROM_EMAIL);
   const cleanRecipientEmail = sanitizeHeaderField(to.email);
   const cleanRecipientName = to.name ? sanitizeHeaderField(to.name) : "";
+  const headers = buildListUnsubscribeHeaders(cleanFromEmail, unsubscribeUrl);
 
   const info = await transporter.sendMail({
     from: {
       name: sanitizeHeaderField(env.SMTP_FROM_NAME),
-      address: sanitizeHeaderField(env.SMTP_FROM_EMAIL),
+      address: cleanFromEmail,
     },
     to: cleanRecipientName
       ? { name: cleanRecipientName, address: cleanRecipientEmail }
@@ -46,6 +94,7 @@ export async function sendTransactionalEmail({ to, subject, html, text }: SendEm
     subject: sanitizeHeaderField(subject),
     html,
     text,
+    headers,
   });
 
   return {

@@ -562,6 +562,7 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
   let sentCount = 0;
   let skippedCount = 0;
   const activeAuthEmails = new Set(recipients.map((r) => r.email.toLowerCase()));
+  const baseUrl = env.APP_BASE_URL.replace(/\/+$/, "");
 
   for (const recipient of recipients) {
     if (await hasNewsletterBeenSent(recipient.userId, newsletterDate)) {
@@ -573,11 +574,13 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
     const stories = rankedStories.length > 0 ? rankedStories : await getLatestFallbackStories(recipient.userId, cutoff);
     const trendBullets = await getProfileTrendBullets(recipient.profileId);
     const subject = `${env.BRAND_AUTHOR_NAME}'s AI Brief: ${stories.length} stories for ${newsletterDate}`;
+    const unsubscribeUrl = `${baseUrl}/feed/unsubscribe?token=account-${recipient.userId}`;
     const result = await sendTransactionalEmail({
       to: { email: recipient.email },
       subject,
-      html: buildNewsletterHtml(recipient, stories, newsletterDate, undefined, env.APP_TIME_ZONE, trendBullets),
-      text: buildNewsletterText(recipient, stories, newsletterDate, undefined, env.APP_TIME_ZONE, trendBullets),
+      html: buildNewsletterHtml(recipient, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
+      text: buildNewsletterText(recipient, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
+      unsubscribeUrl,
     });
 
     await recordNewsletterSend(recipient, newsletterDate, stories.length, result.providerMessageId);
@@ -613,7 +616,6 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
           : await getLatestFallbackStories(publicCurator.userId, cutoff);
       const trendBullets = await getProfileTrendBullets(publicCurator.profileId);
       const subject = `${env.BRAND_AUTHOR_NAME}'s AI Brief: ${stories.length} stories for ${newsletterDate}`;
-      const baseUrl = env.APP_BASE_URL.replace(/\/+$/, "");
 
       for (const subscriber of pendingSubscribers) {
         const unsubscribeUrl = `${baseUrl}/feed/unsubscribe?token=${encodeURIComponent(subscriber.unsubscribeToken)}`;
@@ -622,6 +624,7 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
           subject,
           html: buildNewsletterHtml(publicCurator, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
           text: buildNewsletterText(publicCurator, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
+          unsubscribeUrl,
         });
 
         await db
