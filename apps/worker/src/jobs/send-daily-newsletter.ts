@@ -316,7 +316,7 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
 
 const DEFAULT_BRAND_AUTHOR_NAME = "Michael";
 const DEFAULT_BRAND_AUTHOR_BIO =
-  "Founding-level AI engineering curation — high-signal papers, model releases, agent tooling, and inference infrastructure, with practitioner notes on why each story matters.";
+  "AI engineering curation — high-signal papers, model releases, agent tooling, and inference infrastructure, with practical notes on why each story matters.";
 
 function resolveBrandSettings() {
   const authorName = process.env.BRAND_AUTHOR_NAME?.trim() || DEFAULT_BRAND_AUTHOR_NAME;

@@ -45,7 +45,7 @@ const envSchema = z.object({
   BRAND_AUTHOR_BIO: z
     .string()
     .default(
-      "Founding-level AI engineering curation — high-signal papers, model releases, agent tooling, and inference infrastructure, with practitioner notes on why each story matters.",
+      "AI engineering curation — high-signal papers, model releases, agent tooling, and inference infrastructure, with practical notes on why each story matters.",
     ),
   BRAND_X_URL: optionalString,
   BRAND_LINKEDIN_URL: optionalString,

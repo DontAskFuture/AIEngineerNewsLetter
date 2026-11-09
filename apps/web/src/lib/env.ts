@@ -13,7 +13,7 @@ function sanitizeHttpUrl(raw: string | undefined): string | null {
 }
 
 const DEFAULT_BRAND_AUTHOR_BIO =
-  "Opinionated daily curation of high-signal AI engineering, agent tooling, and inference infrastructure stories across 122 primary sources — with practitioner notes on what actually matters.";
+  "AI engineering curation — high-signal papers, model releases, agent tooling, and inference infrastructure, with practical notes on why each story matters.";
 
 let cachedEnv:
   | {
