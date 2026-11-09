@@ -57,7 +57,7 @@ export function loadWebEnv() {
       authAllowedEmails: allowedEmails.length > 0 ? allowedEmails : ["lianglingfan@gmail.com"],
       adminEmails: adminEmails.length > 0 ? adminEmails : ["lianglingfan@gmail.com"],
       authSessionDays: Number.isFinite(authSessionDays) && authSessionDays > 0 ? authSessionDays : 30,
-      brandAuthorName: process.env.BRAND_AUTHOR_NAME?.trim() || "Founding AI Engineer",
+      brandAuthorName: process.env.BRAND_AUTHOR_NAME?.trim() || "Michael",
       brandAuthorBio: process.env.BRAND_AUTHOR_BIO?.trim() || DEFAULT_BRAND_AUTHOR_BIO,
       brandXUrl: sanitizeHttpUrl(process.env.BRAND_X_URL),
       brandLinkedinUrl: sanitizeHttpUrl(process.env.BRAND_LINKEDIN_URL),

@@ -68,7 +68,7 @@ services:
       AUTH_ALLOWED_EMAILS: ${AUTH_ALLOWED_EMAILS:-lianglingfan@gmail.com}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-lianglingfan@gmail.com}
       AUTH_SESSION_DAYS: ${AUTH_SESSION_DAYS:-30}
-      BRAND_AUTHOR_NAME: ${BRAND_AUTHOR_NAME:-Founding AI Engineer}
+      BRAND_AUTHOR_NAME: ${BRAND_AUTHOR_NAME:-Michael}
       BRAND_AUTHOR_BIO: ${BRAND_AUTHOR_BIO:-}
       BRAND_X_URL: ${BRAND_X_URL:-}
       BRAND_LINKEDIN_URL: ${BRAND_LINKEDIN_URL:-}

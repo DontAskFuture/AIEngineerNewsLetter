@@ -339,7 +339,7 @@ export function buildNewsletterHtml(
             const take = formatPractitionerTake(story.curatorNote, story.whyRelevant);
             return take
               ? `<div style="margin:10px 0 0 0;padding:12px 14px;background:#eef5f2;border-left:3px solid #2e5b4f;border-radius:8px;">
-                  <p style="margin:0 0 4px 0;color:#2e5b4f;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.14em;">Curator's Take · Why It Matters &amp; What To Learn</p>
+                  <p style="margin:0 0 4px 0;color:#2e5b4f;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.14em;">Michael's Take</p>
                   <p style="margin:0;color:#182126;font-size:15px;line-height:1.55;">${escapeHtml(take)}</p>
                 </div>`
               : "";
@@ -411,7 +411,7 @@ export function buildNewsletterText(
     lines.push(formatDate(story.sortTime, resolvedTimeZone));
     const take = formatPractitionerTake(story.curatorNote, story.whyRelevant);
     if (take) {
-      lines.push(`Curator's Take: ${take}`);
+      lines.push(`Michael's Take: ${take}`);
     }
     lines.push(story.canonicalUrl);
     lines.push("");

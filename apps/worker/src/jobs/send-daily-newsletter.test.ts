@@ -68,7 +68,7 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     profileName: "Founding analyst",
   };
 
-  it("renders Curator's Take, Pinned Pick badges, and one-click unsubscribe links", () => {
+  it("renders Michael's Take, Pinned Pick badges, and one-click unsubscribe links", () => {
     const stories = [
       makeStory({
         id: 10,
@@ -84,14 +84,14 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     const text = buildNewsletterText(recipient, stories, "2026-11-07", unsubscribeUrl, "UTC");
 
     assert.match(html, /Pinned Pick/);
-    assert.match(html, /Curator's Take/);
+    assert.match(html, /Michael's Take/);
     assert.match(html, /Critical primitive for multi-tenant code execution &amp; tool isolation\./);
     assert.doesNotMatch(html, /AI generated note that should be overridden/);
     assert.match(html, /Agent Sandbox Runtime &lt;v2&gt;/);
     assert.match(html, /href="https:\/\/example\.com\/feed\/unsubscribe\?token=abc123token"/);
 
     assert.match(text, /1\. Agent Sandbox Runtime <v2> \[Pinned Pick\]/);
-    assert.match(text, /Curator's Take: Critical primitive for multi-tenant code execution & tool isolation\./);
+    assert.match(text, /Michael's Take: Critical primitive for multi-tenant code execution & tool isolation\./);
     assert.match(text, /Unsubscribe: https:\/\/example\.com\/feed\/unsubscribe\?token=abc123token/);
   });
 });

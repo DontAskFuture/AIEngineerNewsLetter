@@ -139,7 +139,7 @@ export function MoreStories({
                     return takeNote ? (
                       <div className="surface-panel-strong mt-3 border-l-4 border-[color:var(--leaf)] rounded-[1rem] p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                          {brandAuthorName}&apos;s Take · Why It Matters &amp; What To Learn
+                          {brandAuthorName}&apos;s Take
                         </p>
                         <p className="mt-2 text-sm leading-7 text-[color:var(--ink)]">
                           {takeNote}
