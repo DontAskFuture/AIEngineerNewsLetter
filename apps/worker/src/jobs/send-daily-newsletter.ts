@@ -314,14 +314,94 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
   );
 }
 
+const DEFAULT_BRAND_AUTHOR_NAME = "Michael";
+const DEFAULT_BRAND_AUTHOR_BIO =
+  "Founding-level AI engineering curation — high-signal papers, model releases, agent tooling, and inference infrastructure, with practitioner notes on why each story matters.";
+
+function resolveBrandSettings() {
+  const authorName = process.env.BRAND_AUTHOR_NAME?.trim() || DEFAULT_BRAND_AUTHOR_NAME;
+  const authorBio = process.env.BRAND_AUTHOR_BIO?.trim() || DEFAULT_BRAND_AUTHOR_BIO;
+  const baseUrl = (process.env.APP_BASE_URL?.trim() || "https://news.michaelliang.dev").replace(/\/+$/, "");
+  const xUrl = process.env.BRAND_X_URL?.trim() || null;
+  const linkedinUrl = process.env.BRAND_LINKEDIN_URL?.trim() || null;
+  const githubUrl = process.env.BRAND_GITHUB_URL?.trim() || null;
+
+  return { authorName, authorBio, baseUrl, xUrl, linkedinUrl, githubUrl };
+}
+
+async function getProfileTrendBullets(profileId: number): Promise<string[]> {
+  try {
+    const db = getDb();
+    const [cached] = await db
+      .select({ rankingJson: schema.rankingCache.rankingJson })
+      .from(schema.rankingCache)
+      .where(and(eq(schema.rankingCache.profileId, profileId), gt(schema.rankingCache.expiresAt, new Date())))
+      .orderBy(desc(schema.rankingCache.createdAt))
+      .limit(1);
+
+    const record =
+      cached?.rankingJson && typeof cached.rankingJson === "object"
+        ? (cached.rankingJson as Record<string, unknown>)
+        : null;
+    if (!record || !Array.isArray(record.takeaways)) {
+      return [];
+    }
+
+    return record.takeaways
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean)
+      .slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
 export function buildNewsletterHtml(
   recipient: NewsletterRecipient,
   stories: NewsletterStory[],
   newsletterDate: string,
   unsubscribeUrl?: string,
   timeZone?: string,
+  trendBullets: string[] = [],
 ) {
   const resolvedTimeZone = timeZone ?? loadWorkerEnv().APP_TIME_ZONE;
+  const brand = resolveBrandSettings();
+  const feedUrl = `${brand.baseUrl}/feed`;
+  const rssUrl = `${brand.baseUrl}/rss.xml`;
+
+  const socialLinks = [
+    `<a href="${escapeHtml(feedUrl)}" style="color:#2e5b4f;text-decoration:none;font-weight:600;">Web Feed</a>`,
+    `<a href="${escapeHtml(rssUrl)}" style="color:#2e5b4f;text-decoration:none;font-weight:600;">RSS</a>`,
+    brand.xUrl ? `<a href="${escapeHtml(sanitizeStoryUrl(brand.xUrl))}" style="color:#2e5b4f;text-decoration:none;font-weight:600;">X</a>` : null,
+    brand.linkedinUrl
+      ? `<a href="${escapeHtml(sanitizeStoryUrl(brand.linkedinUrl))}" style="color:#2e5b4f;text-decoration:none;font-weight:600;">LinkedIn</a>`
+      : null,
+    brand.githubUrl
+      ? `<a href="${escapeHtml(sanitizeStoryUrl(brand.githubUrl))}" style="color:#2e5b4f;text-decoration:none;font-weight:600;">GitHub</a>`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' &nbsp;·&nbsp; ');
+
+  const trendSection =
+    trendBullets.length > 0
+      ? `
+        <div style="margin:0 0 28px 0;padding:18px 20px;background:#eef5f2;border-left:4px solid #2e5b4f;border-radius:14px;">
+          <p style="margin:0 0 10px 0;color:#2e5b4f;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.16em;">
+            Today's Industry Trend · Macro Signal &amp; Insights
+          </p>
+          <ul style="margin:0;padding-left:18px;color:#182126;font-size:15px;line-height:1.6;">
+            ${trendBullets
+              .map(
+                (bullet) =>
+                  `<li style="margin:0 0 8px 0;">${escapeHtml(bullet)}</li>`,
+              )
+              .join("")}
+          </ul>
+        </div>
+      `
+      : "";
+
   const storyItems = stories
     .map(
       (story, index) => `
@@ -339,7 +419,7 @@ export function buildNewsletterHtml(
             const take = formatPractitionerTake(story.curatorNote, story.whyRelevant);
             return take
               ? `<div style="margin:10px 0 0 0;padding:12px 14px;background:#eef5f2;border-left:3px solid #2e5b4f;border-radius:8px;">
-                  <p style="margin:0 0 4px 0;color:#2e5b4f;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.14em;">Michael's Take</p>
+                  <p style="margin:0 0 4px 0;color:#2e5b4f;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.14em;">${escapeHtml(brand.authorName)}'s Take</p>
                   <p style="margin:0;color:#182126;font-size:15px;line-height:1.55;">${escapeHtml(take)}</p>
                 </div>`
               : "";
@@ -355,11 +435,20 @@ export function buildNewsletterHtml(
     </p>
   `;
 
-  const unsubscribeFooter = unsubscribeUrl
-    ? `<p style="margin:24px 0 0 0;padding-top:16px;border-top:1px solid #e3dccd;color:#5f6a6f;font-size:12px;line-height:1.6;">
-        You are subscribed to this curated AI intelligence brief. <a href="${escapeHtml(unsubscribeUrl)}" style="color:#2e5b4f;text-decoration:underline;">Unsubscribe in one click</a>.
-      </p>`
-    : "";
+  const footerHtml = `
+    <div style="margin:24px 0 0 0;padding-top:16px;border-top:1px solid #e3dccd;color:#5f6a6f;font-size:12px;line-height:1.6;">
+      <p style="margin:0 0 6px 0;">
+        Curated by <strong style="color:#182126;">${escapeHtml(brand.authorName)}</strong> · ${socialLinks}
+      </p>
+      ${
+        unsubscribeUrl
+          ? `<p style="margin:0;">
+              You are subscribed to ${escapeHtml(brand.authorName)}'s daily AI intelligence brief. <a href="${escapeHtml(unsubscribeUrl)}" style="color:#2e5b4f;text-decoration:underline;">Unsubscribe in one click</a>.
+            </p>`
+          : ""
+      }
+    </div>
+  `;
 
   return `
     <!doctype html>
@@ -367,15 +456,19 @@ export function buildNewsletterHtml(
       <body style="margin:0;padding:0;background:#f6f1e7;font-family:Arial,sans-serif;color:#182126;">
         <div style="max-width:680px;margin:0 auto;padding:32px 20px;">
           <div style="background:#fffaf0;border:1px solid #e3dccd;border-radius:24px;padding:28px;">
-            <p style="margin:0 0 8px 0;color:#2e5b4f;font-size:12px;text-transform:uppercase;letter-spacing:0.18em;">
-              Daily AI intelligence brief
+            <p style="margin:0 0 8px 0;color:#2e5b4f;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.18em;">
+              ${escapeHtml(brand.authorName)}'s Daily AI Intelligence Brief · ${escapeHtml(newsletterDate)}
             </p>
-            <h1 style="margin:0;color:#182126;font-size:30px;line-height:1.15;">Top stories for ${escapeHtml(recipient.profileName)}</h1>
-            <p style="margin:12px 0 24px 0;color:#5f6a6f;font-size:15px;line-height:1.6;">
-              ${escapeHtml(newsletterDate)} · Selected from your first saved interest profile.
+            <h1 style="margin:0;color:#182126;font-size:30px;line-height:1.15;">What AI Engineers Should Read Today</h1>
+            <p style="margin:10px 0 14px 0;color:#5f6a6f;font-size:15px;line-height:1.6;">
+              ${escapeHtml(brand.authorBio)}
             </p>
+            <p style="margin:0 0 24px 0;font-size:13px;color:#2e5b4f;">
+              ${socialLinks}
+            </p>
+            ${trendSection}
             ${stories.length > 0 ? `<ol style="margin:0;padding-left:22px;">${storyItems}</ol>` : emptyState}
-            ${unsubscribeFooter}
+            ${footerHtml}
           </div>
         </div>
       </body>
@@ -389,13 +482,25 @@ export function buildNewsletterText(
   newsletterDate: string,
   unsubscribeUrl?: string,
   timeZone?: string,
+  trendBullets: string[] = [],
 ) {
   const resolvedTimeZone = timeZone ?? loadWorkerEnv().APP_TIME_ZONE;
+  const brand = resolveBrandSettings();
   const lines = [
-    `Daily AI intelligence brief for ${recipient.profileName}`,
-    newsletterDate,
+    `${brand.authorName}'s Daily AI Intelligence Brief (${newsletterDate})`,
+    "What AI Engineers Should Read Today",
+    brand.authorBio,
+    `Web: ${brand.baseUrl}/feed | RSS: ${brand.baseUrl}/rss.xml`,
     "",
   ];
+
+  if (trendBullets.length > 0) {
+    lines.push("TODAY'S INDUSTRY TREND · MACRO SIGNAL & INSIGHTS");
+    trendBullets.forEach((bullet) => {
+      lines.push(`- ${bullet}`);
+    });
+    lines.push("");
+  }
 
   if (stories.length === 0) {
     lines.push("No new stories were found in the last 24 hours for this profile.");
@@ -411,7 +516,7 @@ export function buildNewsletterText(
     lines.push(formatDate(story.sortTime, resolvedTimeZone));
     const take = formatPractitionerTake(story.curatorNote, story.whyRelevant);
     if (take) {
-      lines.push(`Michael's Take: ${take}`);
+      lines.push(`${brand.authorName}'s Take: ${take}`);
     }
     lines.push(story.canonicalUrl);
     lines.push("");
@@ -466,12 +571,13 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
 
     const rankedStories = await getRankedStories(recipient.profileId, recipient.userId, cutoff);
     const stories = rankedStories.length > 0 ? rankedStories : await getLatestFallbackStories(recipient.userId, cutoff);
-    const subject = `Your AI brief: ${stories.length} stories for ${newsletterDate}`;
+    const trendBullets = await getProfileTrendBullets(recipient.profileId);
+    const subject = `${env.BRAND_AUTHOR_NAME}'s AI Brief: ${stories.length} stories for ${newsletterDate}`;
     const result = await sendTransactionalEmail({
       to: { email: recipient.email },
       subject,
-      html: buildNewsletterHtml(recipient, stories, newsletterDate),
-      text: buildNewsletterText(recipient, stories, newsletterDate),
+      html: buildNewsletterHtml(recipient, stories, newsletterDate, undefined, env.APP_TIME_ZONE, trendBullets),
+      text: buildNewsletterText(recipient, stories, newsletterDate, undefined, env.APP_TIME_ZONE, trendBullets),
     });
 
     await recordNewsletterSend(recipient, newsletterDate, stories.length, result.providerMessageId);
@@ -505,7 +611,8 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
         rankedStories.length > 0
           ? rankedStories
           : await getLatestFallbackStories(publicCurator.userId, cutoff);
-      const subject = `Your AI brief: ${stories.length} stories for ${newsletterDate}`;
+      const trendBullets = await getProfileTrendBullets(publicCurator.profileId);
+      const subject = `${env.BRAND_AUTHOR_NAME}'s AI Brief: ${stories.length} stories for ${newsletterDate}`;
       const baseUrl = env.APP_BASE_URL.replace(/\/+$/, "");
 
       for (const subscriber of pendingSubscribers) {
@@ -513,8 +620,8 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
         await sendTransactionalEmail({
           to: { email: subscriber.email },
           subject,
-          html: buildNewsletterHtml(publicCurator, stories, newsletterDate, unsubscribeUrl),
-          text: buildNewsletterText(publicCurator, stories, newsletterDate, unsubscribeUrl),
+          html: buildNewsletterHtml(publicCurator, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
+          text: buildNewsletterText(publicCurator, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
         });
 
         await db
