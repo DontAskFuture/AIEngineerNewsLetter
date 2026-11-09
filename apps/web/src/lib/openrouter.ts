@@ -81,6 +81,7 @@ async function chatCompletion<T>(
       model,
       temperature: 0.1,
       max_tokens: maxTokens,
+      reasoning: { effort: "low" },
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
