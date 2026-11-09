@@ -72,7 +72,7 @@ async function callLlm(
 
   for (const model of models) {
     const freeTier = isFreeTierModel(model);
-    const maxTokens = Math.min(2400, Math.max(400, candidates.length * 100));
+    const maxTokens = Math.min(3600, Math.max(600, candidates.length * 160));
     const body = JSON.stringify({
       model,
       temperature: 0.1,
@@ -140,7 +140,18 @@ async function callLlm(
         break;
       }
 
-      const payload = (await response.json()) as Record<string, unknown>;
+      let payload: Record<string, unknown>;
+      try {
+        payload = (await response.json()) as Record<string, unknown>;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Response body error");
+        if (freeTier) {
+          pool.recordFailure(model, 408);
+          logger.warn({ model, msg: lastError.message }, "Free-tier model response body failure");
+          break;
+        }
+        continue;
+      }
 
       // OpenRouter reports upstream provider failures as HTTP 200 with an
       // `error` body, so this must be handled as a model failure (fall through

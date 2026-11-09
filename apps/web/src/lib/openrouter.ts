@@ -146,7 +146,18 @@ async function chatCompletion<T>(
         break;
       }
 
-      const payload = (await response.json()) as Record<string, unknown>;
+      let payload: Record<string, unknown>;
+      try {
+        payload = (await response.json()) as Record<string, unknown>;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Response body error");
+        if (freeTier) {
+          pool?.recordFailure(model, 408);
+          console.warn(`[openrouter] ${model} response body failure: ${lastError.message}`);
+          break;
+        }
+        continue;
+      }
 
       // OpenRouter reports upstream provider failures as HTTP 200 with an
       // `error` body, so this must be handled as a model failure (fall through
@@ -221,7 +232,7 @@ export async function summarizeTopStoriesForProfile({
   const result = await chatCompletion(
     prompt.system,
     prompt.user,
-    800,
+    1200,
     parseSummarizeTopStoriesResponse,
     [...selectSummaryModelCandidates(), env.openRouterModel],
   );
@@ -248,7 +259,7 @@ export async function scoreDocumentBatch({
     candidates,
   });
   const allowedIds = new Set(candidates.map((c) => c.id));
-  const maxTokens = Math.min(2400, Math.max(400, candidates.length * 100));
+  const maxTokens = Math.min(3600, Math.max(600, candidates.length * 160));
 
   const { models, pool } = await resolveScoringCandidates();
   const result = await chatCompletion(
