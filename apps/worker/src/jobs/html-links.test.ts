@@ -43,4 +43,24 @@ describe("extractArticleLinks", () => {
       "https://www.physicalintelligence.company/research/open-vla-scaling",
     ]);
   });
+
+  it("extracts DeepSeek release note links under /news/ from /updates", () => {
+    const baseUrl = "https://api-docs.deepseek.com/updates";
+    const html = `
+      <html>
+        <body>
+          <a href="/news/news261017">DeepSeek-V4.1 Flash Release</a>
+          <a href="/news/news250120">DeepSeek-R1 Release</a>
+          <a href="/guides/reasoning_model">Reasoning Guide</a>
+        </body>
+      </html>
+    `;
+
+    const dom = new JSDOM(html, { url: baseUrl });
+    const links = extractArticleLinks(dom, baseUrl, "deepseek-updates");
+    assert.deepEqual(links, [
+      "https://api-docs.deepseek.com/news/news261017",
+      "https://api-docs.deepseek.com/news/news250120",
+    ]);
+  });
 });

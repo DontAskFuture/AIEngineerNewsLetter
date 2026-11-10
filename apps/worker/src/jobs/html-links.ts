@@ -52,6 +52,11 @@ export const htmlParserConfigs: Record<string, HtmlParserConfig> = {
     selectors: ['a[href^="/blog/"]', 'a[href^="/research/"]'],
     pathPattern: /^\/(blog|research)\/[^/]+\/?$/,
   },
+  // DeepSeek's API changelog index (/updates) links out to release notes under /news/<slug>.
+  "deepseek-updates": {
+    selectors: ['a[href^="/news/"]'],
+    pathPattern: /^\/news\/[^/]+\/?$/,
+  },
 };
 
 export function getHtmlParserConfig(parserKey: string | null): HtmlParserConfig | undefined {
