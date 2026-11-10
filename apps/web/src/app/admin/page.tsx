@@ -13,7 +13,7 @@ import {
 import { getOperationsSnapshot } from "@/lib/operations";
 import { getScoringStatsBySource } from "@/lib/scoring";
 import { getDb, schema } from "@ai-intel/db";
-import { scoringConfig } from "@ai-intel/shared";
+import { MAX_TOP_STORIES_PER_TOPIC, scoringConfig } from "@ai-intel/shared";
 import { eq, asc } from "drizzle-orm";
 import { forceTopStoriesSummaryAction, triggerCrawlAction, triggerScoreAllAction } from "./actions";
 import { ActionButton } from "./action-button";
@@ -108,24 +108,24 @@ export default async function AdminPage() {
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <div className="surface-panel rounded-[1.35rem] p-4">
             <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-              Ranking model
+              Opinion model
             </p>
             <p className="display-font mt-2 text-2xl font-semibold tracking-tight">
-              {env.openRouterModel}
+              {scoringConfig.opinionModelCandidates[0]}
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              This env-configured model remains an explicit fallback after the configured model candidates.
+              DeepSeek writes the practitioner take and the industry-trend briefing. The env model ({env.openRouterModel}) is only a fallback for that prose.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">
             <p className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-              Scoring models
+              Relevance and topics
             </p>
             <p className="display-font mt-2 break-all text-2xl font-semibold tracking-tight">
-              {scoringConfig.scoringModelCandidates.join(" → ")}
+              {scoringConfig.jevModel}
             </p>
             <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              Ranking and scoring use HY3 Preview first, then fall back to DeepSeek V4 Flash. Top-story summaries use the reverse order.
+              Decider Flash scores relevance and assigns a topic for every story. DeepSeek writes the practitioner take for the daily top 10 only. At most {MAX_TOP_STORIES_PER_TOPIC} stories from one topic land in that shortlist before it backfills.
             </p>
           </div>
           <div className="surface-panel rounded-[1.35rem] p-4">

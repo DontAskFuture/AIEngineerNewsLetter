@@ -1,3 +1,4 @@
+import { isTakePlaceholder } from "./prompts";
 import type { SourceCategory } from "./types";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -54,7 +55,7 @@ export function formatPractitionerTake(
   }
 
   const raw = whyRelevant?.trim();
-  if (!raw) {
+  if (!raw || isTakePlaceholder(raw)) {
     return null;
   }
 

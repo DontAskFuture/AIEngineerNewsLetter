@@ -1,19 +1,30 @@
 import { getDb, schema } from "@ai-intel/db";
-import { and, desc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, like, notInArray, or, sql } from "drizzle-orm";
 import {
-  ScoringModelPool,
+  OPINION_NOT_REQUIRED,
+  OPINION_PENDING_TEXT,
+  TAKE_WITHHELD_TEXT,
+  applyOpinionToStoredWhyRelevant,
+  classifyStoryTopicsBatch,
+  computeAdjustedStoryScore,
   decideRetry,
+  decideStoryRelevanceBatch,
   deduplicateScoringCandidates,
   extractBodyError,
   extractDocumentPreview,
-  formatWhyRelevant,
+  hasStoredPractitionerTake,
   isFreeTierModel,
-  parseScoreDocumentsResponse,
-  renderScoreDocumentsPrompt,
+  parseStoryOpinionsResponse,
+  parseWhyRelevantMetadata,
+  renderStoryOpinionsPrompt,
   scoringConfig,
-  type ParsedDocumentScore,
+  selectDiverseShortlist,
+  selectOpinionModelCandidates,
+  type ParsedStoryOpinion,
   type PromptCandidate,
   type ScoreDocumentsPayload,
+  type StoryRelevanceInput,
+  type StoryRelevanceOutcome,
 } from "@ai-intel/shared";
 import { logger } from "../logger";
 import { loadWorkerEnv } from "../env";
@@ -21,38 +32,27 @@ import { loadWorkerEnv } from "../env";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
-// Free-pool endpoints can hang indefinitely, so every request is bounded and a
-// timeout is treated like any other model failure.
+// DeepSeek opinion calls can stall, so every chat request stays bounded.
 const REQUEST_TIMEOUT_MS = 60_000;
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SCORING_PAGE_SIZE = 100;
+const DAILY_TAKE_CANDIDATE_LIMIT = 200;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Health state is per-process, so the pool is a module-level singleton: a model
-// that exhausted its quota on one batch must still be parked on the next.
-let scoringPool: ScoringModelPool | null = null;
-
-function getScoringPool(): ScoringModelPool {
-  const env = loadWorkerEnv();
-  scoringPool ??= new ScoringModelPool({
-    apiKey: env.OPENROUTER_API_KEY ?? null,
-    onWarn: (message) => logger.warn({ msg: message }, "OpenRouter model pool"),
-  });
-  return scoringPool;
-}
-
-async function callLlm(
+async function writeStoryOpinions(
   profileName: string | null,
   interestStatement: string,
   candidates: PromptCandidate[],
-): Promise<{ model: string; scores: ParsedDocumentScore[] }> {
+): Promise<{ model: string; opinions: ParsedStoryOpinion[] }> {
   const env = loadWorkerEnv();
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not set");
+  if (candidates.length === 0) return { model: selectOpinionModelCandidates()[0] ?? env.OPENROUTER_MODEL, opinions: [] };
 
-  const prompt = renderScoreDocumentsPrompt({ profileName, interestStatement, candidates });
+  const prompt = renderStoryOpinionsPrompt({ profileName, interestStatement, candidates });
   const allowedIds = new Set(candidates.map((c) => c.id));
   const headers = {
     Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
@@ -60,14 +60,7 @@ async function callLlm(
     "HTTP-Referer": env.APP_BASE_URL,
     "X-Title": "AI Builder Intelligence",
   };
-
-  const pool = getScoringPool();
-  await pool.refresh();
-
-  const models = pool.candidates(Date.now(), env.OPENROUTER_MODEL);
-  const parked = pool.health();
-  if (parked.length > 0) logger.debug({ parked }, "Skipping parked OpenRouter models");
-
+  const models = Array.from(new Set([...selectOpinionModelCandidates(), env.OPENROUTER_MODEL]));
   let lastError: Error | null = null;
 
   for (const model of models) {
@@ -88,7 +81,7 @@ async function callLlm(
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
-        logger.info({ attempt, backoff, model }, "Retrying OpenRouter request");
+        logger.info({ attempt, backoff, model }, "Retrying DeepSeek opinion request");
         await sleep(backoff);
       }
 
@@ -103,9 +96,7 @@ async function callLlm(
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Network error");
         if (freeTier) {
-          // Timeouts and connection failures are transient, not entitlement problems.
-          pool.recordFailure(model, 408);
-          logger.warn({ model, msg: lastError.message }, "Free-tier model network failure");
+          logger.warn({ model, msg: lastError.message }, "Opinion model network failure");
           break;
         }
         continue;
@@ -117,27 +108,18 @@ async function callLlm(
         const msg = errObj && typeof errObj === "object" && typeof (errObj as Record<string, unknown>).message === "string"
           ? ((errObj as Record<string, unknown>).message as string)
           : `HTTP ${response.status}`;
-
         lastError = new Error(msg);
-
         const decision = decideRetry({
           status: response.status,
           attempt,
           maxRetries: MAX_RETRIES,
           isFreeTier: freeTier,
         });
-
         if (decision === "retry") {
-          logger.warn({ status: response.status, msg, model }, "Retryable OpenRouter error");
+          logger.warn({ status: response.status, msg, model }, "Retryable opinion-model error");
           continue;
         }
-
-        pool.recordFailure(model, response.status);
-        if (response.status === 429 && freeTier) {
-          logger.info({ model }, "Free-tier quota exhausted, parked and falling through");
-        } else {
-          logger.warn({ status: response.status, msg, model }, "OpenRouter model failed");
-        }
+        logger.warn({ status: response.status, msg, model }, "Opinion model failed");
         break;
       }
 
@@ -146,35 +128,24 @@ async function callLlm(
         payload = (await response.json()) as Record<string, unknown>;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Response body error");
-        if (freeTier) {
-          pool.recordFailure(model, 408);
-          logger.warn({ model, msg: lastError.message }, "Free-tier model response body failure");
-          break;
-        }
+        if (freeTier) break;
         continue;
       }
 
-      // OpenRouter reports upstream provider failures as HTTP 200 with an
-      // `error` body, so this must be handled as a model failure (fall through
-      // to the next candidate) rather than thrown out of the candidate loop.
       const bodyError = extractBodyError(payload);
       if (bodyError) {
         lastError = new Error(bodyError.message);
-
         const decision = decideRetry({
           status: bodyError.status,
           attempt,
           maxRetries: MAX_RETRIES,
           isFreeTier: freeTier,
         });
-
         if (decision === "retry") {
-          logger.warn({ status: bodyError.status, msg: bodyError.message, model }, "Retryable OpenRouter upstream error");
+          logger.warn({ status: bodyError.status, msg: bodyError.message, model }, "Retryable opinion-model upstream error");
           continue;
         }
-
-        pool.recordFailure(model, bodyError.status);
-        logger.warn({ status: bodyError.status, msg: bodyError.message, model }, "OpenRouter model unavailable");
+        logger.warn({ status: bodyError.status, msg: bodyError.message, model }, "Opinion model unavailable");
         break;
       }
 
@@ -184,27 +155,264 @@ async function callLlm(
       const content = typeof message?.content === "string" ? message.content.trim() : null;
       if (!content) {
         lastError = new Error("Empty content returned");
-        pool.recordFailure(model, 502);
-        logger.warn({ model }, "OpenRouter returned empty content");
+        logger.warn({ model }, "Opinion model returned empty content");
         break;
       }
 
-      let scores: ParsedDocumentScore[];
       try {
-        scores = parseScoreDocumentsResponse(content, allowedIds);
+        const opinions = parseStoryOpinionsResponse(content, allowedIds);
+        return { model: typeof payload.model === "string" ? payload.model : model, opinions };
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error("Invalid scoring JSON response");
-        pool.recordFailure(model, 502);
-        logger.warn({ model, msg: lastError.message }, "OpenRouter returned invalid scoring JSON, falling through");
+        lastError = error instanceof Error ? error : new Error("Invalid opinion JSON response");
+        logger.warn({ model, msg: lastError.message }, "Opinion model returned invalid JSON");
         break;
       }
-
-      pool.recordSuccess(model);
-      return { model: typeof payload.model === "string" ? payload.model : model, scores };
     }
   }
 
-  throw lastError ?? new Error("OpenRouter request failed after retries");
+  throw lastError ?? new Error("Opinion request failed after retries");
+}
+
+async function persistTopics(topics: Array<{ documentId: number; topic: string }>) {
+  if (topics.length === 0) return;
+  const db = getDb();
+  for (const topic of topics) {
+    await db
+      .update(schema.documents)
+      .set({ storyTopic: topic.topic })
+      .where(and(eq(schema.documents.id, topic.documentId), isNull(schema.documents.storyTopic)));
+  }
+}
+
+async function persistOpinions(
+  profileId: number,
+  model: string,
+  opinions: ParsedStoryOpinion[],
+  duplicateIdsByRepresentative: Map<number, number[]>,
+  storedWhyRelevantByDocument: Map<number, string>,
+) {
+  if (opinions.length === 0) return;
+  const db = getDb();
+  for (const opinion of opinions) {
+    const targetIds = duplicateIdsByRepresentative.get(opinion.documentId) ?? [opinion.documentId];
+    for (const documentId of targetIds) {
+      const existing = storedWhyRelevantByDocument.get(documentId) ?? storedWhyRelevantByDocument.get(opinion.documentId) ?? "";
+      await db
+        .update(schema.documentScores)
+        .set({
+          whyRelevant: applyOpinionToStoredWhyRelevant({
+            existingWhyRelevant: existing,
+            opinion: opinion.whyRelevant,
+            matchedSignals: opinion.matchedSignals,
+          }),
+          opinionModel: model,
+        })
+        .where(and(
+          eq(schema.documentScores.documentId, documentId),
+          eq(schema.documentScores.profileId, profileId),
+          or(
+            isNull(schema.documentScores.opinionModel),
+            eq(schema.documentScores.opinionModel, OPINION_NOT_REQUIRED),
+            like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
+            like(schema.documentScores.whyRelevant, `${TAKE_WITHHELD_TEXT}%`),
+          ),
+        ));
+    }
+  }
+}
+
+async function backfillStoryTopics({
+  targetedDocumentIds,
+  cutoff,
+  safetyCap,
+}: {
+  targetedDocumentIds: number[];
+  cutoff: Date;
+  safetyCap: number;
+}) {
+  const env = loadWorkerEnv();
+  if (!env.OPENROUTER_API_KEY) return;
+  const db = getDb();
+  const skipped = new Set<number>();
+  let considered = 0;
+
+  while (considered < safetyCap) {
+    const filters = [isNull(schema.documents.storyTopic)];
+    if (targetedDocumentIds.length > 0) {
+      filters.push(inArray(schema.documents.id, targetedDocumentIds));
+    } else {
+      filters.push(gt(documentSortKey, cutoff));
+    }
+    if (skipped.size > 0) {
+      filters.push(notInArray(schema.documents.id, Array.from(skipped)));
+    }
+
+    const rows = await db
+      .select({
+        id: schema.documents.id,
+        title: schema.documents.title,
+        summary: schema.documents.summary,
+        bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
+        sourceName: schema.sources.name,
+        sourceCategory: schema.sources.category,
+      })
+      .from(schema.documents)
+      .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+      .where(and(...filters))
+      .orderBy(desc(documentSortKey), desc(schema.documents.id))
+      .limit(Math.min(scoringConfig.batchSize, safetyCap - considered));
+
+    if (rows.length === 0) return;
+
+    const classified = await classifyStoryTopicsBatch({
+      apiKey: env.OPENROUTER_API_KEY,
+      referer: env.APP_BASE_URL,
+      stories: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        excerpt: extractDocumentPreview(row.summary, row.bodyText),
+        sourceName: row.sourceName,
+        sourceCategory: row.sourceCategory,
+        storyTopic: null,
+      })),
+    });
+    const writes = classified.flatMap((row) => (row.topic ? [{ documentId: row.documentId, topic: row.topic }] : []));
+    await persistTopics(writes);
+    const written = new Set(writes.map((row) => row.documentId));
+    for (const row of rows) {
+      if (!written.has(row.id)) skipped.add(row.id);
+    }
+    considered += rows.length;
+    logger.info(
+      { classified: writes.length, considered: rows.length, skipped: skipped.size },
+      "Classified story topics",
+    );
+  }
+}
+
+async function writeDailyTakes({
+  profileId,
+  userId,
+  profileName,
+  interestStatement,
+}: {
+  profileId: number;
+  userId: number;
+  profileName: string;
+  interestStatement: string;
+}) {
+  const db = getDb();
+  const dayCutoff = new Date(Date.now() - DAY_MS);
+  const now = Date.now();
+  const rows = await db
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      summary: schema.documents.summary,
+      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
+      sourceName: schema.sources.name,
+      sourceCategory: schema.sources.category,
+      sourceGroupKey: schema.sources.canonicalDomain,
+      storyTopic: schema.documents.storyTopic,
+      trustTier: schema.sources.trustTier,
+      sortTime: documentSortKey,
+      score: schema.documentScores.score,
+      whyRelevant: schema.documentScores.whyRelevant,
+      opinionModel: schema.documentScores.opinionModel,
+      isPinned: schema.storyCurations.isPinned,
+      isHidden: schema.storyCurations.isHidden,
+    })
+    .from(schema.documentScores)
+    .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .leftJoin(
+      schema.storyCurations,
+      and(
+        eq(schema.storyCurations.documentId, schema.documents.id),
+        eq(schema.storyCurations.userId, userId),
+      ),
+    )
+    .where(and(
+      eq(schema.documentScores.profileId, profileId),
+      or(
+        and(
+          gte(schema.documentScores.score, scoringConfig.minOpinionScore),
+          gt(documentSortKey, dayCutoff),
+        ),
+        eq(schema.storyCurations.isPinned, true),
+      ),
+    ))
+    .orderBy(desc(schema.documentScores.score), desc(documentSortKey))
+    .limit(DAILY_TAKE_CANDIDATE_LIMIT);
+
+  const ranked = rows
+    .map((row) => {
+      const sortTime = new Date(row.sortTime);
+      const parsed = parseWhyRelevantMetadata(row.whyRelevant);
+      const adjustedScore = computeAdjustedStoryScore({
+        score: row.score,
+        sortTime,
+        cutoff: dayCutoff,
+        now,
+        freshnessBoostMax: 12,
+        trustTier: row.trustTier,
+        confidence: parsed.confidence,
+        minQualifyingScore: scoringConfig.minOpinionScore,
+      });
+      return {
+        ...row,
+        sortTime,
+        adjustedScore: adjustedScore ?? row.score,
+        isPinned: Boolean(row.isPinned),
+        isHidden: Boolean(row.isHidden),
+        previewParagraph: extractDocumentPreview(row.summary, row.bodyText),
+      };
+    })
+    .sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      const scoreDiff = (b.adjustedScore ?? 0) - (a.adjustedScore ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return b.sortTime.getTime() - a.sortTime.getTime();
+    });
+
+  const shortlist = selectDiverseShortlist(ranked);
+  const shortlistIds = shortlist.map((story) => story.id);
+  const retireFilters = [
+    eq(schema.documentScores.profileId, profileId),
+    like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
+  ];
+  if (shortlistIds.length > 0) {
+    retireFilters.push(notInArray(schema.documentScores.documentId, shortlistIds));
+  }
+  await db
+    .update(schema.documentScores)
+    .set({
+      whyRelevant: sql`replace(${schema.documentScores.whyRelevant}, ${OPINION_PENDING_TEXT}, ${TAKE_WITHHELD_TEXT})`,
+      opinionModel: OPINION_NOT_REQUIRED,
+    })
+    .where(and(...retireFilters));
+
+  const missing = shortlist.filter((story) => !hasStoredPractitionerTake(story.whyRelevant, story.opinionModel));
+  if (missing.length === 0) return;
+
+  const storedWhyRelevant = new Map(missing.map((story) => [story.id, story.whyRelevant]));
+  const duplicateIds = new Map(missing.map((story) => [story.id, [story.id]]));
+  const candidates: PromptCandidate[] = missing.map((story) => ({
+    id: story.id,
+    title: story.title,
+    previewParagraph: story.previewParagraph ?? "",
+    sourceName: story.sourceName,
+    sourceCategory: story.sourceCategory,
+    publishedAt: story.sortTime,
+  }));
+
+  try {
+    const opinions = await writeStoryOpinions(profileName, interestStatement, candidates);
+    await persistOpinions(profileId, opinions.model, opinions.opinions, duplicateIds, storedWhyRelevant);
+    logger.info({ profileId, opinions: opinions.opinions.length, shortlist: shortlist.length }, "Wrote daily top takes");
+  } catch (error) {
+    logger.error({ profileId, error }, "Daily take generation failed; scores were kept");
+  }
 }
 
 export async function scoreDocuments(payload: ScoreDocumentsPayload) {
@@ -218,6 +426,7 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
   const [profile] = await db
     .select({
       id: schema.userProfiles.id,
+      userId: schema.userProfiles.userId,
       displayName: schema.userProfiles.displayName,
       interestStatement: schema.userProfiles.interestStatement,
     })
@@ -234,89 +443,127 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
     .from(schema.documentScores)
     .where(eq(schema.documentScores.profileId, profileId));
 
-  const documentFilters = [notInArray(schema.documents.id, alreadyScoredIds)];
-  if (targetedDocumentIds.length > 0) {
-    documentFilters.push(inArray(schema.documents.id, targetedDocumentIds));
-  } else {
-    const cutoff = new Date(Date.now() - env.SCORING_LOOKBACK_DAYS * DAY_MS);
-    documentFilters.push(gt(documentSortKey, cutoff));
-  }
-
-  const unscoredDocs = await db
-    .select({
-      id: schema.documents.id,
-      title: schema.documents.title,
-      summary: schema.documents.summary,
-      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
-      sourceName: schema.sources.name,
-      sourceCategory: schema.sources.category,
-      sortTime: documentSortKey,
-    })
-    .from(schema.documents)
-    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
-    .where(and(...documentFilters))
-    .orderBy(desc(documentSortKey), desc(schema.documents.id))
-    .limit(env.SCORING_MAX_DOCUMENTS_PER_RUN);
-
-  if (unscoredDocs.length === 0) {
-    logger.info({ profileId }, "No unscored documents");
-    return;
-  }
-
-  const docsWithPreviews = unscoredDocs.map((doc) => ({
-    ...doc,
-    previewParagraph: extractDocumentPreview(doc.summary, doc.bodyText),
-  }));
-  const deduplicatedGroups = deduplicateScoringCandidates(docsWithPreviews);
-  const totalBatches = Math.ceil(deduplicatedGroups.length / scoringConfig.batchSize);
-
-  // Create scoring job row
-  const [jobRow] = await db
-    .insert(schema.scoringJobs)
-    .values({ profileId, status: "running", totalDocuments: unscoredDocs.length, totalBatches })
-    .returning({ id: schema.scoringJobs.id });
-  const jobId = jobRow!.id;
-
+  const cutoff = new Date(Date.now() - env.SCORING_LOOKBACK_DAYS * DAY_MS);
+  const failedIds = new Set<number>();
+  let attempted = 0;
+  let jobId: number | null = null;
   let scoredTotal = 0;
   let failedTotal = 0;
   let lastBatchError: string | null = null;
+  let batchNumber = 0;
+  let aborted = false;
+
+  const finishSideWork = () => Promise.all([
+    backfillStoryTopics({
+      targetedDocumentIds,
+      cutoff,
+      safetyCap: env.SCORING_MAX_DOCUMENTS_PER_RUN,
+    }),
+    writeDailyTakes({
+      profileId,
+      userId: profile.userId,
+      profileName: profile.displayName,
+      interestStatement: profile.interestStatement,
+    }),
+  ]);
 
   try {
-    for (let i = 0; i < deduplicatedGroups.length; i += scoringConfig.batchSize) {
+    while (attempted < env.SCORING_MAX_DOCUMENTS_PER_RUN && !aborted) {
+      const pageLimit = Math.min(SCORING_PAGE_SIZE, env.SCORING_MAX_DOCUMENTS_PER_RUN - attempted);
+      const documentFilters = [notInArray(schema.documents.id, alreadyScoredIds)];
+      if (failedIds.size > 0) {
+        documentFilters.push(notInArray(schema.documents.id, Array.from(failedIds)));
+      }
+      if (targetedDocumentIds.length > 0) {
+        documentFilters.push(inArray(schema.documents.id, targetedDocumentIds));
+      } else {
+        documentFilters.push(gt(documentSortKey, cutoff));
+      }
+
+      const unscoredDocs = await db
+        .select({
+          id: schema.documents.id,
+          title: schema.documents.title,
+          summary: schema.documents.summary,
+          bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
+          sourceName: schema.sources.name,
+          sourceCategory: schema.sources.category,
+          storyTopic: schema.documents.storyTopic,
+          sortTime: documentSortKey,
+        })
+        .from(schema.documents)
+        .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+        .where(and(...documentFilters))
+        .orderBy(desc(documentSortKey), desc(schema.documents.id))
+        .limit(pageLimit);
+
+      if (unscoredDocs.length === 0) break;
+      attempted += unscoredDocs.length;
+
+      const deduplicatedGroups = deduplicateScoringCandidates(
+        unscoredDocs.map((doc) => ({
+          ...doc,
+          previewParagraph: extractDocumentPreview(doc.summary, doc.bodyText),
+        })),
+      );
+      const pageBatches = Math.ceil(deduplicatedGroups.length / scoringConfig.batchSize);
+
+      if (jobId === null) {
+        const [jobRow] = await db
+          .insert(schema.scoringJobs)
+          .values({
+            profileId,
+            status: "running",
+            totalDocuments: unscoredDocs.length,
+            totalBatches: pageBatches,
+          })
+          .returning({ id: schema.scoringJobs.id });
+        jobId = jobRow!.id;
+      } else {
+        await db
+          .update(schema.scoringJobs)
+          .set({
+            totalDocuments: sql`${schema.scoringJobs.totalDocuments} + ${unscoredDocs.length}`,
+            totalBatches: sql`${schema.scoringJobs.totalBatches} + ${pageBatches}`,
+          })
+          .where(eq(schema.scoringJobs.id, jobId));
+      }
+
+      for (let i = 0; i < deduplicatedGroups.length && !aborted; i += scoringConfig.batchSize) {
       const batchGroups = deduplicatedGroups.slice(i, i + scoringConfig.batchSize);
-      const batchNumber = Math.floor(i / scoringConfig.batchSize) + 1;
+      batchNumber += 1;
       const batchDocumentCount = batchGroups.reduce(
         (sum, group) => sum + group.duplicateIds.length,
         0,
       );
 
       const duplicateTargetIdsByRepresentative = new Map<number, number[]>();
-      const uniqueCandidates: PromptCandidate[] = batchGroups.map((group) => {
+      const stories: StoryRelevanceInput[] = batchGroups.map((group) => {
         const doc = group.representative;
         duplicateTargetIdsByRepresentative.set(doc.id, group.duplicateIds);
         return {
           id: doc.id,
           title: doc.title,
-          previewParagraph: doc.previewParagraph,
+          excerpt: doc.previewParagraph,
           sourceName: doc.sourceName,
           sourceCategory: doc.sourceCategory,
-          publishedAt: doc.sortTime,
+          storyTopic: doc.storyTopic,
         };
       });
 
       try {
-        const result = await callLlm(
-          profile.displayName,
-          profile.interestStatement,
-          uniqueCandidates,
-        );
-        const expandedScores = result.scores.flatMap((s) => {
-          const targetIds = duplicateTargetIdsByRepresentative.get(s.documentId) ?? [s.documentId];
-          return targetIds.map((documentId) => ({
-            ...s,
-            documentId,
-          }));
+        if (!env.OPENROUTER_API_KEY) {
+          throw new Error("OPENROUTER_API_KEY is not set");
+        }
+
+        const outcomes = await decideStoryRelevanceBatch({
+          apiKey: env.OPENROUTER_API_KEY,
+          interestStatement: profile.interestStatement,
+          stories,
+          referer: env.APP_BASE_URL,
         });
+        const successes = outcomes.filter((outcome): outcome is Extract<StoryRelevanceOutcome, { ok: true }> => outcome.ok);
+        const failures = outcomes.filter((outcome) => !outcome.ok);
 
         const [currentProfile] = await db
           .select({ interestStatement: schema.userProfiles.interestStatement })
@@ -332,39 +579,71 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
             { profileId, jobId },
             "Aborting scoring run because profile interest statement changed mid-job",
           );
+          aborted = true;
           break;
         }
 
-        if (expandedScores.length > 0) {
-          await db
-            .insert(schema.documentScores)
-            .values(expandedScores.map((s) => ({
-              documentId: s.documentId,
-              profileId,
-              score: s.score,
-              whyRelevant: formatWhyRelevant(s),
-              model: result.model,
-            })))
-            .onConflictDoUpdate({
-              target: [schema.documentScores.documentId, schema.documentScores.profileId],
-              set: {
-                score: sql`excluded.score`,
-                whyRelevant: sql`excluded.why_relevant`,
-                model: sql`excluded.model`,
-                scoredAt: new Date(),
-              },
-            });
+        for (const failure of failures) {
+          if (!failure.ok) {
+            const ids = duplicateTargetIdsByRepresentative.get(failure.documentId) ?? [failure.documentId];
+            for (const id of ids) failedIds.add(id);
+          }
         }
 
-        const missed = Math.max(0, batchDocumentCount - expandedScores.length);
-        scoredTotal += expandedScores.length;
+        if (successes.length === 0) {
+          throw new Error(failures[0] && "error" in failures[0] ? failures[0].error : "Decider returned no relevance scores");
+        }
+
+        const expandedScores = successes.flatMap((decision) => {
+          const targetIds = duplicateTargetIdsByRepresentative.get(decision.documentId) ?? [decision.documentId];
+          return targetIds.map((documentId) => ({
+            documentId,
+            score: decision.score,
+            whyRelevant: decision.whyRelevant,
+            model: decision.model,
+            opinionModel: decision.opinionModel,
+          }));
+        });
+
+        await db
+          .insert(schema.documentScores)
+          .values(expandedScores.map((s) => ({
+            documentId: s.documentId,
+            profileId,
+            score: s.score,
+            whyRelevant: s.whyRelevant,
+            model: s.model,
+            opinionModel: s.opinionModel,
+          })))
+          .onConflictDoUpdate({
+            target: [schema.documentScores.documentId, schema.documentScores.profileId],
+            set: {
+              score: sql`excluded.score`,
+              whyRelevant: sql`excluded.why_relevant`,
+              model: sql`excluded.model`,
+              opinionModel: sql`excluded.opinion_model`,
+              scoredAt: new Date(),
+            },
+          });
+
+        const topicWrites = successes.flatMap((decision) => {
+          const story = stories.find((candidate) => candidate.id === decision.documentId);
+          if (!decision.topic || story?.storyTopic) return [];
+          const targetIds = duplicateTargetIdsByRepresentative.get(decision.documentId) ?? [decision.documentId];
+          return targetIds.map((documentId) => ({ documentId, topic: decision.topic as string }));
+        });
+        await persistTopics(topicWrites);
+
+        const scoredDocuments = expandedScores.length;
+        const missed = Math.max(0, batchDocumentCount - scoredDocuments);
+        scoredTotal += scoredDocuments;
         failedTotal += missed;
 
         await db
           .update(schema.scoringJobs)
           .set({
             currentBatch: batchNumber,
-            scoredDocuments: sql`${schema.scoringJobs.scoredDocuments} + ${expandedScores.length}`,
+            scoredDocuments: sql`${schema.scoringJobs.scoredDocuments} + ${scoredDocuments}`,
             failedDocuments: sql`${schema.scoringJobs.failedDocuments} + ${missed}`,
           })
           .where(eq(schema.scoringJobs.id, jobId));
@@ -374,9 +653,8 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
             jobId,
             profileId,
             batchNumber,
-            totalBatches,
-            model: result.model,
-            scored: expandedScores.length,
+            model: successes[0]?.model,
+            scored: scoredDocuments,
             total: batchDocumentCount,
           },
           "Scored batch",
@@ -385,6 +663,9 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
         const message = error instanceof Error ? error.message : "Unknown error";
         lastBatchError = message;
         failedTotal += batchDocumentCount;
+        for (const group of batchGroups) {
+          for (const id of group.duplicateIds) failedIds.add(id);
+        }
         logger.error({ jobId, profileId, batchNumber, error }, "Batch scoring failed");
 
         await db
@@ -395,6 +676,14 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
           })
           .where(eq(schema.scoringJobs.id, jobId));
       }
+      }
+    }
+
+    await finishSideWork();
+
+    if (jobId === null) {
+      logger.info({ profileId }, "No unscored documents");
+      return;
     }
 
     const finalStatus = scoredTotal === 0 && failedTotal > 0 ? "failed" : "completed";
@@ -408,15 +697,17 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
       .where(eq(schema.scoringJobs.id, jobId));
 
     logger.info(
-      { jobId, profileId, status: finalStatus, scoredTotal, failedTotal },
+      { jobId, profileId, status: finalStatus, scoredTotal, failedTotal, attempted },
       "Scoring job finished",
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    await db
-      .update(schema.scoringJobs)
-      .set({ status: "failed", completedAt: new Date(), errorMessage: message })
-      .where(eq(schema.scoringJobs.id, jobId));
+    if (jobId !== null) {
+      await db
+        .update(schema.scoringJobs)
+        .set({ status: "failed", completedAt: new Date(), errorMessage: message })
+        .where(eq(schema.scoringJobs.id, jobId));
+    }
 
     logger.error({ jobId, error: message }, "Scoring job failed");
     throw error;

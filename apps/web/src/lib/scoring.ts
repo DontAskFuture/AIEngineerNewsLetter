@@ -1,14 +1,24 @@
 import {
+  OPINION_NOT_REQUIRED,
+  OPINION_PENDING_TEXT,
+  TAKE_WITHHELD_TEXT,
+  applyOpinionToStoredWhyRelevant,
+  classifyStoryTopicsBatch,
+  computeAdjustedStoryScore,
+  decideStoryRelevanceBatch,
   deduplicateScoringCandidates,
   extractDocumentPreview,
-  formatWhyRelevant,
+  hasStoredPractitionerTake,
+  parseWhyRelevantMetadata,
   scoringConfig,
+  selectDiverseShortlist,
+  type StoryRelevanceInput,
+  type StoryRelevanceOutcome,
 } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, desc, eq, gt, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, like, notInArray, or, sql } from "drizzle-orm";
 import { loadWebEnv } from "@/lib/env";
-import type { InterestRankingCandidate } from "@/lib/openrouter";
-import { scoreDocumentBatch } from "@/lib/openrouter";
+import { writeStoryOpinions } from "@/lib/openrouter";
 import {
   startScoringJob,
   updateScoringBatch,
@@ -21,6 +31,55 @@ export { getScoringJobState } from "@/lib/scoring-tracker";
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const DEFAULT_LOOKBACK_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DAILY_TAKE_CANDIDATE_LIMIT = 200;
+
+async function persistTopics(topics: Array<{ documentId: number; topic: string }>) {
+  if (topics.length === 0) return;
+  const db = getDb();
+  for (const topic of topics) {
+    await db
+      .update(schema.documents)
+      .set({ storyTopic: topic.topic })
+      .where(and(eq(schema.documents.id, topic.documentId), isNull(schema.documents.storyTopic)));
+  }
+}
+
+async function persistOpinions(
+  profileId: number,
+  model: string,
+  opinions: Array<{ documentId: number; whyRelevant: string; matchedSignals: string[] }>,
+  duplicateIdsByRepresentative: Map<number, number[]>,
+  storedWhyRelevantByDocument: Map<number, string>,
+) {
+  if (opinions.length === 0) return;
+  const db = getDb();
+  for (const opinion of opinions) {
+    const targetIds = duplicateIdsByRepresentative.get(opinion.documentId) ?? [opinion.documentId];
+    for (const documentId of targetIds) {
+      const existing = storedWhyRelevantByDocument.get(documentId) ?? storedWhyRelevantByDocument.get(opinion.documentId) ?? "";
+      await db
+        .update(schema.documentScores)
+        .set({
+          whyRelevant: applyOpinionToStoredWhyRelevant({
+            existingWhyRelevant: existing,
+            opinion: opinion.whyRelevant,
+            matchedSignals: opinion.matchedSignals,
+          }),
+          opinionModel: model,
+        })
+        .where(and(
+          eq(schema.documentScores.documentId, documentId),
+          eq(schema.documentScores.profileId, profileId),
+          or(
+            isNull(schema.documentScores.opinionModel),
+            eq(schema.documentScores.opinionModel, OPINION_NOT_REQUIRED),
+            like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
+            like(schema.documentScores.whyRelevant, `${TAKE_WITHHELD_TEXT}%`),
+          ),
+        ));
+    }
+  }
+}
 
 export interface ScoringProgress {
   totalUnscored: number;
@@ -40,6 +99,7 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
   const [profile] = await db
     .select({
       id: schema.userProfiles.id,
+      userId: schema.userProfiles.userId,
       displayName: schema.userProfiles.displayName,
       interestStatement: schema.userProfiles.interestStatement,
     })
@@ -65,6 +125,7 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
       bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
       sourceName: schema.sources.name,
       sourceCategory: schema.sources.category,
+      storyTopic: schema.documents.storyTopic,
       sortTime: documentSortKey,
     })
     .from(schema.documents)
@@ -92,6 +153,13 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
   };
 
   if (unscoredDocs.length === 0) {
+    await backfillStoryTopics(env.openRouterApiKey ?? "", env.appBaseUrl ?? "http://localhost:3000", cutoff);
+    await writeDailyTakes({
+      profileId,
+      userId: profile.userId,
+      profileName: profile.displayName,
+      interestStatement: profile.interestStatement,
+    });
     return progress;
   }
 
@@ -108,33 +176,28 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
       );
 
       const duplicateTargetIdsByRepresentative = new Map<number, number[]>();
-      const uniqueCandidates: InterestRankingCandidate[] = batchGroups.map((group) => {
+      const stories: StoryRelevanceInput[] = batchGroups.map((group) => {
         const doc = group.representative;
         duplicateTargetIdsByRepresentative.set(doc.id, group.duplicateIds);
         return {
           id: doc.id,
           title: doc.title,
-          previewParagraph: doc.previewParagraph,
+          excerpt: doc.previewParagraph,
           sourceName: doc.sourceName,
           sourceCategory: doc.sourceCategory,
-          publishedAt: doc.sortTime,
+          storyTopic: doc.storyTopic,
         };
       });
 
       try {
-        const result = await scoreDocumentBatch({
-          profileName: profile.displayName,
+        const outcomes = await decideStoryRelevanceBatch({
+          apiKey: env.openRouterApiKey ?? "",
           interestStatement: profile.interestStatement,
-          candidates: uniqueCandidates,
+          stories,
+          referer: env.appBaseUrl ?? "http://localhost:3000",
         });
-
-        const expandedScores = result.scores.flatMap((s) => {
-          const targetIds = duplicateTargetIdsByRepresentative.get(s.documentId) ?? [s.documentId];
-          return targetIds.map((documentId) => ({
-            ...s,
-            documentId,
-          }));
-        });
+        const successes = outcomes.filter((outcome): outcome is Extract<StoryRelevanceOutcome, { ok: true }> => outcome.ok);
+        const failures = outcomes.filter((outcome) => !outcome.ok);
 
         const [currentProfile] = await db
           .select({ interestStatement: schema.userProfiles.interestStatement })
@@ -149,30 +212,53 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
           break;
         }
 
-        if (expandedScores.length > 0) {
-          await db
-            .insert(schema.documentScores)
-            .values(
-              expandedScores.map((s) => ({
-                documentId: s.documentId,
-                profileId,
-                score: s.score,
-                whyRelevant: formatWhyRelevant(s),
-                model: result.model,
-              })),
-            )
-            .onConflictDoUpdate({
-              target: [schema.documentScores.documentId, schema.documentScores.profileId],
-              set: {
-                score: sql`excluded.score`,
-                whyRelevant: sql`excluded.why_relevant`,
-                model: sql`excluded.model`,
-                scoredAt: new Date(),
-              },
-            });
-
-          progress.scored += expandedScores.length;
+        if (successes.length === 0) {
+          throw new Error(failures[0] && "error" in failures[0] ? failures[0].error : "Decider returned no relevance scores");
         }
+
+        const expandedScores = successes.flatMap((decision) => {
+          const targetIds = duplicateTargetIdsByRepresentative.get(decision.documentId) ?? [decision.documentId];
+          return targetIds.map((documentId) => ({
+            documentId,
+            score: decision.score,
+            whyRelevant: decision.whyRelevant,
+            model: decision.model,
+            opinionModel: decision.opinionModel,
+          }));
+        });
+
+        await db
+          .insert(schema.documentScores)
+          .values(
+            expandedScores.map((s) => ({
+              documentId: s.documentId,
+              profileId,
+              score: s.score,
+              whyRelevant: s.whyRelevant,
+              model: s.model,
+              opinionModel: s.opinionModel,
+            })),
+          )
+          .onConflictDoUpdate({
+            target: [schema.documentScores.documentId, schema.documentScores.profileId],
+            set: {
+              score: sql`excluded.score`,
+              whyRelevant: sql`excluded.why_relevant`,
+              model: sql`excluded.model`,
+              opinionModel: sql`excluded.opinion_model`,
+              scoredAt: new Date(),
+            },
+          });
+
+        const topicWrites = successes.flatMap((decision) => {
+          const story = stories.find((candidate) => candidate.id === decision.documentId);
+          if (!decision.topic || story?.storyTopic) return [];
+          const targetIds = duplicateTargetIdsByRepresentative.get(decision.documentId) ?? [decision.documentId];
+          return targetIds.map((documentId) => ({ documentId, topic: decision.topic as string }));
+        });
+        await persistTopics(topicWrites);
+
+        progress.scored += expandedScores.length;
 
         const missedCount = Math.max(0, batchDocumentCount - expandedScores.length);
         if (missedCount > 0) {
@@ -204,7 +290,191 @@ export async function scoreUnscoredDocuments(profileId: number): Promise<Scoring
     throw error;
   }
 
+  await backfillStoryTopics(env.openRouterApiKey ?? "", env.appBaseUrl ?? "http://localhost:3000", cutoff);
+  await writeDailyTakes({
+    profileId,
+    userId: profile.userId,
+    profileName: profile.displayName,
+    interestStatement: profile.interestStatement,
+  });
   return progress;
+}
+
+async function backfillStoryTopics(apiKey: string, referer: string, cutoff: Date) {
+  if (!apiKey) return;
+  const db = getDb();
+  const skipped = new Set<number>();
+  let considered = 0;
+
+  while (considered < scoringConfig.maxDocumentsPerRun) {
+    const filters = [isNull(schema.documents.storyTopic), gt(documentSortKey, cutoff)];
+    if (skipped.size > 0) {
+      filters.push(notInArray(schema.documents.id, Array.from(skipped)));
+    }
+    const rows = await db
+      .select({
+        id: schema.documents.id,
+        title: schema.documents.title,
+        summary: schema.documents.summary,
+        bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
+        sourceName: schema.sources.name,
+        sourceCategory: schema.sources.category,
+      })
+      .from(schema.documents)
+      .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+      .where(and(...filters))
+      .orderBy(desc(documentSortKey), desc(schema.documents.id))
+      .limit(Math.min(scoringConfig.batchSize, scoringConfig.maxDocumentsPerRun - considered));
+
+    if (rows.length === 0) return;
+
+    const classified = await classifyStoryTopicsBatch({
+      apiKey,
+      referer,
+      stories: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        excerpt: extractDocumentPreview(row.summary, row.bodyText),
+        sourceName: row.sourceName,
+        sourceCategory: row.sourceCategory,
+        storyTopic: null,
+      })),
+    });
+    const writes = classified.flatMap((row) => (row.topic ? [{ documentId: row.documentId, topic: row.topic }] : []));
+    await persistTopics(writes);
+    const written = new Set(writes.map((row) => row.documentId));
+    for (const row of rows) {
+      if (!written.has(row.id)) skipped.add(row.id);
+    }
+    considered += rows.length;
+  }
+}
+
+async function writeDailyTakes({
+  profileId,
+  userId,
+  profileName,
+  interestStatement,
+}: {
+  profileId: number;
+  userId: number;
+  profileName: string;
+  interestStatement: string;
+}) {
+  const db = getDb();
+  const dayCutoff = new Date(Date.now() - DAY_MS);
+  const now = Date.now();
+  const rows = await db
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      summary: schema.documents.summary,
+      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
+      sourceName: schema.sources.name,
+      sourceCategory: schema.sources.category,
+      sourceGroupKey: schema.sources.canonicalDomain,
+      storyTopic: schema.documents.storyTopic,
+      trustTier: schema.sources.trustTier,
+      sortTime: documentSortKey,
+      score: schema.documentScores.score,
+      whyRelevant: schema.documentScores.whyRelevant,
+      opinionModel: schema.documentScores.opinionModel,
+      isPinned: schema.storyCurations.isPinned,
+      isHidden: schema.storyCurations.isHidden,
+    })
+    .from(schema.documentScores)
+    .innerJoin(schema.documents, eq(schema.documents.id, schema.documentScores.documentId))
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+    .leftJoin(
+      schema.storyCurations,
+      and(
+        eq(schema.storyCurations.documentId, schema.documents.id),
+        eq(schema.storyCurations.userId, userId),
+      ),
+    )
+    .where(and(
+      eq(schema.documentScores.profileId, profileId),
+      or(
+        and(
+          gte(schema.documentScores.score, scoringConfig.minOpinionScore),
+          gt(documentSortKey, dayCutoff),
+        ),
+        eq(schema.storyCurations.isPinned, true),
+      ),
+    ))
+    .orderBy(desc(schema.documentScores.score), desc(documentSortKey))
+    .limit(DAILY_TAKE_CANDIDATE_LIMIT);
+
+  const ranked = rows
+    .map((row) => {
+      const sortTime = new Date(row.sortTime);
+      const parsed = parseWhyRelevantMetadata(row.whyRelevant);
+      const adjustedScore = computeAdjustedStoryScore({
+        score: row.score,
+        sortTime,
+        cutoff: dayCutoff,
+        now,
+        freshnessBoostMax: 12,
+        trustTier: row.trustTier,
+        confidence: parsed.confidence,
+        minQualifyingScore: scoringConfig.minOpinionScore,
+      });
+      return {
+        ...row,
+        sortTime,
+        adjustedScore: adjustedScore ?? row.score,
+        isPinned: Boolean(row.isPinned),
+        isHidden: Boolean(row.isHidden),
+        previewParagraph: extractDocumentPreview(row.summary, row.bodyText),
+      };
+    })
+    .sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      const scoreDiff = (b.adjustedScore ?? 0) - (a.adjustedScore ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return b.sortTime.getTime() - a.sortTime.getTime();
+    });
+
+  const shortlist = selectDiverseShortlist(ranked);
+  const shortlistIds = shortlist.map((story) => story.id);
+  const retireFilters = [
+    eq(schema.documentScores.profileId, profileId),
+    like(schema.documentScores.whyRelevant, `${OPINION_PENDING_TEXT}%`),
+  ];
+  if (shortlistIds.length > 0) {
+    retireFilters.push(notInArray(schema.documentScores.documentId, shortlistIds));
+  }
+  await db
+    .update(schema.documentScores)
+    .set({
+      whyRelevant: sql`replace(${schema.documentScores.whyRelevant}, ${OPINION_PENDING_TEXT}, ${TAKE_WITHHELD_TEXT})`,
+      opinionModel: OPINION_NOT_REQUIRED,
+    })
+    .where(and(...retireFilters));
+
+  const missing = shortlist.filter((story) => !hasStoredPractitionerTake(story.whyRelevant, story.opinionModel));
+  if (missing.length === 0) return;
+
+  const storedWhyRelevant = new Map(missing.map((story) => [story.id, story.whyRelevant]));
+  const duplicateIds = new Map(missing.map((story) => [story.id, [story.id]]));
+  try {
+    const opinions = await writeStoryOpinions({
+      profileName,
+      interestStatement,
+      candidates: missing.map((story) => ({
+        id: story.id,
+        title: story.title,
+        previewParagraph: story.previewParagraph ?? "",
+        sourceName: story.sourceName,
+        sourceCategory: story.sourceCategory,
+        publishedAt: story.sortTime,
+      })),
+    });
+    await persistOpinions(profileId, opinions.model, opinions.opinions, duplicateIds, storedWhyRelevant);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[scoring] Daily take generation failed; scores were kept: ${message}`);
+  }
 }
 
 export async function getScoringStats(profileId: number) {

@@ -1,14 +1,14 @@
 import {
-  ScoringModelPool,
   decideRetry,
   extractBodyError,
   isFreeTierModel,
-  parseScoreDocumentsResponse,
+  parseStoryOpinionsResponse,
   parseSummarizeTopStoriesResponse,
-  renderScoreDocumentsPrompt,
+  renderStoryOpinionsPrompt,
   renderSummarizeTopStoriesPrompt,
+  selectOpinionModelCandidates,
   selectSummaryModelCandidates,
-  type ParsedDocumentScore,
+  type ParsedStoryOpinion,
   type ParsedTopStoriesSummary,
   type PromptCandidate,
   type TopStoriesSummaryCandidate,
@@ -23,32 +23,10 @@ const INITIAL_BACKOFF_MS = 1000;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 export type InterestRankingCandidate = PromptCandidate;
-export type BatchScoreResult = ParsedDocumentScore;
 export type ProfileTopStoriesSummaryResponse = ParsedTopStoriesSummary;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Health state is per-process, so the pool is a module-level singleton: a model
-// that exhausted its quota on one batch must still be parked on the next.
-let scoringPool: ScoringModelPool | null = null;
-
-function getScoringPool(): ScoringModelPool {
-  const env = loadWebEnv();
-  scoringPool ??= new ScoringModelPool({
-    apiKey: env.openRouterApiKey,
-    onWarn: (message) => console.warn(`[openrouter] ${message}`),
-  });
-  return scoringPool;
-}
-
-/** Refreshed discovery plus health-filtered order, with the env model last. */
-async function resolveScoringCandidates(): Promise<{ models: string[]; pool: ScoringModelPool }> {
-  const env = loadWebEnv();
-  const pool = getScoringPool();
-  await pool.refresh();
-  return { models: pool.candidates(Date.now(), env.openRouterModel), pool };
 }
 
 async function chatCompletion<T>(
@@ -57,7 +35,6 @@ async function chatCompletion<T>(
   maxTokens: number,
   parse: (content: string) => T,
   modelCandidates?: string[],
-  pool?: ScoringModelPool,
 ): Promise<{ parsed: T; model: string; responseId: string | null }> {
   const env = loadWebEnv();
 
@@ -108,8 +85,6 @@ async function chatCompletion<T>(
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Network error");
         if (freeTier) {
-          // Timeouts and connection failures are transient, not entitlement problems.
-          pool?.recordFailure(model, 408);
           console.warn(`[openrouter] ${model} network failure: ${lastError.message}`);
           break;
         }
@@ -138,7 +113,6 @@ async function chatCompletion<T>(
           continue;
         }
 
-        pool?.recordFailure(model, response.status);
         if (response.status === 429 && freeTier) {
           console.log(`[openrouter] ${model} free-tier quota exhausted, parked and falling through`);
         } else {
@@ -153,7 +127,6 @@ async function chatCompletion<T>(
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Response body error");
         if (freeTier) {
-          pool?.recordFailure(model, 408);
           console.warn(`[openrouter] ${model} response body failure: ${lastError.message}`);
           break;
         }
@@ -179,7 +152,6 @@ async function chatCompletion<T>(
           continue;
         }
 
-        pool?.recordFailure(model, bodyError.status);
         console.warn(`[openrouter] ${model} unavailable: ${bodyError.message}`);
         break;
       }
@@ -191,7 +163,6 @@ async function chatCompletion<T>(
 
       if (!content) {
         lastError = new Error("OpenRouter returned empty content");
-        pool?.recordFailure(model, 502);
         console.warn(`[openrouter] ${model} returned empty content`);
         break;
       }
@@ -201,12 +172,9 @@ async function chatCompletion<T>(
         parsed = parse(content);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Invalid JSON response");
-        pool?.recordFailure(model, 502);
         console.warn(`[openrouter] ${model} returned invalid JSON contract: ${lastError.message}`);
         break;
       }
-
-      pool?.recordSuccess(model);
 
       return {
         parsed,
@@ -245,7 +213,7 @@ export async function summarizeTopStoriesForProfile({
   };
 }
 
-export async function scoreDocumentBatch({
+export async function writeStoryOpinions({
   profileName,
   interestStatement,
   candidates,
@@ -253,24 +221,27 @@ export async function scoreDocumentBatch({
   profileName?: string | null | undefined;
   interestStatement: string;
   candidates: InterestRankingCandidate[];
-}): Promise<{ model: string; scores: BatchScoreResult[] }> {
-  const prompt = renderScoreDocumentsPrompt({
+}): Promise<{ model: string; opinions: ParsedStoryOpinion[] }> {
+  if (candidates.length === 0) {
+    const env = loadWebEnv();
+    return { model: selectOpinionModelCandidates()[0] ?? env.openRouterModel, opinions: [] };
+  }
+
+  const prompt = renderStoryOpinionsPrompt({
     profileName: profileName ?? null,
     interestStatement,
     candidates,
   });
-  const allowedIds = new Set(candidates.map((c) => c.id));
+  const allowedIds = new Set(candidates.map((candidate) => candidate.id));
   const maxTokens = Math.min(8192, Math.max(2048, candidates.length * 300));
-
-  const { models, pool } = await resolveScoringCandidates();
+  const env = loadWebEnv();
   const result = await chatCompletion(
     prompt.system,
     prompt.user,
     maxTokens,
-    (content) => parseScoreDocumentsResponse(content, allowedIds),
-    models,
-    pool,
+    (content) => parseStoryOpinionsResponse(content, allowedIds),
+    Array.from(new Set([...selectOpinionModelCandidates(), env.openRouterModel])),
   );
 
-  return { model: result.model, scores: result.parsed };
+  return { model: result.model, opinions: result.parsed };
 }

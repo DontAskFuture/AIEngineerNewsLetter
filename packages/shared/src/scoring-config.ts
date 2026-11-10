@@ -22,14 +22,29 @@ const freeScoringModelPool = [
 
 export const scoringConfig = {
   batchSize: 20,
-  maxDocumentsPerRun: 20,
+  // Web score-all safety ceiling. The worker uses SCORING_MAX_DOCUMENTS_PER_RUN
+  // for the same role. A run pages until the lookback window is scored or this
+  // ceiling is hit; the next run continues.
+  maxDocumentsPerRun: 5_000,
   preferredModel: freeScoringModelPool[0],
-  // Scoring is the high-volume caller, so it exhausts the free pool before
-  // spending anything, with the paid model as the guaranteed backstop.
+  // Retained for ScoringModelPool tests and discovery. Relevance scoring no
+  // longer consults this list.
   scoringModelCandidates: [...freeScoringModelPool, deepseekFlashLatestModel],
-  // Summaries are low volume and user-facing prose, so they stay on the paid
-  // model rather than trading quality for a negligible saving.
+  // Industry-trend briefings are user-facing prose, so they stay on DeepSeek.
   summaryModelCandidates: [deepseekFlashLatestModel],
+  // Michael's Take is the only generative scoring step, and it stays on DeepSeek.
+  opinionModelCandidates: [deepseekFlashLatestModel],
+  // Perplexity Decider Flash via OpenRouter's Decisions API. Scores relevance
+  // and assigns a story topic for every crawled story.
+  jevModel: "perplexity/pplx-decider-flash-v1.2",
+  jevConcurrency: 8,
+  jevTimeoutMs: 15_000,
+  jevMaxRetries: 3,
+  // Daily shortlist size. DeepSeek writes a take only for these stories.
+  dailyTakeCount: 10,
+  dailyTakeMaxPerSource: 5,
+  // Floor for a non-pinned story to enter that shortlist. Matches the feed.
+  minOpinionScore: 40,
 } as const;
 
 export function selectScoringModelCandidates() {
@@ -38,4 +53,8 @@ export function selectScoringModelCandidates() {
 
 export function selectSummaryModelCandidates() {
   return [...scoringConfig.summaryModelCandidates];
+}
+
+export function selectOpinionModelCandidates() {
+  return [...scoringConfig.opinionModelCandidates];
 }

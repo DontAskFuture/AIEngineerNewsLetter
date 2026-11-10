@@ -303,6 +303,9 @@ export const documents = pgTable(
     discoveredAt: timestamp("discovered_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
     contentHash: text("content_hash").notNull(),
+    // Editorial topic assigned by Decider Flash so top-story selection can mix subjects.
+    // Null until the first relevance pass classifies the document.
+    storyTopic: text("story_topic"),
     metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -358,6 +361,9 @@ export const documentScores = pgTable(
     score: integer("score").notNull(),
     whyRelevant: text("why_relevant").notNull(),
     model: text("model"),
+    // Set when DeepSeek writes Michael's Take. "not_required" until a story
+    // is in the day's top 10. Null on older rows.
+    opinionModel: text("opinion_model"),
     scoredAt: timestamp("scored_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

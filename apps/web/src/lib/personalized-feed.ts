@@ -3,10 +3,13 @@ import {
   DEFAULT_FURTHER_STUDY_TEXT,
   MAX_INTEREST_STATEMENT_LENGTH,
   MAX_PROFILE_NAME_LENGTH,
+  MAX_TOP_STORIES_PER_TOPIC,
   computeAdjustedStoryScore,
   extractDocumentPreview,
   normalizeStoryTitle,
   parseWhyRelevantMetadata,
+  recordStoryTopic,
+  storyTopicAtCap,
   type SourceCategory,
 } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
@@ -123,6 +126,7 @@ function selectTopDocuments(
   const seenIds = new Set<number>();
   const seenTitles = new Set<string>();
   const sourceCounts = new Map<string, number>();
+  const topicCounts = new Map<string, number>();
   const allCandidates = [...primaryDocs, ...fallbackDocs];
 
   const pinnedCandidates = allCandidates
@@ -146,40 +150,36 @@ function selectTopDocuments(
     }
     const sourceKey = doc.sourceGroupKey;
     sourceCounts.set(sourceKey, (sourceCounts.get(sourceKey) ?? 0) + 1);
+    recordStoryTopic(topicCounts, doc.storyTopic);
 
     if (selected.length >= limit) {
       return selected;
     }
   }
 
-  for (const doc of allCandidates) {
-    if (doc.isHidden || seenIds.has(doc.id)) {
-      continue;
-    }
+  const takeUnpinned = (relaxTopic: boolean) => {
+    for (const doc of allCandidates) {
+      if (selected.length >= limit) return;
+      if (doc.isHidden || seenIds.has(doc.id)) continue;
 
-    const normalizedTitle = normalizeStoryTitle(doc.title);
-    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
-      continue;
-    }
+      const normalizedTitle = normalizeStoryTitle(doc.title);
+      if (normalizedTitle && seenTitles.has(normalizedTitle)) continue;
 
-    const sourceKey = doc.sourceGroupKey;
-    const count = sourceCounts.get(sourceKey) ?? 0;
+      const sourceKey = doc.sourceGroupKey;
+      const count = sourceCounts.get(sourceKey) ?? 0;
+      if (count >= maxPerSource) continue;
+      if (!relaxTopic && storyTopicAtCap(topicCounts, doc.storyTopic, MAX_TOP_STORIES_PER_TOPIC)) continue;
 
-    if (count >= maxPerSource) {
-      continue;
+      selected.push(doc);
+      seenIds.add(doc.id);
+      if (normalizedTitle) seenTitles.add(normalizedTitle);
+      sourceCounts.set(sourceKey, count + 1);
+      recordStoryTopic(topicCounts, doc.storyTopic);
     }
+  };
 
-    selected.push(doc);
-    seenIds.add(doc.id);
-    if (normalizedTitle) {
-      seenTitles.add(normalizedTitle);
-    }
-    sourceCounts.set(sourceKey, count + 1);
-
-    if (selected.length >= limit) {
-      break;
-    }
-  }
+  takeUnpinned(false);
+  if (selected.length < limit) takeUnpinned(true);
 
   return selected;
 }
@@ -205,46 +205,41 @@ function promoteUnreadTopStories(
   const seenIds = new Set<number>();
   const seenTitles = new Set<string>();
   const sourceCounts = new Map<string, number>();
+  const topicCounts = new Map<string, number>();
   const unreadTop: PersonalizedFeedDocument[] = [];
 
-  for (const document of priorityPool) {
-    if (document.isHidden || seenIds.has(document.id)) {
-      continue;
-    }
-
-    if (document.isRead && !document.isPinned) {
-      continue;
-    }
-
+  const consider = (document: PersonalizedFeedDocument, relaxTopic: boolean) => {
+    if (unreadTop.length >= limit) return;
+    if (document.isHidden || seenIds.has(document.id)) return;
+    if (document.isRead && !document.isPinned) return;
     if (
       !document.isPinned &&
       !initialTopIds.has(document.id) &&
       document.matchScore !== null &&
       document.matchScore < MIN_TOP_STORY_SCORE
     ) {
-      continue;
+      return;
     }
 
     const normalizedTitle = normalizeStoryTitle(document.title);
-    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
-      continue;
-    }
+    if (normalizedTitle && seenTitles.has(normalizedTitle)) return;
 
     const sourceCount = sourceCounts.get(document.sourceGroupKey) ?? 0;
-    if (!document.isPinned && sourceCount >= maxPerSource) {
-      continue;
+    if (!document.isPinned && sourceCount >= maxPerSource) return;
+    if (!document.isPinned && !relaxTopic && storyTopicAtCap(topicCounts, document.storyTopic, MAX_TOP_STORIES_PER_TOPIC)) {
+      return;
     }
 
     unreadTop.push(document);
     seenIds.add(document.id);
-    if (normalizedTitle) {
-      seenTitles.add(normalizedTitle);
-    }
+    if (normalizedTitle) seenTitles.add(normalizedTitle);
     sourceCounts.set(document.sourceGroupKey, sourceCount + 1);
+    recordStoryTopic(topicCounts, document.storyTopic);
+  };
 
-    if (unreadTop.length >= limit) {
-      break;
-    }
+  for (const document of priorityPool) consider(document, false);
+  if (unreadTop.length < limit) {
+    for (const document of priorityPool) consider(document, true);
   }
 
   const topIds = new Set(unreadTop.map((document) => document.id));
@@ -306,6 +301,7 @@ export interface PersonalizedFeedDocument {
   sourceSlug: string;
   sourceGroupKey: string;
   category: SourceCategory;
+  storyTopic: string | null;
   sourcePublishedAt: Date | null;
   discoveredAt: Date;
   sortTime: Date;
@@ -356,6 +352,7 @@ interface CandidateDocumentRow {
   sourceSlug: string;
   canonicalDomain: string;
   category: SourceCategory;
+  storyTopic: string | null;
   sourcePublishedAt: Date | null;
   discoveredAt: Date;
   sortTime: Date;
@@ -440,6 +437,7 @@ function mapCandidateRow(row: CandidateDocumentRow) {
     sourceSlug: row.sourceSlug,
     sourceGroupKey: row.canonicalDomain || row.sourceSlug,
     category: row.category,
+    storyTopic: row.storyTopic,
     sourcePublishedAt: row.sourcePublishedAt,
     discoveredAt: row.discoveredAt,
     sortTime: row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime),
@@ -715,6 +713,7 @@ async function getCandidateDocuments(
     sourceSlug: schema.sources.slug,
     canonicalDomain: schema.sources.canonicalDomain,
     category: schema.sources.category,
+    storyTopic: schema.documents.storyTopic,
     sourcePublishedAt: schema.documents.sourcePublishedAt,
     discoveredAt: schema.documents.discoveredAt,
     sortTime: documentSortKey,
@@ -1275,6 +1274,7 @@ async function queryScoredDocumentsForProfile({
     sourceSlug: schema.sources.slug,
     canonicalDomain: schema.sources.canonicalDomain,
     category: schema.sources.category,
+    storyTopic: schema.documents.storyTopic,
     trustTier: schema.sources.trustTier,
     sourcePublishedAt: schema.documents.sourcePublishedAt,
     discoveredAt: schema.documents.discoveredAt,

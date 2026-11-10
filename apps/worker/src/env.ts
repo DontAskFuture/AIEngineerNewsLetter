@@ -27,7 +27,7 @@ const envSchema = z.object({
   CRAWLED_DOCUMENT_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(365),
   CRAWLED_DOCUMENT_CLEANUP_INTERVAL_MINUTES: z.coerce.number().int().positive().default(24 * 60),
   CRAWLED_DOCUMENT_CLEANUP_BATCH_SIZE: z.coerce.number().int().positive().default(500),
-  SCORING_MAX_DOCUMENTS_PER_RUN: z.coerce.number().int().min(1).max(100).default(20),
+  SCORING_MAX_DOCUMENTS_PER_RUN: z.coerce.number().int().min(1).max(100_000).default(20_000),
   SCORING_LOOKBACK_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   NEWSLETTER_CHECK_INTERVAL_MINUTES: z.coerce.number().int().positive().default(30),
   NEWSLETTER_SEND_HOUR: z.coerce.number().int().min(0).max(23).default(8),

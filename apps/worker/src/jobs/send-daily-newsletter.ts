@@ -3,8 +3,8 @@ import { getDb, schema } from "@ai-intel/db";
 import {
   computeAdjustedStoryScore,
   formatPractitionerTake,
-  normalizeStoryTitle,
   parseWhyRelevantMetadata,
+  selectDiverseShortlist,
   type SendDailyNewsletterPayload,
 } from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
@@ -38,6 +38,7 @@ export interface NewsletterStory {
   canonicalUrl: string;
   sourceName: string;
   sourceGroupKey: string;
+  storyTopic: string | null;
   sortTime: Date;
   score: number | null;
   whyRelevant: string | null;
@@ -76,43 +77,10 @@ function sanitizeStoryUrl(value: string): string {
 }
 
 export function selectTopStories(stories: NewsletterStory[]) {
-  const sourceCounts = new Map<string, number>();
-  const seenIds = new Set<number>();
-  const seenTitles = new Set<string>();
-  const selected: NewsletterStory[] = [];
-
-  const pinnedStories = stories.filter((story) => story.isPinned && !story.isHidden);
-  const regularStories = stories.filter((story) => !story.isPinned && !story.isHidden);
-
-  for (const story of [...pinnedStories, ...regularStories]) {
-    if (seenIds.has(story.id)) {
-      continue;
-    }
-
-    const normalizedTitle = normalizeStoryTitle(story.title);
-    if (normalizedTitle && seenTitles.has(normalizedTitle)) {
-      continue;
-    }
-
-    const count = sourceCounts.get(story.sourceGroupKey) ?? 0;
-
-    if (!story.isPinned && count >= MAX_PER_SOURCE) {
-      continue;
-    }
-
-    selected.push(story);
-    seenIds.add(story.id);
-    sourceCounts.set(story.sourceGroupKey, count + 1);
-    if (normalizedTitle) {
-      seenTitles.add(normalizedTitle);
-    }
-
-    if (selected.length >= MAX_NEWSLETTER_STORIES) {
-      break;
-    }
-  }
-
-  return selected;
+  return selectDiverseShortlist(stories, {
+    limit: MAX_NEWSLETTER_STORIES,
+    maxPerSource: MAX_PER_SOURCE,
+  });
 }
 
 async function getRecipients() {
@@ -200,6 +168,7 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
       canonicalUrl: schema.documents.canonicalUrl,
       sourceName: schema.sources.name,
       sourceGroupKey: schema.sources.canonicalDomain,
+      storyTopic: schema.documents.storyTopic,
       trustTier: schema.sources.trustTier,
       sortTime: documentSortKey,
       score: schema.documentScores.score,
@@ -251,6 +220,7 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
         canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
         sourceName: row.sourceName,
         sourceGroupKey: row.sourceGroupKey,
+        storyTopic: row.storyTopic,
         sortTime,
         score: row.score,
         adjustedScore: adjustedScore ?? row.score,
@@ -279,6 +249,7 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
       canonicalUrl: schema.documents.canonicalUrl,
       sourceName: schema.sources.name,
       sourceGroupKey: schema.sources.canonicalDomain,
+      storyTopic: schema.documents.storyTopic,
       sortTime: documentSortKey,
       curatorNote: schema.storyCurations.curatorNote,
       isPinned: schema.storyCurations.isPinned,
@@ -304,6 +275,7 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
       canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
       sourceName: row.sourceName,
       sourceGroupKey: row.sourceGroupKey,
+      storyTopic: row.storyTopic,
       sortTime: new Date(row.sortTime),
       score: null,
       whyRelevant: null,
