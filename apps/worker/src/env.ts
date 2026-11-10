@@ -41,6 +41,7 @@ const envSchema = z.object({
   SMTP_PASSWORD: optionalString,
   SMTP_FROM_EMAIL: optionalEmail,
   SMTP_FROM_NAME: z.string().default("Michael's AI Brief"),
+  ADMIN_EMAILS: z.string().default("lianglingfan@gmail.com"),
   BRAND_AUTHOR_NAME: z.string().default("Michael"),
   BRAND_AUTHOR_BIO: z
     .string()

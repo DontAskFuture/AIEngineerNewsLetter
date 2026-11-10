@@ -22,7 +22,7 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 ## Job Queue
 - Both fetch and scoring jobs are managed by pg-boss (Postgres-backed queue).
 - The web app enqueues jobs by inserting into `pgboss.job`; the worker picks them up.
-- Queue names: `fetch-source-endpoint`, `score-documents`, `send-daily-newsletter`.
+- Queue names: `fetch-source-endpoint`, `score-documents`, `send-daily-newsletter`, `send-daily-admin-report`.
 - The worker's default fetch enqueue interval is 60 minutes, while endpoint-specific `cadenceMinutes` still controls per-endpoint singleton throttling.
 - Crawl jobs default to 5 local pg-boss fetch workers per worker process; scoring stays separately queued.
 - Scoring uses a singleton key per profile to prevent duplicate concurrent scoring.

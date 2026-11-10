@@ -187,6 +187,22 @@ export const newsletterSubscribers = pgTable(
   ],
 );
 
+export const rssFeedClients = pgTable(
+  "rss_feed_clients",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    clientHash: text("client_hash").notNull(),
+    userAgent: text("user_agent").notNull().default(""),
+    requestCount: integer("request_count").notNull().default(1),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("rss_feed_clients_hash_idx").on(table.clientHash),
+    index("rss_feed_clients_last_seen_idx").on(table.lastSeenAt),
+  ],
+);
+
 export const sources = pgTable(
   "sources",
   {

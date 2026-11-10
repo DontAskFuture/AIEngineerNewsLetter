@@ -45,3 +45,7 @@ export interface ScoreDocumentsPayload {
 export interface SendDailyNewsletterPayload {
   newsletterDate: string;
 }
+
+export interface SendDailyAdminReportPayload {
+  reportDate: string;
+}

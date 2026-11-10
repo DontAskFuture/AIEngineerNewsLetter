@@ -1,9 +1,44 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { getDb, schema } from "@ai-intel/db";
 import { InvalidSubscriberEmailError, normalizeSubscriberEmail } from "@ai-intel/shared";
 import { eq, sql } from "drizzle-orm";
 
 export { InvalidSubscriberEmailError, normalizeSubscriberEmail };
+
+export async function recordRssFeedClientPoll(request: Request): Promise<void> {
+  try {
+    const ip =
+      request.headers.get("cf-connecting-ip")?.trim() ||
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      "unknown";
+    const userAgent = (request.headers.get("user-agent") ?? "").trim().slice(0, 240);
+    const clientHash = createHash("sha256")
+      .update(`${ip}|${userAgent.toLowerCase()}`)
+      .digest("hex");
+
+    const db = getDb();
+    const now = new Date();
+    await db
+      .insert(schema.rssFeedClients)
+      .values({
+        clientHash,
+        userAgent,
+        requestCount: 1,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [schema.rssFeedClients.clientHash],
+        set: {
+          userAgent,
+          requestCount: sql`${schema.rssFeedClients.requestCount} + 1`,
+          lastSeenAt: now,
+        },
+      });
+  } catch {
+    // Non-blocking telemetry: never fail RSS response delivery
+  }
+}
 
 export async function subscribeToNewsletter(rawEmail: string) {
   const email = normalizeSubscriberEmail(rawEmail);

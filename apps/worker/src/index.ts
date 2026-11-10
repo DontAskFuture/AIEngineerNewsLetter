@@ -2,9 +2,15 @@ import { createHash } from "node:crypto";
 import { PgBoss, type Job } from "pg-boss";
 import { closePool, getDb, schema } from "@ai-intel/db";
 import { and, asc, eq, sql } from "drizzle-orm";
-import type { FetchSourceEndpointPayload, ScoreDocumentsPayload, SendDailyNewsletterPayload } from "@ai-intel/shared";
+import type {
+  FetchSourceEndpointPayload,
+  ScoreDocumentsPayload,
+  SendDailyAdminReportPayload,
+  SendDailyNewsletterPayload,
+} from "@ai-intel/shared";
 import { logger } from "./logger";
 import { loadWorkerEnv } from "./env";
+import { sendDailyAdminReport } from "./jobs/send-daily-admin-report";
 import { sendDailyNewsletter } from "./jobs/send-daily-newsletter";
 import { fetchSourceEndpoint } from "./jobs/fetch-source-endpoint";
 import { scoreDocuments } from "./jobs/score-documents";
@@ -14,6 +20,7 @@ import { listActiveSourceEndpoints, seedDefaultSources } from "./services/source
 const fetchQueueName = "fetch-source-endpoint";
 const scoreQueueName = "score-documents";
 const newsletterQueueName = "send-daily-newsletter";
+const adminReportQueueName = "send-daily-admin-report";
 let crawledDocumentCleanupInFlight = false;
 
 function getLocalDateHour(timeZone: string) {
@@ -131,6 +138,14 @@ async function enqueueDueNewsletter(boss: PgBoss, env: ReturnType<typeof loadWor
       singletonSeconds: 36 * 60 * 60,
     },
   );
+  await boss.send(
+    adminReportQueueName,
+    { reportDate: date },
+    {
+      singletonKey: `daily-admin-report:${date}`,
+      singletonSeconds: 36 * 60 * 60,
+    },
+  );
 }
 
 async function runCrawledDocumentCleanup() {
@@ -164,6 +179,7 @@ async function main() {
   await boss.createQueue(fetchQueueName);
   await boss.createQueue(scoreQueueName);
   await boss.createQueue(newsletterQueueName);
+  await boss.createQueue(adminReportQueueName);
   await seedDefaultSources();
 
   await boss.work<FetchSourceEndpointPayload>(
@@ -188,6 +204,15 @@ async function main() {
     async (jobs: Job<SendDailyNewsletterPayload>[]) => {
       for (const job of jobs) {
         await sendDailyNewsletter(job.data);
+      }
+    },
+  );
+
+  await boss.work<SendDailyAdminReportPayload>(
+    adminReportQueueName,
+    async (jobs: Job<SendDailyAdminReportPayload>[]) => {
+      for (const job of jobs) {
+        await sendDailyAdminReport(job.data);
       }
     },
   );
@@ -225,7 +250,7 @@ async function main() {
 
   logger.info(
     {
-      queues: [fetchQueueName, scoreQueueName, newsletterQueueName],
+      queues: [fetchQueueName, scoreQueueName, newsletterQueueName, adminReportQueueName],
       fetchIntervalMinutes: env.FETCH_INTERVAL_MINUTES,
       fetchWorkerConcurrency: env.FETCH_WORKER_CONCURRENCY,
       newsletterCheckIntervalMinutes: env.NEWSLETTER_CHECK_INTERVAL_MINUTES,

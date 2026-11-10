@@ -5,6 +5,7 @@ const OBSERVED_QUEUE_NAMES = [
   "fetch-source-endpoint",
   "score-documents",
   "send-daily-newsletter",
+  "send-daily-admin-report",
 ] as const;
 
 export interface QueueJobSummary {
@@ -131,7 +132,7 @@ export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
             max(created_on) AS latest_created_at,
             max(completed_on) AS latest_completed_at
           FROM pgboss.job
-          WHERE name IN ('fetch-source-endpoint', 'score-documents', 'send-daily-newsletter')
+          WHERE name IN ('fetch-source-endpoint', 'score-documents', 'send-daily-newsletter', 'send-daily-admin-report')
             AND created_on > now() - interval '24 hours'
           GROUP BY name, state
           ORDER BY name, state`,
@@ -191,7 +192,7 @@ export async function getOperationsSnapshot(): Promise<OperationsSnapshot> {
             completed_on,
             output
           FROM pgboss.job
-          WHERE name IN ('fetch-source-endpoint', 'score-documents', 'send-daily-newsletter')
+          WHERE name IN ('fetch-source-endpoint', 'score-documents', 'send-daily-newsletter', 'send-daily-admin-report')
             AND (state = 'failed' OR output IS NOT NULL)
           ORDER BY created_on DESC
           LIMIT 20`,

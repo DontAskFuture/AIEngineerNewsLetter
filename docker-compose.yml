@@ -140,6 +140,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Michael's AI Brief}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-lianglingfan@gmail.com}
       BRAND_AUTHOR_NAME: ${BRAND_AUTHOR_NAME:-Michael}
       BRAND_AUTHOR_BIO: ${BRAND_AUTHOR_BIO:-}
       BRAND_X_URL: ${BRAND_X_URL:-}
