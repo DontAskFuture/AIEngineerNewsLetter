@@ -86,7 +86,7 @@ describe("buildCuratedRssXml", () => {
       ],
     });
 
-    assert.match(xml, /<title>Autumn &lt;AI&gt; · Curated AI Intelligence<\/title>/);
+    assert.match(xml, /<title>Autumn &lt;AI&gt;&apos;s Newsletter<\/title>/);
     assert.match(xml, /<title>\[Pinned Pick\] Disaggregated RL &amp; Weight Sync<\/title>/);
     assert.match(
       xml,

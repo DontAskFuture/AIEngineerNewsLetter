@@ -20,7 +20,7 @@ This file applies to `apps/web/src/app/feed`.
 - Each story card renders a critical, spicy practitioner take (`formatPractitionerTake(curatorNote, whyRelevant)`) labeled `{brandAuthorName}'s Take` (defaulting to `Michael's Take`), preferring manual `curatorNote` overrides and falling back to cleaned `whyRelevant` commentary.
 - Feed story links should route through the internal outbound redirect so clicks can persist `document_reads` before leaving the app.
 - After read state is applied for signed-in users, stories marked read are removed from the top-10 shortlist and the next unread candidates backfill those slots.
-- Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s default profile, styled with personal branding (`BRAND_AUTHOR_*`) and an inline email newsletter subscription form plus RSS link; profile management and story curation controls stay signed-in only.
+- Anonymous visitors can view a read-only public feed backed by `lianglingfan@gmail.com`'s default profile, styled with personal branding (`BRAND_AUTHOR_*`) and a `{brandAuthorName}'s Newsletter & RSS` subscription form plus RSS link; profile management and story curation controls stay signed-in only.
 - Preserve clear visual separation between feed hero controls, profile editing, top stories, and more stories, and keep those surfaces theme-aware.
 - The public source list lives in the root layout footer. Do not rebuild the old per-source crawl-stats registry on this page; operational source health stays on `/admin`.
 - Keep model-selection and operational ranking configuration details out of the feed surface; those belong in admin.

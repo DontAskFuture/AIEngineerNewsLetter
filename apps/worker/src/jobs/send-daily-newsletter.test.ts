@@ -122,7 +122,7 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     const html = buildNewsletterHtml(recipient, stories, "2026-11-07", unsubscribeUrl, "UTC", trendBullets);
     const text = buildNewsletterText(recipient, stories, "2026-11-07", unsubscribeUrl, "UTC", trendBullets);
 
-    assert.match(html, /Michael's Daily AI Intelligence Brief/);
+    assert.match(html, /Michael's Newsletter · 2026-11-07/);
     assert.match(html, /What AI Engineers Should Read Today/);
     assert.match(html, /Today's Industry Trend · Macro Signal &amp; Insights/);
     assert.match(html, /MoE specialization and NVMe streaming are eroding the H100 moat\./);
@@ -133,7 +133,7 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     assert.match(html, /Agent Sandbox Runtime &lt;v2&gt;/);
     assert.match(html, /href="https:\/\/example\.com\/feed\/unsubscribe\?token=abc123token"/);
 
-    assert.match(text, /Michael's Daily AI Intelligence Brief \(2026-11-07\)/);
+    assert.match(text, /Michael's Newsletter \(2026-11-07\)/);
     assert.match(text, /TODAY'S INDUSTRY TREND · MACRO SIGNAL & INSIGHTS/);
     assert.match(text, /- MoE specialization and NVMe streaming are eroding the H100 moat\./);
     assert.match(text, /1\. Agent Sandbox Runtime <v2> \[Pinned Pick\]/);

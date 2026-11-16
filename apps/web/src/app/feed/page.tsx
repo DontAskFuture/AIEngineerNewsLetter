@@ -342,7 +342,7 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-                Daily AI brief &amp; RSS
+                {env.brandAuthorName}&apos;s Newsletter &amp; RSS
               </p>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
                 Subscribe to get {env.brandAuthorName}&apos;s curated top stories and practitioner notes delivered to your inbox, or follow the feed via RSS.
@@ -369,11 +369,11 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           </div>
           {newsletterStatus === "subscribed" ? (
             <div className="surface-panel-strong mt-4 rounded-[1rem] px-4 py-3 text-sm text-[color:var(--leaf)]" role="status">
-              You&apos;re subscribed! You&apos;ll receive the next daily curated brief in your inbox.
+              You&apos;re subscribed to {env.brandAuthorName}&apos;s Newsletter! You&apos;ll receive the next daily issue in your inbox.
             </div>
           ) : newsletterStatus === "unsubscribed" ? (
             <div className="surface-panel mt-4 rounded-[1rem] px-4 py-3 text-sm text-[color:var(--muted)]" role="status">
-              You have been unsubscribed from the daily email brief.
+              You have been unsubscribed from {env.brandAuthorName}&apos;s Newsletter.
             </div>
           ) : newsletterStatus === "invalid_email" ? (
             <div className="alert-error mt-4 rounded-[1rem] px-4 py-3 text-sm" role="alert">

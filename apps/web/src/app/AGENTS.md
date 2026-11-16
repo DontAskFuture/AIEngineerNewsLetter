@@ -5,7 +5,7 @@ This file applies to `apps/web/src/app` and its subdirectories unless a deeper f
 
 ## Architecture
 - This folder is the HTTP entry surface for the web app.
-- `layout.tsx` defines shared chrome, bootstraps the global light/dark theme state for the app shell, and renders `source-list.tsx` as a concise footer of every seeded source, grouped by category and linked to each source homepage.
+- `layout.tsx` uses `loadWebEnv()` to title the site and navbar `{brandAuthorName}'s Newsletter`, defines shared chrome, bootstraps the global light/dark theme state for the app shell, and renders `source-list.tsx` as a concise footer of every seeded source, grouped by category and linked to each source homepage.
 - Route folders own page composition and route-local server actions.
 - `auth-actions.ts` owns top-level login and logout mutations (without recording new failed-attempt rows once rate-limited); `login/` and `signup/` render the forms that call into it.
 - `signup/page.tsx` is the invite-gated account creation form; it has no dedicated AGENTS.md and is governed by this file plus `../lib/auth`. Its entrypoint is intentionally not linked from app chrome.

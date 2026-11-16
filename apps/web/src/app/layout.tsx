@@ -5,6 +5,7 @@ import Link from "next/link";
 import Script from "next/script";
 import { logoutAction } from "@/app/auth-actions";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { loadWebEnv } from "@/lib/env";
 import { SourceList } from "./source-list";
 import { ThemeToggle } from "./theme-toggle";
 import "./globals.css";
@@ -21,15 +22,18 @@ const display = Space_Grotesk({
   variable: "--font-display",
 });
 
-export const metadata: Metadata = {
-  title: "AI Builder Intelligence",
-  description: "Opinionated AI engineering & infrastructure signal synthesis workspace.",
-  alternates: {
-    types: {
-      "application/rss+xml": "/rss.xml",
+export function generateMetadata(): Metadata {
+  const env = loadWebEnv();
+  return {
+    title: `${env.brandAuthorName}'s Newsletter`,
+    description: env.brandAuthorBio,
+    alternates: {
+      types: {
+        "application/rss+xml": "/rss.xml",
+      },
     },
-  },
-};
+  };
+}
 
 const themeBootstrapScript = `
 (() => {
@@ -56,6 +60,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const env = loadWebEnv();
   const cookieStore = await cookies();
   const currentUser = await getCurrentUser();
   const cookieTheme = cookieStore.get("ai_intel_theme")?.value;
@@ -71,9 +76,11 @@ export default async function RootLayout({
           <div className="mx-auto w-full max-w-7xl px-6 pt-5 sm:px-10 sm:pt-6">
             <header className="header-shell flex flex-col gap-4 rounded-[1.75rem] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <Link href="/" className="flex flex-col gap-1">
-                <span className="display-font text-lg font-semibold tracking-tight">AI Builder Intelligence</span>
+                <span className="display-font text-lg font-semibold tracking-tight">
+                  {env.brandAuthorName}&apos;s Newsletter
+                </span>
                 <span className="text-xs uppercase tracking-[0.18em] text-[color:var(--muted)]">
-                  Signal synthesis workspace
+                  AI engineering &amp; infrastructure curation
                 </span>
               </Link>
               <nav className="flex flex-wrap items-center gap-2 text-sm text-[color:var(--muted)]">

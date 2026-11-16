@@ -110,7 +110,7 @@ export function buildCuratedRssXml({
   items: CuratedRssItemInput[];
   now?: Date;
 }): string {
-  const channelTitle = `${brandAuthorName} · Curated AI Intelligence`;
+  const channelTitle = `${brandAuthorName}'s Newsletter`;
   const lastBuildDate = (items[0]?.sortTime ?? now).toUTCString();
 
   const itemsXml = items

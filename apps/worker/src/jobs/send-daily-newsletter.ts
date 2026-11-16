@@ -415,7 +415,7 @@ export function buildNewsletterHtml(
       ${
         unsubscribeUrl
           ? `<p style="margin:0;">
-              You are subscribed to ${escapeHtml(brand.authorName)}'s daily AI intelligence brief. <a href="${escapeHtml(unsubscribeUrl)}" style="color:#2e5b4f;text-decoration:underline;">Unsubscribe in one click</a>.
+              You are subscribed to ${escapeHtml(brand.authorName)}'s Newsletter. <a href="${escapeHtml(unsubscribeUrl)}" style="color:#2e5b4f;text-decoration:underline;">Unsubscribe in one click</a>.
             </p>`
           : ""
       }
@@ -429,7 +429,7 @@ export function buildNewsletterHtml(
         <div style="max-width:680px;margin:0 auto;padding:32px 20px;">
           <div style="background:#fffaf0;border:1px solid #e3dccd;border-radius:24px;padding:28px;">
             <p style="margin:0 0 8px 0;color:#2e5b4f;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.18em;">
-              ${escapeHtml(brand.authorName)}'s Daily AI Intelligence Brief · ${escapeHtml(newsletterDate)}
+              ${escapeHtml(brand.authorName)}'s Newsletter · ${escapeHtml(newsletterDate)}
             </p>
             <h1 style="margin:0;color:#182126;font-size:30px;line-height:1.15;">What AI Engineers Should Read Today</h1>
             <p style="margin:10px 0 14px 0;color:#5f6a6f;font-size:15px;line-height:1.6;">
@@ -459,7 +459,7 @@ export function buildNewsletterText(
   const resolvedTimeZone = timeZone ?? loadWorkerEnv().APP_TIME_ZONE;
   const brand = resolveBrandSettings();
   const lines = [
-    `${brand.authorName}'s Daily AI Intelligence Brief (${newsletterDate})`,
+    `${brand.authorName}'s Newsletter (${newsletterDate})`,
     "What AI Engineers Should Read Today",
     brand.authorBio,
     `Web: ${brand.baseUrl}/feed | RSS: ${brand.baseUrl}/rss.xml`,
@@ -545,7 +545,7 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
     const rankedStories = await getRankedStories(recipient.profileId, recipient.userId, cutoff);
     const stories = rankedStories.length > 0 ? rankedStories : await getLatestFallbackStories(recipient.userId, cutoff);
     const trendBullets = await getProfileTrendBullets(recipient.profileId);
-    const subject = `${env.BRAND_AUTHOR_NAME}'s AI Brief: ${stories.length} stories for ${newsletterDate}`;
+    const subject = `${env.BRAND_AUTHOR_NAME}'s Newsletter: ${stories.length} stories for ${newsletterDate}`;
     const unsubscribeUrl = `${baseUrl}/feed/unsubscribe?token=account-${recipient.userId}`;
     const result = await sendTransactionalEmail({
       to: { email: recipient.email },
@@ -587,7 +587,7 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
           ? rankedStories
           : await getLatestFallbackStories(publicCurator.userId, cutoff);
       const trendBullets = await getProfileTrendBullets(publicCurator.profileId);
-      const subject = `${env.BRAND_AUTHOR_NAME}'s AI Brief: ${stories.length} stories for ${newsletterDate}`;
+      const subject = `${env.BRAND_AUTHOR_NAME}'s Newsletter: ${stories.length} stories for ${newsletterDate}`;
 
       for (const subscriber of pendingSubscribers) {
         const unsubscribeUrl = `${baseUrl}/feed/unsubscribe?token=${encodeURIComponent(subscriber.unsubscribeToken)}`;
