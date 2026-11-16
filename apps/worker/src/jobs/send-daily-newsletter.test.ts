@@ -81,6 +81,21 @@ describe("selectTopStories", () => {
       [1, 2, 7, 8, 3, 4, 5, 6],
     );
   });
+
+  it("excludes unpinned non-human-readable titles such as bare build tags or semver tags", () => {
+    const stories = [
+      makeStory({ id: 1, title: "b12391", sourceGroupKey: "github.com", storyTopic: "infrastructure", score: 95 }),
+      makeStory({ id: 2, title: "v0.45.4", sourceGroupKey: "github.com", storyTopic: "models", score: 90 }),
+      makeStory({ id: 3, title: "ciflow/xpu/181559", sourceGroupKey: "github.com", storyTopic: "infrastructure", score: 88 }),
+      makeStory({ id: 4, title: "Human-readable agent release", sourceGroupKey: "example.com", storyTopic: "agents", score: 70 }),
+    ];
+
+    const selected = selectTopStories(stories);
+    assert.deepEqual(
+      selected.map((story) => story.id),
+      [4],
+    );
+  });
 });
 
 describe("buildNewsletterHtml and buildNewsletterText", () => {

@@ -6,6 +6,7 @@ import {
   deduplicateScoringCandidates,
   extractDocumentPreview,
   formatWhyRelevant,
+  isHumanReadableStoryTitle,
   normalizeStoryTitle,
   parseStoryOpinionsResponse,
   parseSummarizeTopStoriesResponse,
@@ -89,6 +90,46 @@ describe("normalizeStoryTitle, deduplicateScoringCandidates, and computeAdjusted
       normalizeStoryTitle("FlashAttention 3: Fast FP8 Kernels"),
       "flashattention 3 fast fp8 kernels",
     );
+    assert.equal(
+      normalizeStoryTitle("千问办公2.0发布，首个支持多人与Agent协作的Team Agent来了"),
+      "千问办公2 0发布 首个支持多人与agent协作的team agent来了",
+    );
+  });
+
+  it("rejects non-human-readable bare numbers, build tags, semver tags, and CI branch tags", () => {
+    const rejected = [
+      "",
+      "   ",
+      "12391",
+      "b12391",
+      "#12391",
+      "v0.45.4",
+      "Release: v5.15.0",
+      "Release 5.18.0",
+      "v2.34.0 (2026-08-24)",
+      "v0.21.0rc3",
+      "3.4.0b1",
+      "dev-20261116",
+      "316721af87d94937952fd0167e7eb38eb995db0e",
+      "ciflow/xpu/181559",
+      "ciflow/torchtitan/203605: [Inductor] add an option",
+      "viable/strict/1794784998",
+      "trunk/316721af87d94937952fd0167e7eb38eb995db0e",
+    ];
+    for (const title of rejected) {
+      assert.equal(isHumanReadableStoryTitle(title), false, `Expected reject for "${title}"`);
+    }
+
+    const accepted = [
+      "b12425: model : read qwen3vl output head size",
+      "vLLM 0.8 introduces FP8 speculative decoding",
+      "Qwen4-Max",
+      "Datasette-agent 0.6a0",
+      "千问办公2.0发布，首个支持多人与Agent协作的Team Agent来了",
+    ];
+    for (const title of accepted) {
+      assert.equal(isHumanReadableStoryTitle(title), true, `Expected accept for "${title}"`);
+    }
   });
 
   it("deduplicates cross-batch candidates with identical normalized title and preview", () => {

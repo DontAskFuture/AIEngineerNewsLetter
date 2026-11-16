@@ -10,6 +10,7 @@ import {
   parseJevStoryDecision,
   recordStoryTopic,
   relevanceStorage,
+  selectDiverseShortlist,
   storyTopicAtCap,
   storyTopicKey,
 } from "./jev";
@@ -172,5 +173,49 @@ describe("decideStoryRelevanceBatch", () => {
     assert.equal(outcomes[1]?.ok, false);
     if (outcomes[0]?.ok) assert.equal(outcomes[0].topic, "models");
     if (!outcomes[1]?.ok) assert.match(outcomes[1].error, /rejected/);
+  });
+});
+
+describe("selectDiverseShortlist", () => {
+  it("excludes unpinned non-human-readable titles while allowing explicit curator pins", () => {
+    const shortlist = selectDiverseShortlist([
+      {
+        id: 1,
+        title: "b12391",
+        sourceGroupKey: "github.com",
+        storyTopic: "infrastructure",
+        isPinned: false,
+        isHidden: false,
+      },
+      {
+        id: 2,
+        title: "v0.45.4",
+        sourceGroupKey: "github.com",
+        storyTopic: "models",
+        isPinned: false,
+        isHidden: false,
+      },
+      {
+        id: 3,
+        title: "v2.34.0",
+        sourceGroupKey: "github.com",
+        storyTopic: "models",
+        isPinned: true,
+        isHidden: false,
+      },
+      {
+        id: 4,
+        title: "BitDecoding-FP4: Native FP4 KV Cache Decoding",
+        sourceGroupKey: "arxiv.org",
+        storyTopic: "research",
+        isPinned: false,
+        isHidden: false,
+      },
+    ]);
+
+    assert.deepEqual(
+      shortlist.map((story) => story.id),
+      [3, 4],
+    );
   });
 });

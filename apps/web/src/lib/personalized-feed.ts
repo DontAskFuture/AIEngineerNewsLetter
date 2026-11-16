@@ -6,6 +6,7 @@ import {
   MAX_TOP_STORIES_PER_TOPIC,
   computeAdjustedStoryScore,
   extractDocumentPreview,
+  isHumanReadableStoryTitle,
   normalizeStoryTitle,
   parseWhyRelevantMetadata,
   recordStoryTopic,
@@ -161,6 +162,7 @@ function selectTopDocuments(
     for (const doc of allCandidates) {
       if (selected.length >= limit) return;
       if (doc.isHidden || seenIds.has(doc.id)) continue;
+      if (!isHumanReadableStoryTitle(doc.title)) continue;
 
       const normalizedTitle = normalizeStoryTitle(doc.title);
       if (normalizedTitle && seenTitles.has(normalizedTitle)) continue;
@@ -211,6 +213,7 @@ function promoteUnreadTopStories(
   const consider = (document: PersonalizedFeedDocument, relaxTopic: boolean) => {
     if (unreadTop.length >= limit) return;
     if (document.isHidden || seenIds.has(document.id)) return;
+    if (!document.isPinned && !isHumanReadableStoryTitle(document.title)) return;
     if (document.isRead && !document.isPinned) return;
     if (
       !document.isPinned &&

@@ -1,6 +1,7 @@
 import { decideRetry } from "./openrouter-retry";
 import {
   formatWhyRelevant,
+  isHumanReadableStoryTitle,
   MAX_INTEREST_STATEMENT_LENGTH,
   normalizeStoryTitle,
   parseWhyRelevantMetadata,
@@ -123,7 +124,9 @@ export function selectDiverseShortlist<T extends DiverseShortlistStory>(
   const selected: T[] = [];
 
   const pinnedStories = stories.filter((story) => story.isPinned && !story.isHidden);
-  const regularStories = stories.filter((story) => !story.isPinned && !story.isHidden);
+  const regularStories = stories.filter(
+    (story) => !story.isPinned && !story.isHidden && isHumanReadableStoryTitle(story.title),
+  );
 
   const tryAdd = (story: T, relaxTopic: boolean) => {
     if (selected.length >= limit || seenIds.has(story.id)) return;

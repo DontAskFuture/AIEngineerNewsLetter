@@ -226,8 +226,51 @@ export function normalizeStoryTitle(title: string | null | undefined): string {
     .toLowerCase()
     .replace(/^(?:\[(?:r|d|p|n|paper|project|release|blog)\]\s*|show hn:\s*|ask hn:\s*|tell hn:\s*|launch hn:\s*)+/gi, "")
     .replace(/['’`]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+}
+
+/**
+ * Returns false when a story title carries no human-readable prose (for example
+ * bare build numbers like `b12391`, bare version tags like `v0.45.4`, raw SHAs,
+ * or CI branch tags like `ciflow/xpu/181559` / `viable/strict/1794784998`).
+ */
+export function isHumanReadableStoryTitle(title: string | null | undefined): boolean {
+  const trimmed = title?.trim() ?? "";
+  if (!trimmed) return false;
+
+  // Reject automated CI/branch tag prefixes emitted into GitHub release feeds
+  if (/^(?:ciflow\/|viable\/strict\/|trunk\/[0-9a-f]{7,40}\b)/i.test(trimmed)) {
+    return false;
+  }
+
+  // Strip optional leading release/version/build/tag label and trailing parenthesized date
+  const withoutPrefix = trimmed
+    .replace(/^(?:release|version|build|tag|rev|nightly|dev)(?:[\s:#-]+|(?=\d)|$)/i, "")
+    .replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/, "")
+    .trim();
+
+  if (
+    !withoutPrefix ||
+    /^[#bvBVrR]?\d+(?:[._-]\d+)*$/.test(withoutPrefix) ||
+    /^[vV]?\d+(?:\.\d+)+(?:[-+._a-zA-Z0-9]*)?$/.test(withoutPrefix) ||
+    /^[0-9a-f]{7,40}$/i.test(withoutPrefix) ||
+    /^[a-z0-9_.-]+\/[a-z0-9_.-]+\/\d+$/i.test(withoutPrefix)
+  ) {
+    return false;
+  }
+
+  // Require at least one word containing 2+ Unicode letters (supports English and CJK/Chinese titles)
+  // after ignoring standalone version/build tokens.
+  const proseWords = withoutPrefix.split(/\s+/).filter((token) => {
+    const clean = token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    if (!clean) return false;
+    if (/^[bvBVrR]?\d+$/.test(clean)) return false;
+    if (/^[vV]?\d+(?:\.\d+)+(?:[-+._a-zA-Z0-9]*)?$/.test(clean)) return false;
+    return /\p{L}{2,}/u.test(clean);
+  });
+
+  return proseWords.length > 0;
 }
 
 export interface DeduplicatedScoringGroup<T extends { id: number; title: string }> {
