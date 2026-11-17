@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatPractitionerTake } from "@ai-intel/shared";
+import { formatPractitionerTake, shouldDisplayTopStoryImage } from "@ai-intel/shared";
 import { getCurrentUser } from "@/lib/auth";
 import { loadWebEnv } from "@/lib/env";
 import {
@@ -460,8 +460,13 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         </div>
 
         <div className="mt-6 grid gap-4">
-          {personalizedFeed.topDocuments.map((document) => {
+          {personalizedFeed.topDocuments.map((document, index) => {
             const takeNote = formatPractitionerTake(document.curatorNote, document.whyRelevant);
+            const showStoryImage = shouldDisplayTopStoryImage(
+              index,
+              document.isPinned,
+              document.imageUrl ? { imageUrl: document.imageUrl, imageAlt: document.imageAlt } : null,
+            );
             return (
             <article
               key={document.id}
@@ -505,6 +510,25 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                   <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
+                  {showStoryImage && document.imageUrl ? (
+                    <figure className="mt-4 overflow-hidden rounded-[1.25rem] border border-[color:var(--line)] bg-[#fbfaf6]">
+                      <a href={`/out/${document.id}`} target="_blank" rel="noopener noreferrer" className="block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={document.imageUrl}
+                          alt={document.imageAlt ?? `${document.title} diagram`}
+                          loading={index === 0 ? "eager" : "lazy"}
+                          referrerPolicy="no-referrer"
+                          className="max-h-[22rem] w-full object-contain"
+                        />
+                      </a>
+                      {document.imageAlt ? (
+                        <figcaption className="border-t border-[color:var(--line)] bg-[color:var(--panel)] px-4 py-2 text-xs leading-5 text-[color:var(--muted)]">
+                          {document.imageAlt}
+                        </figcaption>
+                      ) : null}
+                    </figure>
+                  ) : null}
                   {takeNote ? (
                     <div className="surface-panel-strong mt-4 border-l-4 border-[color:var(--leaf)] rounded-[1.25rem] p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">

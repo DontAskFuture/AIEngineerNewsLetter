@@ -9,6 +9,7 @@ import {
   isHumanReadableStoryTitle,
   normalizeStoryTitle,
   parseWhyRelevantMetadata,
+  readDocumentStoryImage,
   recordStoryTopic,
   storyTopicAtCap,
   type SourceCategory,
@@ -309,6 +310,8 @@ export interface PersonalizedFeedDocument {
   discoveredAt: Date;
   sortTime: Date;
   previewParagraph: string;
+  imageUrl: string | null;
+  imageAlt: string | null;
   llmRank: number | null;
   matchScore: number | null;
   whyRelevant: string | null;
@@ -359,6 +362,7 @@ interface CandidateDocumentRow {
   sourcePublishedAt: Date | null;
   discoveredAt: Date;
   sortTime: Date;
+  metadata?: unknown;
   readAt?: Date | null;
   curatorNote?: string | null;
   isPinned?: boolean | null;
@@ -430,6 +434,7 @@ function mapCandidateRow(row: CandidateDocumentRow) {
   const readAt = row.readAt ? (row.readAt instanceof Date ? row.readAt : new Date(row.readAt)) : null;
   const pinnedAt = row.pinnedAt ? (row.pinnedAt instanceof Date ? row.pinnedAt : new Date(row.pinnedAt)) : null;
   const curatorNote = row.curatorNote?.trim() ? row.curatorNote.trim() : null;
+  const storyImage = readDocumentStoryImage(row.metadata);
   return {
     id: row.id,
     title: row.title,
@@ -445,6 +450,8 @@ function mapCandidateRow(row: CandidateDocumentRow) {
     discoveredAt: row.discoveredAt,
     sortTime: row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime),
     previewParagraph: extractFirstParagraph(row.summary, row.bodyText),
+    imageUrl: storyImage?.imageUrl ?? null,
+    imageAlt: storyImage?.imageAlt ?? null,
     llmRank: null,
     matchScore: null,
     whyRelevant: null,
@@ -720,6 +727,7 @@ async function getCandidateDocuments(
     sourcePublishedAt: schema.documents.sourcePublishedAt,
     discoveredAt: schema.documents.discoveredAt,
     sortTime: documentSortKey,
+    metadata: schema.documents.metadata,
     curatorNote: schema.storyCurations.curatorNote,
     isPinned: schema.storyCurations.isPinned,
     isHidden: schema.storyCurations.isHidden,
@@ -1282,6 +1290,7 @@ async function queryScoredDocumentsForProfile({
     sourcePublishedAt: schema.documents.sourcePublishedAt,
     discoveredAt: schema.documents.discoveredAt,
     sortTime: documentSortKey,
+    metadata: schema.documents.metadata,
     score: schema.documentScores.score,
     whyRelevant: schema.documentScores.whyRelevant,
     model: schema.documentScores.model,

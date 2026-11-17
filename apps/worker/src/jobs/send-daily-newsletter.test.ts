@@ -20,6 +20,8 @@ function makeStory(overrides: Partial<NewsletterStory> & { id: number; title: st
     score: overrides.score ?? 85,
     whyRelevant: overrides.whyRelevant ?? "Relevant to AI builders.",
     curatorNote: overrides.curatorNote ?? null,
+    imageUrl: overrides.imageUrl ?? null,
+    imageAlt: overrides.imageAlt ?? null,
     isPinned: overrides.isPinned ?? false,
     isHidden: overrides.isHidden ?? false,
   };
@@ -139,5 +141,47 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     assert.match(text, /1\. Agent Sandbox Runtime <v2> \[Pinned Pick\]/);
     assert.match(text, /Michael's Take: Critical primitive for multi-tenant code execution & tool isolation\./);
     assert.match(text, /Unsubscribe: https:\/\/example\.com\/feed\/unsubscribe\?token=abc123token/);
+  });
+
+  it("renders visuals selectively on Top 1-3 stories and pinned picks while omitting them on later unpinned stories", () => {
+    const stories: NewsletterStory[] = [
+      makeStory({
+        id: 1,
+        title: "Story 1 Chart",
+        imageUrl: "https://cdn.example.com/chart-1.png",
+        imageAlt: "Throughput benchmark",
+      }),
+      makeStory({
+        id: 2,
+        title: "Story 2 Diagram",
+        imageUrl: "https://cdn.example.com/chart-2.png",
+      }),
+      makeStory({
+        id: 3,
+        title: "Story 3 Figure",
+        imageUrl: "https://cdn.example.com/chart-3.png",
+      }),
+      makeStory({
+        id: 4,
+        title: "Story 4 Unpinned Image Omitted",
+        imageUrl: "https://cdn.example.com/chart-4.png",
+      }),
+      makeStory({
+        id: 5,
+        title: "Story 5 Pinned Image Included",
+        isPinned: true,
+        imageUrl: "https://cdn.example.com/chart-5.png",
+        imageAlt: "Pinned architecture plot",
+      }),
+    ];
+
+    const html = buildNewsletterHtml(recipient, stories, "2026-11-16", undefined, "UTC", []);
+    assert.match(html, /src="https:\/\/cdn\.example\.com\/chart-1\.png"/);
+    assert.match(html, /Throughput benchmark/);
+    assert.match(html, /src="https:\/\/cdn\.example\.com\/chart-2\.png"/);
+    assert.match(html, /src="https:\/\/cdn\.example\.com\/chart-3\.png"/);
+    assert.doesNotMatch(html, /chart-4\.png/);
+    assert.match(html, /src="https:\/\/cdn\.example\.com\/chart-5\.png"/);
+    assert.match(html, /Pinned architecture plot/);
   });
 });

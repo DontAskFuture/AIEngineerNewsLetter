@@ -9,9 +9,18 @@ import { getDb, schema } from "@ai-intel/db";
 import { canonicalizeUrl, type FetchSourceEndpointPayload } from "@ai-intel/shared";
 import { logger } from "../logger";
 import { persistRawPayload } from "../storage/local-raw-store";
+import { extractImageFromArticleDom, extractImageFromFeedItem } from "./article-media";
 import { extractArticleLinks } from "./html-links";
 
-const parser = new RSSParser();
+const parser = new RSSParser({
+  customFields: {
+    item: [
+      ["media:content", "mediaContent", { keepArray: true }],
+      ["media:thumbnail", "mediaThumbnail", { keepArray: true }],
+      ["content:encoded", "contentEncoded"],
+    ],
+  },
+});
 const userAgent = "ai-builder-intelligence-bot/0.1 (+https://localhost)";
 const MAX_DOCUMENTS_PER_SOURCE = 50;
 const MAX_ENDPOINT_RESPONSE_BYTES = 15 * 1024 * 1024;
@@ -480,13 +489,16 @@ async function enrichFeedItemFromArticle(articleUrl: string, allowedDomain: stri
   try {
     const { body } = await fetchArticleHtml(articleUrl, allowedDomain);
     const dom = new JSDOM(body, { url: articleUrl });
-    const article = new Readability(dom.window.document).parse();
+    const readerDoc = dom.window.document.cloneNode(true) as Document;
+    const article = new Readability(readerDoc).parse();
     const summary = toPlainText(extractSummary(dom, article?.excerpt?.trim() || null));
     const bodyText = toPlainText(article?.textContent?.trim() || null);
+    const image = extractImageFromArticleDom(dom, article?.content, articleUrl);
 
     return {
       summary: summary ?? firstReadableParagraph(bodyText),
       bodyText: bodyText ?? summary,
+      image,
     };
   } catch {
     return null;
@@ -610,6 +622,10 @@ async function upsertFeedDocuments(
       return [];
     }
     const { summary, bodyText } = extractFeedItemText(item);
+    const storyImage = extractImageFromFeedItem(
+      item as unknown as Record<string, unknown>,
+      resolvedLink ?? baseUrl,
+    );
     const sourcePublishedAt = toDate(item.isoDate ?? item.pubDate);
     const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
 
@@ -620,6 +636,7 @@ async function upsertFeedDocuments(
       externalId: item.guid ?? null,
       summary,
       bodyText,
+      storyImage,
       sourcePublishedAt,
       contentHash,
       metadata: {
@@ -648,6 +665,7 @@ async function upsertFeedDocuments(
 
     let summary = candidate.summary;
     let bodyText = candidate.bodyText;
+    let storyImage = candidate.storyImage;
 
     if (
       articleEnrichmentCount < MAX_FEED_ARTICLE_ENRICHMENTS &&
@@ -660,6 +678,7 @@ async function upsertFeedDocuments(
       if (enriched) {
         summary = enriched.summary ?? summary;
         bodyText = enriched.bodyText ?? bodyText;
+        storyImage = storyImage ?? enriched.image;
       }
     }
 
@@ -674,7 +693,11 @@ async function upsertFeedDocuments(
       bodyText,
       sourcePublishedAt: candidate.sourcePublishedAt,
       contentHash: hashValue([candidate.title, summary ?? "", bodyText ?? ""].join("\n")),
-      metadata: candidate.metadata,
+      metadata: {
+        ...candidate.metadata,
+        imageUrl: storyImage?.imageUrl ?? null,
+        imageAlt: storyImage?.imageAlt ?? null,
+      },
     });
 
     if (insertedDocumentId) {
@@ -707,13 +730,15 @@ async function upsertSingleHtmlDocument(
   body: string,
 ): Promise<number | null> {
   const dom = new JSDOM(body, { url: articleUrl });
-  const article = new Readability(dom.window.document).parse();
+  const readerDoc = dom.window.document.cloneNode(true) as Document;
+  const article = new Readability(readerDoc).parse();
 
   const title = extractTitle(dom, article?.title?.trim() || dom.window.document.title?.trim());
   if (!title) return null;
 
   const summary = extractSummary(dom, article?.excerpt?.trim() || null);
   const bodyText = article?.textContent?.trim() || null;
+  const image = extractImageFromArticleDom(dom, article?.content, articleUrl);
   const canonicalUrl = canonicalizeUrl(articleUrl);
   const contentHash = hashValue([title, summary ?? "", bodyText ?? ""].join("\n"));
   const sourcePublishedAt = extractPublishedAt(dom);
@@ -732,6 +757,8 @@ async function upsertSingleHtmlDocument(
     metadata: {
       byline: article?.byline ?? null,
       siteName: article?.siteName ?? null,
+      imageUrl: image?.imageUrl ?? null,
+      imageAlt: image?.imageAlt ?? null,
     },
   });
 }

@@ -4,7 +4,9 @@ import {
   computeAdjustedStoryScore,
   formatPractitionerTake,
   parseWhyRelevantMetadata,
+  readDocumentStoryImage,
   selectDiverseShortlist,
+  shouldDisplayTopStoryImage,
   type SendDailyNewsletterPayload,
 } from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
@@ -43,6 +45,8 @@ export interface NewsletterStory {
   score: number | null;
   whyRelevant: string | null;
   curatorNote: string | null;
+  imageUrl?: string | null;
+  imageAlt?: string | null;
   isPinned: boolean;
   isHidden: boolean;
 }
@@ -171,6 +175,7 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
       storyTopic: schema.documents.storyTopic,
       trustTier: schema.sources.trustTier,
       sortTime: documentSortKey,
+      metadata: schema.documents.metadata,
       score: schema.documentScores.score,
       whyRelevant: schema.documentScores.whyRelevant,
       curatorNote: schema.storyCurations.curatorNote,
@@ -203,6 +208,7 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
     .map((row) => {
       const sortTime = new Date(row.sortTime);
       const parsedMeta = parseWhyRelevantMetadata(row.whyRelevant);
+      const storyImage = readDocumentStoryImage(row.metadata);
       const adjustedScore = computeAdjustedStoryScore({
         score: row.score,
         sortTime,
@@ -226,6 +232,8 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
         adjustedScore: adjustedScore ?? row.score,
         whyRelevant: parsedMeta.whyRelevant || null,
         curatorNote: row.curatorNote?.trim() || null,
+        imageUrl: storyImage?.imageUrl ?? null,
+        imageAlt: storyImage?.imageAlt ?? null,
         isPinned: Boolean(row.isPinned),
         isHidden: Boolean(row.isHidden),
       };
@@ -251,6 +259,7 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
       sourceGroupKey: schema.sources.canonicalDomain,
       storyTopic: schema.documents.storyTopic,
       sortTime: documentSortKey,
+      metadata: schema.documents.metadata,
       curatorNote: schema.storyCurations.curatorNote,
       isPinned: schema.storyCurations.isPinned,
       isHidden: schema.storyCurations.isHidden,
@@ -269,20 +278,25 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
     .limit(MAX_CANDIDATE_DOCUMENTS);
 
   return selectTopStories(
-    rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
-      sourceName: row.sourceName,
-      sourceGroupKey: row.sourceGroupKey,
-      storyTopic: row.storyTopic,
-      sortTime: new Date(row.sortTime),
-      score: null,
-      whyRelevant: null,
-      curatorNote: row.curatorNote?.trim() || null,
-      isPinned: Boolean(row.isPinned),
-      isHidden: Boolean(row.isHidden),
-    })),
+    rows.map((row) => {
+      const storyImage = readDocumentStoryImage(row.metadata);
+      return {
+        id: row.id,
+        title: row.title,
+        canonicalUrl: sanitizeStoryUrl(row.canonicalUrl),
+        sourceName: row.sourceName,
+        sourceGroupKey: row.sourceGroupKey,
+        storyTopic: row.storyTopic,
+        sortTime: new Date(row.sortTime),
+        score: null,
+        whyRelevant: null,
+        curatorNote: row.curatorNote?.trim() || null,
+        imageUrl: storyImage?.imageUrl ?? null,
+        imageAlt: storyImage?.imageAlt ?? null,
+        isPinned: Boolean(row.isPinned),
+        isHidden: Boolean(row.isHidden),
+      };
+    }),
   );
 }
 
@@ -387,6 +401,25 @@ export function buildNewsletterHtml(
           <p style="margin:8px 0 0 0;color:#5f6a6f;font-size:13px;">
             ${escapeHtml(formatDate(story.sortTime, resolvedTimeZone))}
           </p>
+          ${(() => {
+            const validStoryImage = readDocumentStoryImage(
+              story.imageUrl ? { imageUrl: story.imageUrl, imageAlt: story.imageAlt ?? null } : null,
+            );
+            if (!shouldDisplayTopStoryImage(index, story.isPinned, validStoryImage) || !validStoryImage) {
+              return "";
+            }
+            const altText = validStoryImage.imageAlt ?? `${story.title} diagram`;
+            return `<div style="margin:12px 0 0 0;border:1px solid #e3dccd;border-radius:12px;overflow:hidden;background:#fbfaf6;">
+                <a href="${escapeHtml(story.canonicalUrl)}" style="display:block;text-decoration:none;">
+                  <img src="${escapeHtml(validStoryImage.imageUrl)}" alt="${escapeHtml(altText)}" referrerpolicy="no-referrer" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0;" />
+                </a>
+                ${
+                  validStoryImage.imageAlt
+                    ? `<p style="margin:0;padding:8px 12px;background:#fffaf0;border-top:1px solid #e3dccd;color:#5f6a6f;font-size:12px;line-height:1.45;">${escapeHtml(validStoryImage.imageAlt)}</p>`
+                    : ""
+                }
+              </div>`;
+          })()}
           ${(() => {
             const take = formatPractitionerTake(story.curatorNote, story.whyRelevant);
             return take

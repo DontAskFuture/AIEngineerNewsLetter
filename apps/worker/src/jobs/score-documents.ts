@@ -28,6 +28,7 @@ import {
 } from "@ai-intel/shared";
 import { logger } from "../logger";
 import { loadWorkerEnv } from "../env";
+import { enrichTopStoryImagesForProfile } from "../services/article-image-enrichment";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
@@ -465,6 +466,7 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
       profileName: profile.displayName,
       interestStatement: profile.interestStatement,
     }),
+    enrichTopStoryImagesForProfile(profileId, profile.userId),
   ]);
 
   try {
