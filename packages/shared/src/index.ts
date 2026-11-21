@@ -8,5 +8,6 @@ export * from "./model-pool";
 export * from "./model-releases";
 export * from "./openrouter-retry";
 export * from "./scoring-config";
+export * from "./translation";
 export * from "./types";
 export * from "./url";

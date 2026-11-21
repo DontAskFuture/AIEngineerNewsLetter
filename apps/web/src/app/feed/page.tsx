@@ -437,6 +437,168 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         </section>
       ) : null}
 
+      <section
+        key={`top-stories-${personalizedFeed.selectedProfile.id}`}
+        className="glass-card rounded-[2rem] p-6 sm:p-8"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+              Top stories
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
+              {isPublicView
+                ? `The highest-signal AI engineering, model, and infrastructure stories in this window — each with ${env.brandAuthorName}'s take on the real industry trend and takeaway.`
+                : "Pre-computed relevance scores are capped for source diversity so you can review the highest-signal items first."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+            <span className="surface-chip px-3 py-2">Top 10 curated</span>
+            {!isPublicView ? (
+              <>
+                <span className="surface-chip px-3 py-2">max 5 per source family</span>
+                <span className="surface-chip px-3 py-2">{personalizedFeed.selectedProfile.displayName}</span>
+              </>
+            ) : (
+              <span className="surface-chip px-3 py-2">For AI Engineers</span>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4">
+          {personalizedFeed.topDocuments.map((document, index) => {
+            const takeNote = formatPractitionerTake(document.curatorNote, document.whyRelevant);
+            const showStoryImage = shouldDisplayTopStoryImage(
+              index,
+              document.isPinned,
+              document.imageUrl ? { imageUrl: document.imageUrl, imageAlt: document.imageAlt } : null,
+            );
+            return (
+            <article
+              key={document.id}
+              className={`surface-panel rounded-[1.5rem] p-5 transition sm:p-6 ${document.isRead ? "opacity-80" : ""}`}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="max-w-4xl">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
+                      {document.sourceName}
+                    </p>
+                    {document.isNonEnglish ? (
+                      <span className="rounded-full border border-[color:color-mix(in_srgb,var(--warning)_40%,transparent)] bg-[color:var(--warning-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--warning)]">
+                        Non-English ·{" "}
+                        {document.isTranslated
+                          ? `Translated from ${document.sourceLanguageLabel ?? "Original"}`
+                          : (document.sourceLanguageLabel ?? "Original")}
+                      </span>
+                    ) : null}
+                    {document.isPinned ? (
+                      <span className="surface-chip px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        Pinned Pick
+                      </span>
+                    ) : null}
+                    {document.isRead ? (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
+                        Read{document.readAt ? ` ${formatRelativeTime(document.readAt)}` : ""}
+                      </span>
+                    ) : null}
+                    {!isPublicView && document.llmRank ? (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
+                        LLM rank #{document.llmRank}
+                      </span>
+                    ) : null}
+                    {document.matchScore ? (
+                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
+                        Match {formatPercent(document.matchScore)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <a
+                    href={`/out/${document.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="display-font mt-2 block text-2xl font-semibold tracking-tight"
+                  >
+                    {document.title}
+                  </a>
+                  <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
+                    {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
+                  </p>
+                  {document.isNonEnglish ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[1rem] border border-[color:color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color:var(--warning-soft)] px-3.5 py-2 text-xs leading-5 text-[color:var(--ink)]">
+                      <span className="font-semibold text-[color:var(--warning)]">
+                        Original ({document.sourceLanguageLabel ?? "Non-English"}):
+                      </span>
+                      {document.originalTitle ? (
+                        <span className="text-[color:var(--muted-strong)]">{document.originalTitle}</span>
+                      ) : null}
+                      <a
+                        href={`/out/${document.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-[color:var(--leaf)] underline underline-offset-2"
+                      >
+                        Read original ↗
+                      </a>
+                    </div>
+                  ) : null}
+                  {showStoryImage && document.imageUrl ? (
+                    <figure className="mt-4 overflow-hidden rounded-[1.25rem] border border-[color:var(--line)] bg-[#fbfaf6]">
+                      <a href={`/out/${document.id}`} target="_blank" rel="noopener noreferrer" className="block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={document.imageUrl}
+                          alt={document.imageAlt ?? `${document.title} diagram`}
+                          loading={index === 0 ? "eager" : "lazy"}
+                          referrerPolicy="no-referrer"
+                          className="max-h-[22rem] w-full object-contain"
+                        />
+                      </a>
+                      {document.imageAlt ? (
+                        <figcaption className="border-t border-[color:var(--line)] bg-[color:var(--panel)] px-4 py-2 text-xs leading-5 text-[color:var(--muted)]">
+                          {document.imageAlt}
+                        </figcaption>
+                      ) : null}
+                    </figure>
+                  ) : null}
+                  {takeNote ? (
+                    <div className="surface-panel-strong mt-4 border-l-4 border-[color:var(--leaf)] rounded-[1.25rem] p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
+                        {env.brandAuthorName}&apos;s Take
+                      </p>
+                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
+                        {takeNote}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-2 text-left sm:text-right">
+                  <span className="surface-chip w-fit px-3 py-1 text-xs uppercase tracking-[0.18em] sm:ml-auto">
+                    {formatCategoryLabel(document.category)}
+                  </span>
+                  <span className="text-sm text-[color:var(--muted)]">{formatRelativeTime(document.sortTime)}</span>
+                  <span className="text-xs text-[color:var(--muted)]">{formatDateTime(document.sortTime)}</span>
+                  {!isPublicView ? (
+                    <FeedStoryActions
+                      documentId={document.id}
+                      isRead={document.isRead}
+                      isInReadList={savedDocumentIdSet.has(document.id)}
+                      isPinned={document.isPinned}
+                      isHidden={document.isHidden}
+                      curatorNote={document.curatorNote}
+                      whyRelevant={document.whyRelevant}
+                      timeWindow={timeWindow}
+                      profileSlug={personalizedFeed.selectedProfile.slug}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </article>
+            );
+          })}
+        </div>
+      </section>
+
       {personalizedFeed.modelReleases.length > 0 ? (
         <section
           key={`model-releases-${personalizedFeed.activeTimeWindow}`}
@@ -521,142 +683,6 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
         </section>
       ) : null}
 
-      <section
-        key={`top-stories-${personalizedFeed.selectedProfile.id}`}
-        className="glass-card rounded-[2rem] p-6 sm:p-8"
-      >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
-              Top stories
-            </p>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)] sm:text-base">
-              {isPublicView
-                ? `The highest-signal AI engineering, model, and infrastructure stories in this window — each with ${env.brandAuthorName}'s take on the real industry trend and takeaway.`
-                : "Pre-computed relevance scores are capped for source diversity so you can review the highest-signal items first."}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
-            <span className="surface-chip px-3 py-2">Top 10 curated</span>
-            {!isPublicView ? (
-              <>
-                <span className="surface-chip px-3 py-2">max 5 per source family</span>
-                <span className="surface-chip px-3 py-2">{personalizedFeed.selectedProfile.displayName}</span>
-              </>
-            ) : (
-              <span className="surface-chip px-3 py-2">For AI Engineers</span>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-6 grid gap-4">
-          {personalizedFeed.topDocuments.map((document, index) => {
-            const takeNote = formatPractitionerTake(document.curatorNote, document.whyRelevant);
-            const showStoryImage = shouldDisplayTopStoryImage(
-              index,
-              document.isPinned,
-              document.imageUrl ? { imageUrl: document.imageUrl, imageAlt: document.imageAlt } : null,
-            );
-            return (
-            <article
-              key={document.id}
-              className={`surface-panel rounded-[1.5rem] p-5 transition sm:p-6 ${document.isRead ? "opacity-80" : ""}`}
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="max-w-4xl">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--leaf)]">
-                      {document.sourceName}
-                    </p>
-                    {document.isPinned ? (
-                      <span className="surface-chip px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                        Pinned Pick
-                      </span>
-                    ) : null}
-                    {document.isRead ? (
-                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
-                        Read{document.readAt ? ` ${formatRelativeTime(document.readAt)}` : ""}
-                      </span>
-                    ) : null}
-                    {!isPublicView && document.llmRank ? (
-                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
-                        LLM rank #{document.llmRank}
-                      </span>
-                    ) : null}
-                    {document.matchScore ? (
-                      <span className="surface-chip px-3 py-1 text-xs uppercase tracking-[0.16em]">
-                        Match {formatPercent(document.matchScore)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <a
-                    href={`/out/${document.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="display-font mt-2 block text-2xl font-semibold tracking-tight"
-                  >
-                    {document.title}
-                  </a>
-                  <p className="mt-3 text-sm leading-6 text-[color:var(--muted)] sm:text-base">
-                    {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
-                  </p>
-                  {showStoryImage && document.imageUrl ? (
-                    <figure className="mt-4 overflow-hidden rounded-[1.25rem] border border-[color:var(--line)] bg-[#fbfaf6]">
-                      <a href={`/out/${document.id}`} target="_blank" rel="noopener noreferrer" className="block">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={document.imageUrl}
-                          alt={document.imageAlt ?? `${document.title} diagram`}
-                          loading={index === 0 ? "eager" : "lazy"}
-                          referrerPolicy="no-referrer"
-                          className="max-h-[22rem] w-full object-contain"
-                        />
-                      </a>
-                      {document.imageAlt ? (
-                        <figcaption className="border-t border-[color:var(--line)] bg-[color:var(--panel)] px-4 py-2 text-xs leading-5 text-[color:var(--muted)]">
-                          {document.imageAlt}
-                        </figcaption>
-                      ) : null}
-                    </figure>
-                  ) : null}
-                  {takeNote ? (
-                    <div className="surface-panel-strong mt-4 border-l-4 border-[color:var(--leaf)] rounded-[1.25rem] p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
-                        {env.brandAuthorName}&apos;s Take
-                      </p>
-                      <p className="mt-2 text-sm leading-7 text-[color:var(--ink)] sm:text-base">
-                        {takeNote}
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex flex-col gap-2 text-left sm:text-right">
-                  <span className="surface-chip w-fit px-3 py-1 text-xs uppercase tracking-[0.18em] sm:ml-auto">
-                    {formatCategoryLabel(document.category)}
-                  </span>
-                  <span className="text-sm text-[color:var(--muted)]">{formatRelativeTime(document.sortTime)}</span>
-                  <span className="text-xs text-[color:var(--muted)]">{formatDateTime(document.sortTime)}</span>
-                  {!isPublicView ? (
-                    <FeedStoryActions
-                      documentId={document.id}
-                      isRead={document.isRead}
-                      isInReadList={savedDocumentIdSet.has(document.id)}
-                      isPinned={document.isPinned}
-                      isHidden={document.isHidden}
-                      curatorNote={document.curatorNote}
-                      whyRelevant={document.whyRelevant}
-                      timeWindow={timeWindow}
-                      profileSlug={personalizedFeed.selectedProfile.slug}
-                    />
-                  ) : null}
-                </div>
-              </div>
-            </article>
-            );
-          })}
-        </div>
-      </section>
-
       {personalizedFeed.remainingDocuments.length > 0 && (
         <MoreStories
           key={`more-stories-${personalizedFeed.selectedProfile.id}`}
@@ -668,6 +694,10 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
           documents={personalizedFeed.remainingDocuments.map((doc) => ({
             id: doc.id,
             title: doc.title,
+            originalTitle: doc.originalTitle,
+            isNonEnglish: doc.isNonEnglish,
+            isTranslated: doc.isTranslated,
+            sourceLanguageLabel: doc.sourceLanguageLabel,
             canonicalUrl: doc.canonicalUrl,
             sourceName: doc.sourceName,
             category: doc.category,

@@ -4,20 +4,25 @@ import {
   WATCHED_MODEL_PROVIDERS,
   WATCHED_OFFICIAL_SOURCE_SLUGS,
   computeAdjustedStoryScore,
+  extractDocumentPreview,
   extractWatchedDocumentModelReleases,
   fetchWatchedOpenRouterModelReleases,
   formatPractitionerTake,
   mergeWatchedModelReleases,
   parseWhyRelevantMetadata,
   readDocumentStoryImage,
+  readDocumentTranslation,
+  resolveDisplayStoryContent,
   selectDiverseShortlist,
   shouldDisplayTopStoryImage,
+  type DocumentTranslationMetadata,
   type SendDailyNewsletterPayload,
   type WatchedModelRelease,
 } from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
 import { logger } from "../logger";
 import { sendTransactionalEmail } from "../services/smtp";
+import { ensureDocumentsTranslated } from "../services/story-translation";
 
 const documentSortKey = sql<Date>`coalesce(${schema.documents.sourcePublishedAt}, ${schema.documents.discoveredAt})`;
 const MAX_CANDIDATE_DOCUMENTS = 200;
@@ -52,6 +57,8 @@ export interface NewsletterStory {
   storyTopic: string | null;
   sortTime: Date;
   score: number | null;
+  previewParagraph?: string | null;
+  translation?: DocumentTranslationMetadata | null;
   whyRelevant: string | null;
   curatorNote: string | null;
   imageUrl?: string | null;
@@ -186,6 +193,8 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
     .select({
       id: schema.documents.id,
       title: schema.documents.title,
+      summary: schema.documents.summary,
+      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
       canonicalUrl: schema.documents.canonicalUrl,
       sourceName: schema.sources.name,
       sourceGroupKey: schema.sources.canonicalDomain,
@@ -226,6 +235,8 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
       const sortTime = new Date(row.sortTime);
       const parsedMeta = parseWhyRelevantMetadata(row.whyRelevant);
       const storyImage = readDocumentStoryImage(row.metadata);
+      const translation = readDocumentTranslation(row.metadata);
+      const previewParagraph = extractDocumentPreview(row.summary, row.bodyText, { maxChars: 380 }) || null;
       const adjustedScore = computeAdjustedStoryScore({
         score: row.score,
         sortTime,
@@ -247,6 +258,8 @@ async function getRankedStories(profileId: number, userId: number, cutoff: Date)
         sortTime,
         score: row.score,
         adjustedScore: adjustedScore ?? row.score,
+        previewParagraph,
+        translation,
         whyRelevant: parsedMeta.whyRelevant || null,
         curatorNote: row.curatorNote?.trim() || null,
         imageUrl: storyImage?.imageUrl ?? null,
@@ -271,6 +284,8 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
     .select({
       id: schema.documents.id,
       title: schema.documents.title,
+      summary: schema.documents.summary,
+      bodyText: sql<string | null>`left(${schema.documents.bodyText}, 2000)`,
       canonicalUrl: schema.documents.canonicalUrl,
       sourceName: schema.sources.name,
       sourceGroupKey: schema.sources.canonicalDomain,
@@ -297,6 +312,8 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
   return selectTopStories(
     rows.map((row) => {
       const storyImage = readDocumentStoryImage(row.metadata);
+      const translation = readDocumentTranslation(row.metadata);
+      const previewParagraph = extractDocumentPreview(row.summary, row.bodyText, { maxChars: 380 }) || null;
       return {
         id: row.id,
         title: row.title,
@@ -306,6 +323,8 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
         storyTopic: row.storyTopic,
         sortTime: new Date(row.sortTime),
         score: null,
+        previewParagraph,
+        translation,
         whyRelevant: null,
         curatorNote: row.curatorNote?.trim() || null,
         imageUrl: storyImage?.imageUrl ?? null,
@@ -315,6 +334,27 @@ async function getLatestFallbackStories(userId: number, cutoff: Date) {
       };
     }),
   );
+}
+
+async function attachTranslationsToStories(stories: NewsletterStory[]): Promise<NewsletterStory[]> {
+  if (stories.length === 0) return stories;
+  try {
+    const translations = await ensureDocumentsTranslated(
+      stories.map((story) => ({
+        id: story.id,
+        title: story.title,
+        previewParagraph: story.previewParagraph ?? "",
+        metadata: story.translation ? { translation: story.translation } : null,
+      })),
+    );
+    return stories.map((story) => ({
+      ...story,
+      translation: translations.get(story.id) ?? story.translation ?? null,
+    }));
+  } catch (error) {
+    logger.warn({ error }, "Failed to translate non-English newsletter stories; continuing");
+    return stories;
+  }
 }
 
 const DEFAULT_BRAND_AUTHOR_NAME = "Michael";
@@ -489,7 +529,7 @@ export function buildNewsletterHtml(
   const modelReleasesSection =
     modelReleases.length > 0
       ? `
-        <div style="margin:0 0 28px 0;padding:18px 20px;background:#f8f5ec;border:1px solid #e3dccd;border-left:4px solid #2e5b4f;border-radius:14px;">
+        <div style="margin:28px 0 0 0;padding:18px 20px;background:#f8f5ec;border:1px solid #e3dccd;border-left:4px solid #2e5b4f;border-radius:14px;">
           <p style="margin:0 0 4px 0;color:#2e5b4f;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.16em;">
             New AI Model Releases · Watched Labs (Last ${MODEL_RELEASES_LOOKBACK_DAYS} Days)
           </p>
@@ -537,18 +577,37 @@ export function buildNewsletterHtml(
       : "";
 
   const storyItems = stories
-    .map(
-      (story, index) => `
+    .map((story, index) => {
+      const resolved = resolveDisplayStoryContent({
+        title: story.title,
+        previewParagraph: story.previewParagraph ?? "",
+        metadata: story.translation ? { translation: story.translation } : null,
+      });
+      const langLabel = resolved.sourceLanguageLabel ?? "Original";
+      const nonEnglishBadge = resolved.isNonEnglish
+        ? ` &nbsp;<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">Non-English · ${escapeHtml(resolved.isTranslated ? `Translated from ${langLabel}` : langLabel)}</span>`
+        : "";
+      const translatedPreviewHtml =
+        resolved.isNonEnglish && resolved.displayPreview
+          ? `<p style="margin:10px 0 0 0;color:#2c373c;font-size:14px;line-height:1.6;">${escapeHtml(resolved.displayPreview)}</p>`
+          : "";
+      const originalLinkHtml = resolved.isNonEnglish
+        ? `<p style="margin:8px 0 0 0;padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#78350f;font-size:12px;line-height:1.5;"><strong>Original (${escapeHtml(langLabel)}):</strong> ${escapeHtml(resolved.originalTitle ?? story.title)} &nbsp;·&nbsp; <a href="${escapeHtml(story.canonicalUrl)}" style="color:#2e5b4f;text-decoration:underline;font-weight:700;">Read original &#8599;</a></p>`
+        : "";
+
+      return `
         <li style="margin:0 0 24px 0;padding:0 0 20px 0;border-bottom:1px solid #e5e7eb;">
           <p style="margin:0 0 6px 0;color:#2e5b4f;font-size:12px;text-transform:uppercase;letter-spacing:0.12em;">
-            ${index + 1}. ${escapeHtml(story.sourceName)}${story.isPinned ? " · Pinned Pick" : ""}${story.score ? ` · Match ${story.score}/100` : ""}
+            ${index + 1}. ${escapeHtml(story.sourceName)}${story.isPinned ? " · Pinned Pick" : ""}${story.score ? ` · Match ${story.score}/100` : ""}${nonEnglishBadge}
           </p>
           <a href="${escapeHtml(story.canonicalUrl)}" style="color:#182126;font-size:20px;font-weight:700;text-decoration:none;">
-            ${escapeHtml(story.title)}
+            ${escapeHtml(resolved.displayTitle)}
           </a>
           <p style="margin:8px 0 0 0;color:#5f6a6f;font-size:13px;">
             ${escapeHtml(formatDate(story.sortTime, resolvedTimeZone))}
           </p>
+          ${translatedPreviewHtml}
+          ${originalLinkHtml}
           ${(() => {
             const validStoryImage = readDocumentStoryImage(
               story.imageUrl ? { imageUrl: story.imageUrl, imageAlt: story.imageAlt ?? null } : null,
@@ -556,7 +615,7 @@ export function buildNewsletterHtml(
             if (!shouldDisplayTopStoryImage(index, story.isPinned, validStoryImage) || !validStoryImage) {
               return "";
             }
-            const altText = validStoryImage.imageAlt ?? `${story.title} diagram`;
+            const altText = validStoryImage.imageAlt ?? `${resolved.displayTitle} diagram`;
             return `<div style="margin:12px 0 0 0;border:1px solid #e3dccd;border-radius:12px;overflow:hidden;background:#fbfaf6;">
                 <a href="${escapeHtml(story.canonicalUrl)}" style="display:block;text-decoration:none;">
                   <img src="${escapeHtml(validStoryImage.imageUrl)}" alt="${escapeHtml(altText)}" referrerpolicy="no-referrer" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0;" />
@@ -578,8 +637,8 @@ export function buildNewsletterHtml(
               : "";
           })()}
         </li>
-      `,
-    )
+      `;
+    })
     .join("");
 
   const emptyState = `
@@ -620,8 +679,8 @@ export function buildNewsletterHtml(
               ${socialLinks}
             </p>
             ${trendSection}
-            ${modelReleasesSection}
             ${stories.length > 0 ? `<ol style="margin:0;padding-left:22px;">${storyItems}</ol>` : emptyState}
+            ${modelReleasesSection}
             ${footerHtml}
           </div>
         </div>
@@ -657,6 +716,40 @@ export function buildNewsletterText(
     lines.push("");
   }
 
+  if (stories.length === 0) {
+    lines.push("No new stories were found in the last 24 hours for this profile.");
+    lines.push("");
+  } else {
+    stories.forEach((story, index) => {
+      const resolved = resolveDisplayStoryContent({
+        title: story.title,
+        previewParagraph: story.previewParagraph ?? "",
+        metadata: story.translation ? { translation: story.translation } : null,
+      });
+      const langLabel = resolved.sourceLanguageLabel ?? "Original";
+      const nonEnglishTag = resolved.isNonEnglish
+        ? ` [Non-English · ${resolved.isTranslated ? `Translated from ${langLabel}` : langLabel}]`
+        : "";
+      lines.push(
+        `${index + 1}. ${resolved.displayTitle}${story.isPinned ? " [Pinned Pick]" : ""}${nonEnglishTag}`,
+      );
+      lines.push(`${story.sourceName}${story.score ? ` · Match ${story.score}/100` : ""}`);
+      lines.push(formatDate(story.sortTime, resolvedTimeZone));
+      if (resolved.isNonEnglish && resolved.displayPreview) {
+        lines.push(`Preview (${resolved.isTranslated ? "Translated" : langLabel}): ${resolved.displayPreview}`);
+      }
+      if (resolved.isNonEnglish) {
+        lines.push(`Original (${langLabel}): ${resolved.originalTitle ?? story.title}`);
+      }
+      const take = formatPractitionerTake(story.curatorNote, story.whyRelevant);
+      if (take) {
+        lines.push(`${brand.authorName}'s Take: ${take}`);
+      }
+      lines.push(`${resolved.isNonEnglish ? "Read original: " : ""}${story.canonicalUrl}`);
+      lines.push("");
+    });
+  }
+
   if (modelReleases.length > 0) {
     lines.push(`NEW AI MODEL RELEASES (WATCHED LABS · LAST ${MODEL_RELEASES_LOOKBACK_DAYS} DAYS)`);
     modelReleases.forEach((release) => {
@@ -676,26 +769,6 @@ export function buildNewsletterText(
     });
     lines.push("");
   }
-
-  if (stories.length === 0) {
-    lines.push("No new stories were found in the last 24 hours for this profile.");
-    if (unsubscribeUrl) {
-      lines.push("", `Unsubscribe: ${unsubscribeUrl}`);
-    }
-    return lines.join("\n");
-  }
-
-  stories.forEach((story, index) => {
-    lines.push(`${index + 1}. ${story.title}${story.isPinned ? " [Pinned Pick]" : ""}`);
-    lines.push(`${story.sourceName}${story.score ? ` · Match ${story.score}/100` : ""}`);
-    lines.push(formatDate(story.sortTime, resolvedTimeZone));
-    const take = formatPractitionerTake(story.curatorNote, story.whyRelevant);
-    if (take) {
-      lines.push(`${brand.authorName}'s Take: ${take}`);
-    }
-    lines.push(story.canonicalUrl);
-    lines.push("");
-  });
 
   if (unsubscribeUrl) {
     lines.push(`Unsubscribe: ${unsubscribeUrl}`);
@@ -768,7 +841,8 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
       getProfileTrendBullets(recipient.profileId),
       getReleasesForUser(recipient.userId),
     ]);
-    const stories = rankedStories.length > 0 ? rankedStories : await getLatestFallbackStories(recipient.userId, cutoff);
+    const rawStories = rankedStories.length > 0 ? rankedStories : await getLatestFallbackStories(recipient.userId, cutoff);
+    const stories = await attachTranslationsToStories(rawStories);
     const subject = `${env.BRAND_AUTHOR_NAME}'s Newsletter: ${stories.length} stories for ${newsletterDate}`;
     const unsubscribeUrl = `${baseUrl}/feed/unsubscribe?token=account-${recipient.userId}`;
     const result = await sendTransactionalEmail({
@@ -826,10 +900,11 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
         getProfileTrendBullets(publicCurator.profileId),
         getReleasesForUser(publicCurator.userId),
       ]);
-      const stories =
+      const rawStories =
         rankedStories.length > 0
           ? rankedStories
           : await getLatestFallbackStories(publicCurator.userId, cutoff);
+      const stories = await attachTranslationsToStories(rawStories);
       const subject = `${env.BRAND_AUTHOR_NAME}'s Newsletter: ${stories.length} stories for ${newsletterDate}`;
 
       for (const subscriber of pendingSubscribers) {

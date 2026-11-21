@@ -236,6 +236,10 @@ export interface CuratedRssItemInput {
   imageUrl?: string | null;
   imageAlt?: string | null;
   isPinned: boolean;
+  isNonEnglish?: boolean;
+  isTranslated?: boolean;
+  sourceLanguageLabel?: string | null;
+  originalTitle?: string | null;
 }
 
 export function buildCuratedRssXml({
@@ -259,7 +263,11 @@ export function buildCuratedRssXml({
   const itemsXml = items
     .map((doc, index) => {
       const link = sanitizeHttpUrl(doc.canonicalUrl, feedUrl);
-      const titlePrefix = doc.isPinned ? "[Pinned Pick] " : "";
+      const pinnedPrefix = doc.isPinned ? "[Pinned Pick] " : "";
+      const nonEnglishPrefix = doc.isNonEnglish
+        ? `[Non-English · ${doc.isTranslated ? `Translated from ${doc.sourceLanguageLabel ?? "Original"}` : (doc.sourceLanguageLabel ?? "Original")}] `
+        : "";
+      const titlePrefix = `${pinnedPrefix}${nonEnglishPrefix}`;
       const descriptionParts: string[] = [];
       const take = formatPractitionerTake(doc.curatorNote, doc.whyRelevant);
       const validImageUrl = sanitizeStoryImageUrl(doc.imageUrl);
@@ -275,6 +283,14 @@ export function buildCuratedRssXml({
       }
       if (doc.previewParagraph) {
         descriptionParts.push(doc.previewParagraph);
+      }
+      if (doc.isNonEnglish) {
+        const lang = doc.sourceLanguageLabel ?? "Non-English";
+        descriptionParts.push(
+          doc.originalTitle && doc.isTranslated
+            ? `Original (${lang}): ${doc.originalTitle} — ${link}`
+            : `Original (${lang}): ${link}`,
+        );
       }
       descriptionParts.push(`Source: ${doc.sourceName}`);
 

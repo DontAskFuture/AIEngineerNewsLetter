@@ -29,6 +29,7 @@ import {
 import { logger } from "../logger";
 import { loadWorkerEnv } from "../env";
 import { enrichTopStoryImagesForProfile } from "../services/article-image-enrichment";
+import { translateRecentNonEnglishDocuments } from "../services/story-translation";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRIES = 3;
@@ -467,6 +468,7 @@ export async function scoreDocuments(payload: ScoreDocumentsPayload) {
       interestStatement: profile.interestStatement,
     }),
     enrichTopStoryImagesForProfile(profileId, profile.userId),
+    translateRecentNonEnglishDocuments(),
   ]);
 
   try {

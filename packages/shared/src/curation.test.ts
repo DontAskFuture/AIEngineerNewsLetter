@@ -124,11 +124,31 @@ describe("buildCuratedRssXml", () => {
           imageUrl: "https://cdn.example.com/story-5.webp",
           isPinned: true,
         },
+        {
+          id: 47,
+          title: "miHoYo Releases a VLA Paper",
+          canonicalUrl: "https://www.qbitai.com/2026/11/vla",
+          sourceName: "QbitAI",
+          category: "community_feed",
+          sortTime: new Date("2026-11-07T07:00:00Z"),
+          previewParagraph: "A vision-language-action paper targeting low-latency robotics.",
+          curatorNote: null,
+          isPinned: false,
+          isNonEnglish: true,
+          isTranslated: true,
+          sourceLanguageLabel: "Chinese",
+          originalTitle: "米哈游发了个VLA论文",
+        },
       ],
     });
 
     assert.match(xml, /<title>Autumn &lt;AI&gt;&apos;s Newsletter<\/title>/);
     assert.match(xml, /<title>\[Pinned Pick\] Disaggregated RL &amp; Weight Sync<\/title>/);
+    assert.match(
+      xml,
+      /<title>\[Non-English · Translated from Chinese\] miHoYo Releases a VLA Paper<\/title>/,
+    );
+    assert.match(xml, /Original \(Chinese\): 米哈游发了个VLA论文 — https:\/\/www\.qbitai\.com\/2026\/11\/vla/);
     assert.match(
       xml,
       /Autumn &lt;AI&gt;&apos;s Take: Watch the collective bandwidth curve &lt;100ms\./,

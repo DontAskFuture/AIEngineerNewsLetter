@@ -13,6 +13,10 @@ import { FeedStoryActions } from "./feed-story-actions";
 interface MoreStoriesDocument {
   id: number;
   title: string;
+  originalTitle: string | null;
+  isNonEnglish: boolean;
+  isTranslated: boolean;
+  sourceLanguageLabel: string | null;
   canonicalUrl: string;
   sourceName: string;
   category: string;
@@ -102,6 +106,14 @@ export function MoreStories({
                     <span className="text-xs text-[color:var(--muted)]">
                       {formatRelativeTime(document.sortTime)}
                     </span>
+                    {document.isNonEnglish && (
+                      <span className="rounded-full border border-[color:color-mix(in_srgb,var(--warning)_40%,transparent)] bg-[color:var(--warning-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--warning)]">
+                        Non-English ·{" "}
+                        {document.isTranslated
+                          ? `Translated from ${document.sourceLanguageLabel ?? "Original"}`
+                          : (document.sourceLanguageLabel ?? "Original")}
+                      </span>
+                    )}
                     {document.isPinned && (
                       <span className="surface-chip px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--leaf)]">
                         Pinned Pick
@@ -134,6 +146,24 @@ export function MoreStories({
                   <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                     {summarizeText(document.previewParagraph, "No first paragraph was extracted yet.")}
                   </p>
+                  {document.isNonEnglish && (
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[0.875rem] border border-[color:color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color:var(--warning-soft)] px-3 py-1.5 text-xs leading-5 text-[color:var(--ink)]">
+                      <span className="font-semibold text-[color:var(--warning)]">
+                        Original ({document.sourceLanguageLabel ?? "Non-English"}):
+                      </span>
+                      {document.originalTitle && (
+                        <span className="text-[color:var(--muted-strong)]">{document.originalTitle}</span>
+                      )}
+                      <a
+                        href={`/out/${document.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-[color:var(--leaf)] underline underline-offset-2"
+                      >
+                        Read original ↗
+                      </a>
+                    </div>
+                  )}
                   {(() => {
                     const takeNote = formatPractitionerTake(document.curatorNote, document.whyRelevant);
                     return takeNote ? (

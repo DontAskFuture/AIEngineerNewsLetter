@@ -16,6 +16,7 @@ import {
   parseWhyRelevantMetadata,
   readDocumentStoryImage,
   recordStoryTopic,
+  resolveDisplayStoryContent,
   storyTopicAtCap,
   type SourceCategory,
   type WatchedModelRelease,
@@ -309,6 +310,10 @@ export interface FeedUserProfile {
 export interface PersonalizedFeedDocument {
   id: number;
   title: string;
+  originalTitle: string | null;
+  isNonEnglish: boolean;
+  isTranslated: boolean;
+  sourceLanguageLabel: string | null;
   summary: string | null;
   canonicalUrl: string;
   sourceId: number;
@@ -448,9 +453,19 @@ function mapCandidateRow(row: CandidateDocumentRow) {
   const pinnedAt = row.pinnedAt ? (row.pinnedAt instanceof Date ? row.pinnedAt : new Date(row.pinnedAt)) : null;
   const curatorNote = row.curatorNote?.trim() ? row.curatorNote.trim() : null;
   const storyImage = readDocumentStoryImage(row.metadata);
+  const rawPreview = extractFirstParagraph(row.summary, row.bodyText);
+  const displayContent = resolveDisplayStoryContent({
+    title: row.title,
+    previewParagraph: rawPreview,
+    metadata: row.metadata,
+  });
   return {
     id: row.id,
-    title: row.title,
+    title: displayContent.displayTitle,
+    originalTitle: displayContent.originalTitle,
+    isNonEnglish: displayContent.isNonEnglish,
+    isTranslated: displayContent.isTranslated,
+    sourceLanguageLabel: displayContent.sourceLanguageLabel,
     summary: row.summary,
     canonicalUrl: row.canonicalUrl,
     sourceId: row.sourceId,
@@ -462,7 +477,7 @@ function mapCandidateRow(row: CandidateDocumentRow) {
     sourcePublishedAt: row.sourcePublishedAt,
     discoveredAt: row.discoveredAt,
     sortTime: row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime),
-    previewParagraph: extractFirstParagraph(row.summary, row.bodyText),
+    previewParagraph: displayContent.displayPreview,
     imageUrl: storyImage?.imageUrl ?? null,
     imageAlt: storyImage?.imageAlt ?? null,
     llmRank: null,

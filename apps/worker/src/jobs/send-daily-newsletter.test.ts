@@ -19,6 +19,8 @@ function makeStory(overrides: Partial<NewsletterStory> & { id: number; title: st
     storyTopic: overrides.storyTopic ?? null,
     sortTime: overrides.sortTime ?? new Date("2026-11-07T12:00:00Z"),
     score: overrides.score ?? 85,
+    previewParagraph: overrides.previewParagraph ?? null,
+    translation: overrides.translation ?? null,
     whyRelevant: overrides.whyRelevant ?? "Relevant to AI builders.",
     curatorNote: overrides.curatorNote ?? null,
     imageUrl: overrides.imageUrl ?? null,
@@ -244,6 +246,10 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     );
 
     assert.match(html, /New AI Model Releases · Watched Labs \(Last 7 Days\)/);
+    assert.ok(
+      html.indexOf("Inference Kernel Update") < html.indexOf("New AI Model Releases"),
+      "New AI Model Releases should render after Top stories in HTML",
+    );
     assert.match(html, /Google/);
     assert.match(html, />NEW</);
     assert.match(html, /Gemini 4 Neon/);
@@ -254,8 +260,46 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     assert.match(html, /Introducing MAI-Code-2 and MAI-Code-2-Flash/);
 
     assert.match(text, /NEW AI MODEL RELEASES \(WATCHED LABS · LAST 7 DAYS\)/);
+    assert.ok(
+      text.indexOf("Inference Kernel Update") < text.indexOf("NEW AI MODEL RELEASES"),
+      "New AI Model Releases should render after Top stories in plain text",
+    );
     assert.match(text, /- \[Google\] \[NEW\] Gemini 4 Neon \(Nov 20 · 1M ctx · \$3 \/ \$15 per 1M · google\/gemini-4-neon\)/);
     assert.match(text, /Official post: https:\/\/deepmind\.google\/blog\/introducing-gemini-4-neon/);
     assert.match(text, /- \[Microsoft AI \(MAI\)\] Introducing MAI-Code-2 and MAI-Code-2-Flash \(Nov 18 · Microsoft AI \(MAI\)\)/);
+  });
+
+  it("renders translated title, translated preview, non-English badge, and original link for non-English stories", () => {
+    const stories = [
+      makeStory({
+        id: 206316,
+        title: "米哈游发了个VLA论文",
+        canonicalUrl: "https://www.qbitai.com/2026/11/vla-paper",
+        sourceName: "QbitAI (量子位)",
+        previewParagraph: "米哈游团队发布视觉语言动作模型论文。",
+        translation: {
+          sourceLanguage: "Chinese",
+          sourceLanguageCode: "zh",
+          translatedTitle: "miHoYo Publishes a New VLA Paper",
+          translatedPreview: "The miHoYo research team released a vision-language-action model paper for low-latency control.",
+          model: "~deepseek/deepseek-flash-latest",
+          translatedAt: "2026-11-21T15:00:00.000Z",
+        },
+      }),
+    ];
+
+    const html = buildNewsletterHtml(recipient, stories, "2026-11-21", undefined, "UTC", [], []);
+    const text = buildNewsletterText(recipient, stories, "2026-11-21", undefined, "UTC", [], []);
+
+    assert.match(html, /Non-English · Translated from Chinese/);
+    assert.match(html, /miHoYo Publishes a New VLA Paper/);
+    assert.match(html, /vision-language-action model paper for low-latency control\./);
+    assert.match(html, /Original \(Chinese\):<\/strong> 米哈游发了个VLA论文/);
+    assert.match(html, /href="https:\/\/www\.qbitai\.com\/2026\/11\/vla-paper"[^>]*>Read original/);
+
+    assert.match(text, /1\. miHoYo Publishes a New VLA Paper \[Non-English · Translated from Chinese\]/);
+    assert.match(text, /Preview \(Translated\): The miHoYo research team released a vision-language-action model paper/);
+    assert.match(text, /Original \(Chinese\): 米哈游发了个VLA论文/);
+    assert.match(text, /Read original: https:\/\/www\.qbitai\.com\/2026\/11\/vla-paper/);
   });
 });

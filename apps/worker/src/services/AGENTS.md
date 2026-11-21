@@ -8,6 +8,7 @@ This file applies to `apps/worker/src/services`.
 - `source-registry.ts` owns source registry seeding and synchronization behavior.
 - `smtp.ts` owns transactional email delivery through authenticated SMTP submission (Gmail on port 587 by default), strips CR/LF characters from header fields (`from`, `to`, `subject`), and attaches RFC 8058 `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers via `buildListUnsubscribeHeaders` (covered by `smtp.test.ts`).
 - `article-image-enrichment.ts` implements SSRF-safe public HTTPS HTML fetching (`fetchPublicHttpsHtml`) and `enrichTopStoryImagesForProfile` to backfill `{ imageUrl, imageAlt, imageChecked }` into `documents.metadata` for high-scoring recent stories (including `arxiv.org/html/...` Figure 1 diagrams while skipping GitHub release tags and Reddit threads).
+- `story-translation.ts` detects untranslated non-English stories (`ensureDocumentsTranslated`, `translateRecentNonEnglishDocuments`), batches title + preview translations through OpenRouter DeepSeek (`selectOpinionModelCandidates` with shared retry/timeout policy), and persists `{ translation: { sourceLanguage, sourceLanguageCode, translatedTitle, translatedPreview, model, translatedAt } }` into `documents.metadata` via atomic JSONB merge.
 
 ## Implementation Guidance
 - Keep services focused on domain operations rather than process control.
