@@ -1,13 +1,19 @@
-import { and, asc, desc, eq, gt, gte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@ai-intel/db";
 import {
+  WATCHED_MODEL_PROVIDERS,
+  WATCHED_OFFICIAL_SOURCE_SLUGS,
   computeAdjustedStoryScore,
+  extractWatchedDocumentModelReleases,
+  fetchWatchedOpenRouterModelReleases,
   formatPractitionerTake,
+  mergeWatchedModelReleases,
   parseWhyRelevantMetadata,
   readDocumentStoryImage,
   selectDiverseShortlist,
   shouldDisplayTopStoryImage,
   type SendDailyNewsletterPayload,
+  type WatchedModelRelease,
 } from "@ai-intel/shared";
 import { loadWorkerEnv } from "../env";
 import { logger } from "../logger";
@@ -18,6 +24,9 @@ const MAX_CANDIDATE_DOCUMENTS = 200;
 const MAX_NEWSLETTER_STORIES = 10;
 const MAX_PER_SOURCE = 5;
 const MIN_NEWSLETTER_SCORE = 40;
+const MODEL_RELEASES_LOOKBACK_DAYS = 7;
+const MAX_MODEL_RELEASES = 12;
+const WATCHED_LABS_SUMMARY = WATCHED_MODEL_PROVIDERS.map((provider) => provider.shortLabel).join(" · ");
 const PUBLIC_CURATOR_EMAIL = "lianglingfan@gmail.com";
 const defaultNewsletterProfile = {
   slug: "founding-analyst",
@@ -64,6 +73,14 @@ function formatDate(value: Date, timeZone: string) {
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone,
+  }).format(value);
+}
+
+function formatShortDate(value: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
     timeZone,
   }).format(value);
 }
@@ -342,6 +359,86 @@ async function getProfileTrendBullets(profileId: number): Promise<string[]> {
   }
 }
 
+export async function getRecentWatchedModelReleases(
+  userId: number,
+  options?: {
+    lookbackDays?: number;
+    preloadedOpenRouterReleases?: WatchedModelRelease[];
+  },
+): Promise<WatchedModelRelease[]> {
+  try {
+    const env = loadWorkerEnv();
+    const db = getDb();
+    const lookbackDays = options?.lookbackDays ?? MODEL_RELEASES_LOOKBACK_DAYS;
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+
+    const officialSlugs = [...WATCHED_OFFICIAL_SOURCE_SLUGS];
+    const [docRows, openRouterReleases] = await Promise.all([
+      db
+        .select({
+          id: schema.documents.id,
+          title: schema.documents.title,
+          canonicalUrl: schema.documents.canonicalUrl,
+          sourceName: schema.sources.name,
+          sourceSlug: schema.sources.slug,
+          category: schema.sources.category,
+          storyTopic: schema.documents.storyTopic,
+          sortTime: documentSortKey,
+          isHidden: schema.storyCurations.isHidden,
+        })
+        .from(schema.documents)
+        .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+        .leftJoin(
+          schema.storyCurations,
+          and(
+            eq(schema.storyCurations.documentId, schema.documents.id),
+            eq(schema.storyCurations.userId, userId),
+          ),
+        )
+        .where(
+          and(
+            gt(documentSortKey, cutoff),
+            officialSlugs.length > 0
+              ? or(eq(schema.documents.storyTopic, "models"), inArray(schema.sources.slug, officialSlugs))
+              : eq(schema.documents.storyTopic, "models"),
+          ),
+        )
+        .orderBy(desc(documentSortKey))
+        .limit(MAX_CANDIDATE_DOCUMENTS),
+      options?.preloadedOpenRouterReleases !== undefined
+        ? Promise.resolve(options.preloadedOpenRouterReleases)
+        : fetchWatchedOpenRouterModelReleases({
+            cutoffDate: cutoff,
+            now,
+            apiKey: env.OPENROUTER_API_KEY,
+          }),
+    ]);
+
+    const documentReleases = extractWatchedDocumentModelReleases(
+      docRows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        canonicalUrl: row.canonicalUrl,
+        sourceName: row.sourceName,
+        sourceSlug: row.sourceSlug,
+        category: row.category,
+        storyTopic: row.storyTopic,
+        sortTime: new Date(row.sortTime),
+        isHidden: Boolean(row.isHidden),
+      })),
+      { cutoffDate: cutoff, now },
+    );
+
+    return mergeWatchedModelReleases(openRouterReleases, documentReleases, {
+      limit: MAX_MODEL_RELEASES,
+    });
+  } catch (error) {
+    logger.warn({ userId, error }, "Failed to load watched AI model releases for newsletter");
+    return [];
+  }
+}
+
 export function buildNewsletterHtml(
   recipient: NewsletterRecipient,
   stories: NewsletterStory[],
@@ -349,6 +446,7 @@ export function buildNewsletterHtml(
   unsubscribeUrl?: string,
   timeZone?: string,
   trendBullets: string[] = [],
+  modelReleases: WatchedModelRelease[] = [],
 ) {
   const resolvedTimeZone = timeZone ?? loadWorkerEnv().APP_TIME_ZONE;
   const brand = resolveBrandSettings();
@@ -382,6 +480,56 @@ export function buildNewsletterHtml(
                 (bullet) =>
                   `<li style="margin:0 0 8px 0;">${escapeHtml(bullet)}</li>`,
               )
+              .join("")}
+          </ul>
+        </div>
+      `
+      : "";
+
+  const modelReleasesSection =
+    modelReleases.length > 0
+      ? `
+        <div style="margin:0 0 28px 0;padding:18px 20px;background:#f8f5ec;border:1px solid #e3dccd;border-left:4px solid #2e5b4f;border-radius:14px;">
+          <p style="margin:0 0 4px 0;color:#2e5b4f;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.16em;">
+            New AI Model Releases · Watched Labs (Last ${MODEL_RELEASES_LOOKBACK_DAYS} Days)
+          </p>
+          <p style="margin:0 0 14px 0;color:#5f6a6f;font-size:11px;line-height:1.5;">
+            Tracking ${escapeHtml(WATCHED_LABS_SUMMARY)}
+          </p>
+          <ul style="margin:0;padding:0;list-style:none;">
+            ${modelReleases
+              .map((release, idx) => {
+                const detailParts = [
+                  release.contextLabel,
+                  release.pricingLabel,
+                  release.origin === "announcement" ? release.sourceLabel : release.modelId,
+                ].filter((part): part is string => Boolean(part));
+                const announcementLink =
+                  release.announcementUrl && release.announcementUrl !== release.url
+                    ? ` &nbsp;·&nbsp; <a href="${escapeHtml(sanitizeStoryUrl(release.announcementUrl))}" style="color:#2e5b4f;text-decoration:underline;font-weight:600;">Official post</a>`
+                    : "";
+                const borderStyle = idx < modelReleases.length - 1 ? "border-bottom:1px solid #e3dccd;padding:0 0 11px 0;margin:0 0 11px 0;" : "padding:0;margin:0;";
+                return `
+                  <li style="${borderStyle}">
+                    <p style="margin:0 0 4px 0;font-size:11px;line-height:1.4;">
+                      <span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#eef5f2;border:1px solid #cfe0d8;color:#2e5b4f;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">${escapeHtml(release.providerLabel)}</span>${
+                        release.isNew
+                          ? ` &nbsp;<span style="display:inline-block;padding:2px 6px;border-radius:999px;background:#2e5b4f;color:#fffaf0;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">NEW</span>`
+                          : ""
+                      }
+                      <span style="color:#5f6a6f;"> &nbsp;·&nbsp; ${escapeHtml(formatShortDate(release.releasedAt, resolvedTimeZone))}</span>
+                    </p>
+                    <a href="${escapeHtml(sanitizeStoryUrl(release.url))}" style="color:#182126;font-size:15px;font-weight:700;text-decoration:none;line-height:1.35;">
+                      ${escapeHtml(release.modelName)}
+                    </a>
+                    ${
+                      detailParts.length > 0 || announcementLink
+                        ? `<p style="margin:4px 0 0 0;color:#5f6a6f;font-size:12px;line-height:1.45;">${escapeHtml(detailParts.join(" · "))}${announcementLink}</p>`
+                        : ""
+                    }
+                  </li>
+                `;
+              })
               .join("")}
           </ul>
         </div>
@@ -472,6 +620,7 @@ export function buildNewsletterHtml(
               ${socialLinks}
             </p>
             ${trendSection}
+            ${modelReleasesSection}
             ${stories.length > 0 ? `<ol style="margin:0;padding-left:22px;">${storyItems}</ol>` : emptyState}
             ${footerHtml}
           </div>
@@ -488,6 +637,7 @@ export function buildNewsletterText(
   unsubscribeUrl?: string,
   timeZone?: string,
   trendBullets: string[] = [],
+  modelReleases: WatchedModelRelease[] = [],
 ) {
   const resolvedTimeZone = timeZone ?? loadWorkerEnv().APP_TIME_ZONE;
   const brand = resolveBrandSettings();
@@ -503,6 +653,26 @@ export function buildNewsletterText(
     lines.push("TODAY'S INDUSTRY TREND · MACRO SIGNAL & INSIGHTS");
     trendBullets.forEach((bullet) => {
       lines.push(`- ${bullet}`);
+    });
+    lines.push("");
+  }
+
+  if (modelReleases.length > 0) {
+    lines.push(`NEW AI MODEL RELEASES (WATCHED LABS · LAST ${MODEL_RELEASES_LOOKBACK_DAYS} DAYS)`);
+    modelReleases.forEach((release) => {
+      const specs = [
+        formatShortDate(release.releasedAt, resolvedTimeZone),
+        release.contextLabel,
+        release.pricingLabel,
+        release.origin === "announcement" ? release.sourceLabel : release.modelId,
+      ].filter((part): part is string => Boolean(part));
+      lines.push(
+        `- [${release.providerLabel}]${release.isNew ? " [NEW]" : ""} ${release.modelName} (${specs.join(" · ")})`,
+      );
+      lines.push(`  ${sanitizeStoryUrl(release.url)}`);
+      if (release.announcementUrl && release.announcementUrl !== release.url) {
+        lines.push(`  Official post: ${sanitizeStoryUrl(release.announcementUrl)}`);
+      }
     });
     lines.push("");
   }
@@ -563,7 +733,25 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
   const env = loadWorkerEnv();
   const db = getDb();
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const recipients = await getRecipients();
+  const modelReleaseCutoff = new Date(Date.now() - MODEL_RELEASES_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const [recipients, openRouterModelReleases] = await Promise.all([
+    getRecipients(),
+    fetchWatchedOpenRouterModelReleases({
+      cutoffDate: modelReleaseCutoff,
+      apiKey: env.OPENROUTER_API_KEY,
+    }),
+  ]);
+  const modelReleasesByUser = new Map<number, WatchedModelRelease[]>();
+  const getReleasesForUser = async (userId: number) => {
+    const cached = modelReleasesByUser.get(userId);
+    if (cached) return cached;
+    const loaded = await getRecentWatchedModelReleases(userId, {
+      lookbackDays: MODEL_RELEASES_LOOKBACK_DAYS,
+      preloadedOpenRouterReleases: openRouterModelReleases,
+    });
+    modelReleasesByUser.set(userId, loaded);
+    return loaded;
+  };
   let sentCount = 0;
   let skippedCount = 0;
   const activeAuthEmails = new Set(recipients.map((r) => r.email.toLowerCase()));
@@ -575,16 +763,35 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
       continue;
     }
 
-    const rankedStories = await getRankedStories(recipient.profileId, recipient.userId, cutoff);
+    const [rankedStories, trendBullets, modelReleases] = await Promise.all([
+      getRankedStories(recipient.profileId, recipient.userId, cutoff),
+      getProfileTrendBullets(recipient.profileId),
+      getReleasesForUser(recipient.userId),
+    ]);
     const stories = rankedStories.length > 0 ? rankedStories : await getLatestFallbackStories(recipient.userId, cutoff);
-    const trendBullets = await getProfileTrendBullets(recipient.profileId);
     const subject = `${env.BRAND_AUTHOR_NAME}'s Newsletter: ${stories.length} stories for ${newsletterDate}`;
     const unsubscribeUrl = `${baseUrl}/feed/unsubscribe?token=account-${recipient.userId}`;
     const result = await sendTransactionalEmail({
       to: { email: recipient.email },
       subject,
-      html: buildNewsletterHtml(recipient, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
-      text: buildNewsletterText(recipient, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
+      html: buildNewsletterHtml(
+        recipient,
+        stories,
+        newsletterDate,
+        unsubscribeUrl,
+        env.APP_TIME_ZONE,
+        trendBullets,
+        modelReleases,
+      ),
+      text: buildNewsletterText(
+        recipient,
+        stories,
+        newsletterDate,
+        unsubscribeUrl,
+        env.APP_TIME_ZONE,
+        trendBullets,
+        modelReleases,
+      ),
       unsubscribeUrl,
     });
 
@@ -614,12 +821,15 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
     );
 
     if (pendingSubscribers.length > 0) {
-      const rankedStories = await getRankedStories(publicCurator.profileId, publicCurator.userId, cutoff);
+      const [rankedStories, trendBullets, modelReleases] = await Promise.all([
+        getRankedStories(publicCurator.profileId, publicCurator.userId, cutoff),
+        getProfileTrendBullets(publicCurator.profileId),
+        getReleasesForUser(publicCurator.userId),
+      ]);
       const stories =
         rankedStories.length > 0
           ? rankedStories
           : await getLatestFallbackStories(publicCurator.userId, cutoff);
-      const trendBullets = await getProfileTrendBullets(publicCurator.profileId);
       const subject = `${env.BRAND_AUTHOR_NAME}'s Newsletter: ${stories.length} stories for ${newsletterDate}`;
 
       for (const subscriber of pendingSubscribers) {
@@ -627,8 +837,24 @@ export async function sendDailyNewsletter({ newsletterDate }: SendDailyNewslette
         await sendTransactionalEmail({
           to: { email: subscriber.email },
           subject,
-          html: buildNewsletterHtml(publicCurator, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
-          text: buildNewsletterText(publicCurator, stories, newsletterDate, unsubscribeUrl, env.APP_TIME_ZONE, trendBullets),
+          html: buildNewsletterHtml(
+            publicCurator,
+            stories,
+            newsletterDate,
+            unsubscribeUrl,
+            env.APP_TIME_ZONE,
+            trendBullets,
+            modelReleases,
+          ),
+          text: buildNewsletterText(
+            publicCurator,
+            stories,
+            newsletterDate,
+            unsubscribeUrl,
+            env.APP_TIME_ZONE,
+            trendBullets,
+            modelReleases,
+          ),
           unsubscribeUrl,
         });
 

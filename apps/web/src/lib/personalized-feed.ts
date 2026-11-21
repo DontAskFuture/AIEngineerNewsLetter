@@ -4,18 +4,24 @@ import {
   MAX_INTEREST_STATEMENT_LENGTH,
   MAX_PROFILE_NAME_LENGTH,
   MAX_TOP_STORIES_PER_TOPIC,
+  WATCHED_OFFICIAL_SOURCE_SLUGS,
   computeAdjustedStoryScore,
   extractDocumentPreview,
+  extractWatchedDocumentModelReleases,
+  extractWatchedOpenRouterModels,
+  fetchOpenRouterModelsPayload,
   isHumanReadableStoryTitle,
+  mergeWatchedModelReleases,
   normalizeStoryTitle,
   parseWhyRelevantMetadata,
   readDocumentStoryImage,
   recordStoryTopic,
   storyTopicAtCap,
   type SourceCategory,
+  type WatchedModelRelease,
 } from "@ai-intel/shared";
 import { getDb, schema } from "@ai-intel/db";
-import { and, asc, desc, eq, gt, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { enqueueProfileScoring } from "@/lib/crawler";
 import { loadWebEnv } from "@/lib/env";
 import { summarizeTopStoriesForProfile } from "@/lib/openrouter";
@@ -34,6 +40,11 @@ const TOP_STORIES_SUMMARY_CACHE_PREFIX = "top-stories-summary:v5";
 const TOP_STORIES_SUMMARY_CACHE_TTL_HOURS = 24;
 const SUMMARY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const summaryFailureCooldownUntil = new Map<number, number>();
+const OPENROUTER_MODELS_CACHE_TTL_MS = 15 * 60 * 1000;
+const OPENROUTER_MODELS_FAILURE_TTL_MS = 2 * 60 * 1000;
+const MAX_FEED_MODEL_RELEASES = 12;
+let cachedOpenRouterModels: { expiresAt: number; payload: unknown | null } | null = null;
+let openRouterModelsInFlight: Promise<unknown | null> | null = null;
 
 export type TimeWindow = "day" | "week" | "month" | "quarter" | "year";
 
@@ -337,6 +348,8 @@ export interface PersonalizedFeedSnapshot {
   topDocuments: PersonalizedFeedDocument[];
   remainingDocuments: PersonalizedFeedDocument[];
   topStoriesSummary: ProfileTopStoriesSummary | null;
+  modelReleases: WatchedModelRelease[];
+  modelReleasesWindowLabel: string;
   showWhyRelevant: boolean;
   candidateCount: number;
   rankingMode: "interest_ranked" | "latest";
@@ -1356,6 +1369,115 @@ async function queryScoredDocumentsForProfile({
     .limit(MAX_CANDIDATE_DOCUMENTS);
 }
 
+async function getCachedOpenRouterModelsPayload(): Promise<unknown | null> {
+  const now = Date.now();
+  if (cachedOpenRouterModels && cachedOpenRouterModels.expiresAt > now) {
+    return cachedOpenRouterModels.payload;
+  }
+
+  if (openRouterModelsInFlight) {
+    return openRouterModelsInFlight;
+  }
+
+  const apiKey = loadWebEnv().openRouterApiKey;
+  const loadPromise = (async () => {
+    try {
+      const payload = await fetchOpenRouterModelsPayload({ apiKey });
+      cachedOpenRouterModels = {
+        expiresAt:
+          Date.now() +
+          (payload ? OPENROUTER_MODELS_CACHE_TTL_MS : OPENROUTER_MODELS_FAILURE_TTL_MS),
+        payload,
+      };
+      return payload;
+    } finally {
+      openRouterModelsInFlight = null;
+    }
+  })();
+
+  openRouterModelsInFlight = loadPromise;
+  return loadPromise;
+}
+
+async function getWatchedModelReleasesForWindow(
+  timeWindow: TimeWindow,
+  ownerUserId: number,
+): Promise<{ releases: WatchedModelRelease[]; windowLabel: string }> {
+  const effectiveWindow: TimeWindow = timeWindow === "day" ? "week" : timeWindow;
+  const windowLabel = TIME_WINDOW_LABELS[effectiveWindow];
+
+  try {
+    const db = getDb();
+    const now = new Date();
+    const cutoff = getTimeWindowCutoff(effectiveWindow);
+    const officialSlugs = [...WATCHED_OFFICIAL_SOURCE_SLUGS];
+
+    const [docRows, openRouterPayload] = await Promise.all([
+      db
+        .select({
+          id: schema.documents.id,
+          title: schema.documents.title,
+          canonicalUrl: schema.documents.canonicalUrl,
+          sourceName: schema.sources.name,
+          sourceSlug: schema.sources.slug,
+          category: schema.sources.category,
+          storyTopic: schema.documents.storyTopic,
+          sortTime: documentSortKey,
+          isHidden: schema.storyCurations.isHidden,
+        })
+        .from(schema.documents)
+        .innerJoin(schema.sources, eq(schema.sources.id, schema.documents.sourceId))
+        .leftJoin(
+          schema.storyCurations,
+          and(
+            eq(schema.storyCurations.documentId, schema.documents.id),
+            eq(schema.storyCurations.userId, ownerUserId),
+          ),
+        )
+        .where(
+          and(
+            gt(documentSortKey, cutoff),
+            officialSlugs.length > 0
+              ? or(eq(schema.documents.storyTopic, "models"), inArray(schema.sources.slug, officialSlugs))
+              : eq(schema.documents.storyTopic, "models"),
+          ),
+        )
+        .orderBy(desc(documentSortKey))
+        .limit(MAX_CANDIDATE_DOCUMENTS),
+      getCachedOpenRouterModelsPayload(),
+    ]);
+
+    const openRouterReleases = openRouterPayload
+      ? extractWatchedOpenRouterModels(openRouterPayload, { cutoffDate: cutoff, now })
+      : [];
+    const documentReleases = extractWatchedDocumentModelReleases(
+      docRows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        canonicalUrl: row.canonicalUrl,
+        sourceName: row.sourceName,
+        sourceSlug: row.sourceSlug,
+        category: row.category,
+        storyTopic: row.storyTopic,
+        sortTime: row.sortTime instanceof Date ? row.sortTime : new Date(row.sortTime),
+        isHidden: Boolean(row.isHidden),
+      })),
+      { cutoffDate: cutoff, now },
+    );
+
+    return {
+      releases: mergeWatchedModelReleases(openRouterReleases, documentReleases, {
+        limit: MAX_FEED_MODEL_RELEASES,
+      }),
+      windowLabel,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.warn(`[feed] Failed to load watched AI model releases: ${message}`);
+    return { releases: [], windowLabel };
+  }
+}
+
 async function buildPersonalizedFeedSnapshot({
   profileSlug,
   timeWindow,
@@ -1373,7 +1495,7 @@ async function buildPersonalizedFeedSnapshot({
   const cutoff = getTimeWindowCutoff(timeWindow);
   const windowLabel = TIME_WINDOW_LABELS[timeWindow];
   const profileSubquery = buildSelectedProfileIdSubquery(ownerUserId, profileSlug);
-  const [profiles, candidateDocuments, initialScoredRows] = await Promise.all([
+  const [profiles, candidateDocuments, initialScoredRows, modelReleasesResult] = await Promise.all([
     getProfiles(ownerUserId),
     getCandidateDocuments(cutoff, readStateUserId, ownerUserId),
     queryScoredDocumentsForProfile({
@@ -1382,7 +1504,10 @@ async function buildPersonalizedFeedSnapshot({
       readStateUserId,
       ownerUserId,
     }),
+    getWatchedModelReleasesForWindow(timeWindow, ownerUserId),
   ]);
+  const modelReleases = modelReleasesResult.releases;
+  const modelReleasesWindowLabel = modelReleasesResult.windowLabel;
   const matchedBySlug = profileSlug
     ? profiles.find((profile) => profile.slug === profileSlug) ?? null
     : null;
@@ -1415,6 +1540,8 @@ async function buildPersonalizedFeedSnapshot({
       topDocuments: [],
       remainingDocuments: [],
       topStoriesSummary: null,
+      modelReleases,
+      modelReleasesWindowLabel,
       showWhyRelevant,
       candidateCount: 0,
       rankingMode: "latest",
@@ -1454,6 +1581,8 @@ async function buildPersonalizedFeedSnapshot({
       topDocuments: documentsWithReadState.topDocuments,
       remainingDocuments: documentsWithReadState.remainingDocuments,
       topStoriesSummary: null,
+      modelReleases,
+      modelReleasesWindowLabel,
       showWhyRelevant,
       candidateCount: candidateDocuments.length,
       rankingMode: "latest",
@@ -1552,6 +1681,8 @@ async function buildPersonalizedFeedSnapshot({
       topDocuments: documentsWithReadState.topDocuments,
       remainingDocuments: documentsWithReadState.remainingDocuments,
       topStoriesSummary,
+      modelReleases,
+      modelReleasesWindowLabel,
       showWhyRelevant,
       candidateCount: candidateDocuments.length,
       rankingMode: "interest_ranked",
@@ -1581,6 +1712,8 @@ async function buildPersonalizedFeedSnapshot({
     topDocuments: documentsWithReadState.topDocuments,
     remainingDocuments: documentsWithReadState.remainingDocuments,
     topStoriesSummary,
+    modelReleases,
+    modelReleasesWindowLabel,
     showWhyRelevant,
     candidateCount: candidateDocuments.length,
     rankingMode: "latest",

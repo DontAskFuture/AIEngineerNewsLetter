@@ -2194,4 +2194,36 @@ export const defaultSources: SeedSource[] = [
       },
     ],
   },
+  {
+    slug: "microsoft-ai-mai",
+    name: "Microsoft AI (MAI)",
+    description: "Official model and product announcements from Microsoft AI (MAI).",
+    category: "lab_blog",
+    baseUrl: "https://microsoft.ai",
+    canonicalDomain: "microsoft.ai",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://microsoft.ai/news/",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
+  {
+    slug: "xai-news",
+    name: "xAI News",
+    description: "Official model and research announcements from xAI (Grok).",
+    category: "lab_blog",
+    baseUrl: "https://x.ai",
+    canonicalDomain: "x.ai",
+    trustTier: 1,
+    endpoints: [
+      {
+        kind: "html",
+        url: "https://x.ai/news",
+        cadenceMinutes: 60,
+      },
+    ],
+  },
 ];

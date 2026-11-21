@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { WatchedModelRelease } from "@ai-intel/shared";
 import {
   buildNewsletterHtml,
   buildNewsletterText,
@@ -183,5 +184,78 @@ describe("buildNewsletterHtml and buildNewsletterText", () => {
     assert.doesNotMatch(html, /chart-4\.png/);
     assert.match(html, /src="https:\/\/cdn\.example\.com\/chart-5\.png"/);
     assert.match(html, /Pinned architecture plot/);
+    assert.doesNotMatch(html, /New AI Model Releases/);
+  });
+
+  it("renders the watched-lab New AI Model Releases section in HTML and plain text when releases are present", () => {
+    const stories = [makeStory({ id: 1, title: "Inference Kernel Update" })];
+    const modelReleases: WatchedModelRelease[] = [
+      {
+        key: "openrouter:google/gemini-4-neon",
+        providerId: "google",
+        providerLabel: "Google",
+        modelName: "Gemini 4 Neon",
+        modelId: "google/gemini-4-neon",
+        url: "https://openrouter.ai/google/gemini-4-neon",
+        releasedAt: new Date("2026-11-20T12:00:00Z"),
+        origin: "openrouter",
+        sourceLabel: "OpenRouter API",
+        contextLabel: "1M ctx",
+        pricingLabel: "$3 / $15 per 1M",
+        announcementUrl: "https://deepmind.google/blog/introducing-gemini-4-neon",
+        announcementLabel: "Google DeepMind Blog",
+        isNew: true,
+      },
+      {
+        key: "doc:42",
+        providerId: "mai",
+        providerLabel: "Microsoft AI (MAI)",
+        modelName: "Introducing MAI-Code-2 and MAI-Code-2-Flash",
+        modelId: null,
+        url: "https://microsoft.ai/news/introducing-mai-code-2-and-mai-code-2-flash",
+        releasedAt: new Date("2026-11-18T12:00:00Z"),
+        origin: "announcement",
+        sourceLabel: "Microsoft AI (MAI)",
+        contextLabel: null,
+        pricingLabel: null,
+        announcementUrl: "https://microsoft.ai/news/introducing-mai-code-2-and-mai-code-2-flash",
+        announcementLabel: "Microsoft AI (MAI)",
+        isNew: false,
+      },
+    ];
+
+    const html = buildNewsletterHtml(
+      recipient,
+      stories,
+      "2026-11-21",
+      undefined,
+      "UTC",
+      [],
+      modelReleases,
+    );
+    const text = buildNewsletterText(
+      recipient,
+      stories,
+      "2026-11-21",
+      undefined,
+      "UTC",
+      [],
+      modelReleases,
+    );
+
+    assert.match(html, /New AI Model Releases · Watched Labs \(Last 7 Days\)/);
+    assert.match(html, /Google/);
+    assert.match(html, />NEW</);
+    assert.match(html, /Gemini 4 Neon/);
+    assert.match(html, /1M ctx · \$3 \/ \$15 per 1M · google\/gemini-4-neon/);
+    assert.match(html, /href="https:\/\/deepmind\.google\/blog\/introducing-gemini-4-neon"/);
+    assert.match(html, /Official post/);
+    assert.match(html, /Microsoft AI \(MAI\)/);
+    assert.match(html, /Introducing MAI-Code-2 and MAI-Code-2-Flash/);
+
+    assert.match(text, /NEW AI MODEL RELEASES \(WATCHED LABS · LAST 7 DAYS\)/);
+    assert.match(text, /- \[Google\] \[NEW\] Gemini 4 Neon \(Nov 20 · 1M ctx · \$3 \/ \$15 per 1M · google\/gemini-4-neon\)/);
+    assert.match(text, /Official post: https:\/\/deepmind\.google\/blog\/introducing-gemini-4-neon/);
+    assert.match(text, /- \[Microsoft AI \(MAI\)\] Introducing MAI-Code-2 and MAI-Code-2-Flash \(Nov 18 · Microsoft AI \(MAI\)\)/);
   });
 });

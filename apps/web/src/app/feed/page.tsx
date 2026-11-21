@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { formatPractitionerTake, shouldDisplayTopStoryImage } from "@ai-intel/shared";
+import {
+  WATCHED_MODEL_PROVIDERS,
+  formatPractitionerTake,
+  shouldDisplayTopStoryImage,
+} from "@ai-intel/shared";
 import { getCurrentUser } from "@/lib/auth";
 import { loadWebEnv } from "@/lib/env";
 import {
@@ -46,6 +50,8 @@ const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string }[] = [
   { value: "quarter", label: "Last quarter" },
   { value: "year", label: "Last year" },
 ];
+
+const WATCHED_LABS_SUMMARY = WATCHED_MODEL_PROVIDERS.map((provider) => provider.shortLabel).join(" · ");
 
 export default async function FeedPage({ searchParams }: FeedPageProps) {
   const env = loadWebEnv();
@@ -427,6 +433,90 @@ export default async function FeedPage({ searchParams }: FeedPageProps) {
                 {personalizedFeed.topStoriesSummary.summary}
               </p>
             )}
+          </div>
+        </section>
+      ) : null}
+
+      {personalizedFeed.modelReleases.length > 0 ? (
+        <section
+          key={`model-releases-${personalizedFeed.activeTimeWindow}`}
+          className="glass-card rounded-[2rem] p-6 sm:p-8"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.24em] text-[color:var(--leaf)]">
+                New AI Model Releases · Watched Labs
+              </p>
+              <p className="mt-2 max-w-3xl text-xs leading-6 text-[color:var(--muted)] sm:text-sm">
+                Tracking {WATCHED_LABS_SUMMARY}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted)]">
+              <span className="surface-chip px-3 py-2">{personalizedFeed.modelReleasesWindowLabel}</span>
+              <span className="surface-chip px-3 py-2">
+                {personalizedFeed.modelReleases.length} release
+                {personalizedFeed.modelReleases.length === 1 ? "" : "s"}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            {personalizedFeed.modelReleases.map((release) => {
+              const detailParts = [
+                release.contextLabel,
+                release.pricingLabel,
+                release.origin === "announcement" ? release.sourceLabel : release.modelId,
+              ].filter((part): part is string => Boolean(part));
+
+              return (
+                <article
+                  key={release.key}
+                  className="surface-panel flex flex-col justify-between gap-2.5 rounded-[1.25rem] p-4"
+                >
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="surface-chip px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--leaf)]">
+                          {release.providerLabel}
+                        </span>
+                        {release.isNew ? (
+                          <span className="rounded-full bg-[color:var(--leaf)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
+                            New
+                          </span>
+                        ) : null}
+                      </div>
+                      <span className="text-xs text-[color:var(--muted)]">
+                        {formatRelativeTime(release.releasedAt)}
+                      </span>
+                    </div>
+                    <a
+                      href={release.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="display-font mt-2 block text-base font-semibold leading-snug tracking-tight text-[color:var(--ink)] hover:underline"
+                    >
+                      {release.modelName}
+                    </a>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-[color:var(--muted)]">
+                    {detailParts.length > 0 ? <span>{detailParts.join(" · ")}</span> : null}
+                    {release.announcementUrl && release.announcementUrl !== release.url ? (
+                      <>
+                        {detailParts.length > 0 ? <span aria-hidden="true">·</span> : null}
+                        <a
+                          href={release.announcementUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-[color:var(--leaf)] underline-offset-2 hover:underline"
+                        >
+                          Official post
+                        </a>
+                      </>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}
