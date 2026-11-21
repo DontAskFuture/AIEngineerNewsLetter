@@ -25,7 +25,7 @@ const MAX_NEWSLETTER_STORIES = 10;
 const MAX_PER_SOURCE = 5;
 const MIN_NEWSLETTER_SCORE = 40;
 const MODEL_RELEASES_LOOKBACK_DAYS = 7;
-const MAX_MODEL_RELEASES = 12;
+const MAX_MODEL_RELEASES = 15;
 const WATCHED_LABS_SUMMARY = WATCHED_MODEL_PROVIDERS.map((provider) => provider.shortLabel).join(" · ");
 const PUBLIC_CURATOR_EMAIL = "lianglingfan@gmail.com";
 const defaultNewsletterProfile = {

@@ -42,7 +42,7 @@ const SUMMARY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const summaryFailureCooldownUntil = new Map<number, number>();
 const OPENROUTER_MODELS_CACHE_TTL_MS = 15 * 60 * 1000;
 const OPENROUTER_MODELS_FAILURE_TTL_MS = 2 * 60 * 1000;
-const MAX_FEED_MODEL_RELEASES = 12;
+const MAX_FEED_MODEL_RELEASES = 15;
 let cachedOpenRouterModels: { expiresAt: number; payload: unknown | null } | null = null;
 let openRouterModelsInFlight: Promise<unknown | null> | null = null;
 

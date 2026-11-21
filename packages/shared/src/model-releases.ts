@@ -41,7 +41,7 @@ export const WATCHED_MODEL_PROVIDERS: readonly WatchedModelProvider[] = [
     openRouterPrefixes: ["google"],
     officialSourceSlugs: ["deepmind-blog", "google-ai-blog", "google-research-blog"],
     titlePattern:
-      /\b(?:google(?:\s+deepmind)?|deepmind|gemini(?:\s+[\d.]|\s+omni|\s+flash|\s+pro|\s+ultra)?|gemma(?:\s*[\d.])|imagen(?:\s*[\d.])|veo(?:\s*[\d.])|medgemma)\b/i,
+      /\b(?:google(?:\s+deepmind)?|deepmind|gemini(?:\s+[\d.]|\s+omni|\s+flash|\s+pro|\s+ultra)?|genie(?:\s*[\d.])|gemma(?:\s*[\d.])|imagen(?:\s*[\d.])|veo(?:\s*[\d.])|medgemma)\b/i,
   },
   {
     id: "xai",
@@ -190,13 +190,16 @@ const EXCLUDED_ANNOUNCEMENT_SOURCES = new Set([
 ]);
 
 const NON_RELEASE_TITLE_PATTERN =
-  /\b(?:prompting tips|rumor|forecast|should you switch|flop at|scores below|near chance|why is |how good|how we|i hope|making .* think|how .* evolved|ran neck and neck|system card|vs\.?\s|versus|fine[- ]?tune|benchmark|leaderboard|stealth models|promised|turns to|revenue|pricing tips|outlines|roadmap|defying|extract how|trained on|partner network|partnership|partnering with|incident|using |building with|guide to|policy|governance|funding|hiring|careers|recap|year in review)\b|^llm-[a-z0-9-]+ \d/i;
+  /\b(?:prompting tips|rumor|forecast|should you switch|flop at|scores below|near chance|why is |how good|how we|i hope|making .* think|how .* evolved|ran neck and neck|system card|vs\.?\s|versus|fine[- ]?tune|benchmark|leaderboard|stealth models|promised|turns to|revenue|pricing tips|outlines|roadmap|defying|extract how|trained on|partner network|partnership|partnering with|incident|using |building with|guide to|policy|governance|funding|hiring|careers|recap|year in review|initial public offering|ipo|underwriters|private placement|additional shares|acquisition|acquires|lawsuit|antitrust|valuation|board of directors|tool retrieval|app is now available|gemini app|chatgpt app|claude app|android devices|ios app|deprecation|deprecated|retiring|sunset)\b|^llm-[a-z0-9-]+ \d/i;
 
 const RELEASE_INTENT_PATTERN =
   /\b(?:introduc(?:ing|es|ed)|launch(?:es|ed|ing)?|releas(?:es|ed|ing)?|unveil(?:s|ed|ing)?|announc(?:es|ed|ing)?|now available|is live on|open[- ]?sourc(?:es|ed|ing)|ships|debuts|weights|new (?:[\w-]+\s+){0,2}models?)\b|发布|开源|上线|正式推出/i;
 
-const OFFICIAL_VERSIONED_MODEL_TITLE_PATTERN =
-  /\b(?:gemini|gemma|imagen|veo|grok|claude|gpt|o[134]|sora|deepseek|hunyuan|hy\d|mai|phi|nemotron|cosmos|glm|kimi|mimo|qwen|qwq|wan|command|aya|mistral|mixtral|pixtral|codestral|devstral|magistral|ministral|voxtral)[-\s]+(?:v?\d|bot|opus|sonnet|haiku|flash|pro|ultra|max|mini|nano|code|cyber|image|realtime|large|small|medium|next)\b/i;
+const SPECIFIC_MODEL_MENTION_PATTERN =
+  /\b(?:gemini(?:[-\s]+(?:[\d.]|flash|pro|ultra|omni|nano|neon|lite))|genie[-\s]*\d|gemma[-\s]*[\d.]|medgemma|imagen[-\s]*[\d.]|veo[-\s]*[\d.]|grok(?:[-\s]*(?:[\d.]|bot|code))|claude(?:[-\s]+(?:opus|sonnet|haiku|fable|mythos|[\d.]))|gpt[-\s]*(?:\d|oss|live)|o[134](?:-mini|-pro)?|sora[-\s]*[\d.]|deepseek[-\s]*(?:v\d|r\d|coder|vl|prover|math)|hunyuan(?:[-\s]*(?:[\d.]|video|3d|turbo|large|t1|a13b))?|hy\d(?:\.\d)?|mai[-\s]+(?:[\d.]|code|cyber|image|voice|realtime|licensed)|phi[-\s]*[345](?:\.\d)?|nemotron|cosmos[-\s]*[\d.]|parakeet|canary|chatglm|glm[-\s]*\d(?:\.\d)?|autoglm|cogvideox?|cogview|kimi[-\s]*(?:k\d|vl|audio|dev|researcher|linear)|mimo[-\s]*v?\d(?:\.\d)?|milm|qwen[-\s]*[\d.]|qwq(?:[-\s]*\d+)?|wan[-\s]*2(?:\.\d)?|command[-\s]*(?:a|r)(?:\+|\s+plus|\s+vision)?|aya[-\s]*(?:expanse|vision|\d)|embed[-\s]*\d|rerank[-\s]*\d|mistral[-\s]+(?:large|small|medium|next|nemo|[\d.])|mixtral|pixtral|codestral|devstral|magistral|ministral|voxtral|mathstral|saba)\b|\b(?:new (?:[\w-]+\s+){0,2}models?|flagship weights|open[- ]?weights?|foundation models?|world models?|reasoning models?)\b|混元|千问\d|大模型/i;
+
+const TRAILING_LAB_SITE_SUFFIX =
+  /\s*[|–—]\s*(?:Microsoft AI|OpenAI|Anthropic|Google DeepMind|Google AI|Google|xAI|Mistral AI|Mistral|Cohere|NVIDIA|DeepSeek|Qwen|Tencent|Xiaomi)\s*$/i;
 
 export interface WatchedModelRelease {
   key: string;
@@ -476,7 +479,8 @@ export function extractWatchedDocumentModelReleases(
       continue;
     }
 
-    const title = doc.title.trim();
+    const rawTitle = doc.title.trim();
+    const title = rawTitle.replace(TRAILING_LAB_SITE_SUFFIX, "").trim();
     if (!isHumanReadableStoryTitle(title)) {
       continue;
     }
@@ -497,8 +501,11 @@ export function extractWatchedDocumentModelReleases(
       continue;
     }
 
-    const hasOfficialModelTitle =
-      isOfficialLabPost && title.length <= 80 && OFFICIAL_VERSIONED_MODEL_TITLE_PATTERN.test(title);
+    if (!SPECIFIC_MODEL_MENTION_PATTERN.test(title)) {
+      continue;
+    }
+
+    const hasOfficialModelTitle = isOfficialLabPost && title.length <= 90;
     if (!RELEASE_INTENT_PATTERN.test(title) && !hasOfficialModelTitle) {
       continue;
     }
@@ -599,10 +606,18 @@ function announcementMatchesOpenRouterModel(
   }
 
   // Handle combined release posts like "OpenAI launches GPT-6.2 Astra and Sol" matching "GPT-6.2 Astra Pro"
-  const coreTokens = modelTokens.filter((token) => token !== "pro" && token !== "mini" && token !== "flash");
+  // or "Tencent Hy4 is live on Together AI" matching "Hy4 Flash"
+  const coreTokens = modelTokens.filter(
+    (token) => token !== "pro" && token !== "mini" && token !== "flash" && token !== "lite" && token !== "nano",
+  );
   if (coreTokens.length >= 2) {
     const matchedCore = coreTokens.filter((token) => normalizedTitle.includes(` ${token} `));
     if (matchedCore.length === coreTokens.length) {
+      return true;
+    }
+  }
+  if (coreTokens.length === 1 && /\d/.test(coreTokens[0]!) && coreTokens[0]!.length >= 3) {
+    if (normalizedTitle.includes(` ${coreTokens[0]!} `)) {
       return true;
     }
   }
@@ -615,7 +630,7 @@ export function mergeWatchedModelReleases(
   documentReleases: readonly WatchedModelRelease[],
   options?: { limit?: number },
 ): WatchedModelRelease[] {
-  const limit = options?.limit ?? 12;
+  const limit = options?.limit ?? 15;
   const mergedOpenRouter = openRouterReleases.map((item) => ({ ...item }));
   const extraAnnouncements: WatchedModelRelease[] = [];
   const seenAnnouncementTitles = new Set<string>();
@@ -645,11 +660,11 @@ export function mergeWatchedModelReleases(
 
     const duplicateAnnouncement = extraAnnouncements.some((existing) => {
       if (existing.providerId !== announcement.providerId) return false;
-      const existingTokens = significantModelTokens(existing.modelName);
-      const nextTokens = significantModelTokens(announcement.modelName);
-      if (existingTokens.length === 0 || nextTokens.length === 0) return false;
-      const overlap = nextTokens.filter((t) => existingTokens.includes(t));
-      return overlap.length >= Math.min(3, Math.min(existingTokens.length, nextTokens.length));
+      const existingTokens = new Set(significantModelTokens(existing.modelName));
+      const nextTokens = [...new Set(significantModelTokens(announcement.modelName))];
+      if (existingTokens.size === 0 || nextTokens.length === 0) return false;
+      const overlap = nextTokens.filter((t) => existingTokens.has(t));
+      return overlap.length >= Math.min(3, Math.min(existingTokens.size, nextTokens.length));
     });
     if (duplicateAnnouncement) {
       continue;
@@ -661,12 +676,29 @@ export function mergeWatchedModelReleases(
     extraAnnouncements.push({ ...announcement });
   }
 
-  return [...mergedOpenRouter, ...extraAnnouncements]
+  const sortChronologically = (a: WatchedModelRelease, b: WatchedModelRelease) => {
+    const timeDiff = b.releasedAt.getTime() - a.releasedAt.getTime();
+    if (timeDiff !== 0) return timeDiff;
+    if (a.origin !== b.origin) return a.origin === "openrouter" ? -1 : 1;
+    return a.modelName.localeCompare(b.modelName);
+  };
+
+  // Preserve structured OpenRouter launches first so newly listed API models are never crowded out
+  // by freshly-crawled announcements, then fill remaining slots with unique non-OpenRouter releases.
+  const selectedOpenRouter = [...mergedOpenRouter].sort(sortChronologically).slice(0, limit);
+  const remainingSlots = Math.max(0, limit - selectedOpenRouter.length);
+  const selectedAnnouncements = [...extraAnnouncements]
     .sort((a, b) => {
-      const timeDiff = b.releasedAt.getTime() - a.releasedAt.getTime();
-      if (timeDiff !== 0) return timeDiff;
-      if (a.origin !== b.origin) return a.origin === "openrouter" ? -1 : 1;
-      return a.modelName.localeCompare(b.modelName);
+      const aOfficial = a.announcementUrl ? 1 : 0;
+      const bOfficial = b.announcementUrl ? 1 : 0;
+      const dayDiff =
+        Math.floor(b.releasedAt.getTime() / (24 * 60 * 60 * 1000)) -
+        Math.floor(a.releasedAt.getTime() / (24 * 60 * 60 * 1000));
+      if (dayDiff !== 0) return dayDiff;
+      if (bOfficial !== aOfficial) return bOfficial - aOfficial;
+      return b.releasedAt.getTime() - a.releasedAt.getTime();
     })
-    .slice(0, limit);
+    .slice(0, remainingSlots);
+
+  return [...selectedOpenRouter, ...selectedAnnouncements].sort(sortChronologically);
 }

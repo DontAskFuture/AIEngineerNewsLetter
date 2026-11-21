@@ -201,16 +201,76 @@ describe("watched model releases", () => {
         storyTopic: null,
         sortTime: new Date("2026-11-18T14:00:00Z"),
       },
+      {
+        id: 8,
+        title: "Anthropic announces closing of initial public offering",
+        canonicalUrl: "https://www.anthropic.com/news/ipo-close",
+        sourceName: "Anthropic News",
+        sourceSlug: "anthropic-news",
+        category: "lab_blog",
+        storyTopic: "industry",
+        sortTime: new Date("2026-11-20T15:00:00Z"),
+      },
+      {
+        id: 9,
+        title: "Introducing Tool Retrieval in the Gemini API",
+        canonicalUrl: "https://blog.google/gemini-api-tool-retrieval",
+        sourceName: "Google AI Blog",
+        sourceSlug: "google-ai-blog",
+        category: "lab_blog",
+        storyTopic: "agents",
+        sortTime: new Date("2026-11-20T14:00:00Z"),
+      },
+      {
+        id: 10,
+        title: "The Gemini app is now available on lower-memory Android devices.",
+        canonicalUrl: "https://blog.google/gemini-app-android",
+        sourceName: "Google AI Blog",
+        sourceSlug: "google-ai-blog",
+        category: "lab_blog",
+        storyTopic: "models",
+        sortTime: new Date("2026-11-20T11:00:00Z"),
+      },
+      {
+        id: 11,
+        title: "Pushing the quality-cost frontier with MAI Image 2.6 | Microsoft AI",
+        canonicalUrl: "https://microsoft.ai/news/mai-image-2-6",
+        sourceName: "Microsoft AI (MAI)",
+        sourceSlug: "microsoft-ai-mai",
+        category: "lab_blog",
+        storyTopic: null,
+        sortTime: new Date("2026-11-20T16:00:00Z"),
+      },
+      {
+        id: 12,
+        title: "Tencent Hy4 is live on Together AI",
+        canonicalUrl: "https://www.together.ai/blog/tencent-hy4",
+        sourceName: "Together AI Blog",
+        sourceSlug: "together-ai-blog",
+        category: "engineering_blog",
+        storyTopic: "models",
+        sortTime: new Date("2026-11-19T18:00:00Z"),
+      },
     ];
 
     const docReleases = extractWatchedDocumentModelReleases(docs, { cutoffDate, now });
     assert.deepEqual(
-      docReleases.map((r) => ({ id: r.key, providerId: r.providerId })),
+      docReleases.map((r) => ({ id: r.key, providerId: r.providerId, modelName: r.modelName })),
       [
-        { id: "doc:1", providerId: "google" },
-        { id: "doc:5", providerId: "tencent" },
-        { id: "doc:2", providerId: "mai" },
-        { id: "doc:7", providerId: "xai" },
+        {
+          id: "doc:11",
+          providerId: "mai",
+          modelName: "Pushing the quality-cost frontier with MAI Image 2.6",
+        },
+        { id: "doc:1", providerId: "google", modelName: "Introducing Gemini 4 Neon" },
+        {
+          id: "doc:5",
+          providerId: "tencent",
+          modelName: "Tencent Releases Hy4 Flagship Weights Under Conditional License",
+        },
+        { id: "doc:2", providerId: "mai", modelName: "Introducing MAI-Code-2 and MAI-Code-2-Flash" },
+        { id: "doc:12", providerId: "tencent", modelName: "Tencent Hy4 is live on Together AI" },
+        { id: "doc:7", providerId: "xai", modelName: "Grok Bot 1.0" },
       ],
     );
 
@@ -224,21 +284,34 @@ describe("watched model releases", () => {
             context_length: 1_048_576,
             pricing: { prompt: "0.000003", completion: "0.000015" },
           },
+          {
+            id: "tencent/hy4-flash",
+            name: "Tencent: Hy4 Flash",
+            created: Math.floor(new Date("2026-11-16T12:00:00Z").getTime() / 1000),
+            context_length: 262_144,
+            pricing: { prompt: "0.0000002", completion: "0.0000008" },
+          },
         ],
       },
       { cutoffDate, now },
     );
 
     const merged = mergeWatchedModelReleases(openRouterReleases, docReleases);
-    assert.equal(merged.length, 4);
-    assert.equal(merged[0]?.key, "openrouter:google/gemini-4-neon");
+    assert.equal(merged.length, 5);
+    const gemini = merged.find((m) => m.key === "openrouter:google/gemini-4-neon");
     assert.equal(
-      merged[0]?.announcementUrl,
+      gemini?.announcementUrl,
       "https://deepmind.google/blog/introducing-gemini-4-neon",
     );
     assert.deepEqual(
-      merged.map((m) => m.providerId),
-      ["google", "tencent", "mai", "xai"],
+      merged.map((m) => m.key),
+      [
+        "doc:11",
+        "openrouter:google/gemini-4-neon",
+        "doc:2",
+        "doc:7",
+        "openrouter:tencent/hy4-flash",
+      ],
     );
   });
 });
